@@ -1,0 +1,338 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"iter"
+	"net"
+
+	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/guard"
+	"github.com/Autumn-27/norma/llm"
+)
+
+func (t *ToolSet) authorizedScope(rows []db.TaskScope) []db.TaskScope {
+	if t.as == nil || t.taskID <= 0 {
+		return rows
+	}
+	hosts := make([]string, 0, len(rows))
+	hostOf := func(row db.TaskScope) string {
+		if row.Domain != "" {
+			return db.DomainKey(row.Domain)
+		}
+		if ip, _, err := net.ParseCIDR(row.Net); err == nil {
+			return ip.String()
+		}
+		return ""
+	}
+	for _, row := range rows {
+		if host := hostOf(row); host != "" {
+			hosts = append(hosts, host)
+		}
+	}
+	states, err := t.as.TaskHostApprovalStates(t.taskID, hosts)
+	if err != nil {
+		return nil
+	}
+	out := make([]db.TaskScope, 0, len(rows))
+	for _, row := range rows {
+		if host := hostOf(row); host != "" && states[host] != db.ApprovalApproved && !(t.mainExecution && states[host] == db.ApprovalPending) {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// Revalidate persisted structured tool results immediately before every model
+// call, including session resume and compaction. Never rewrite stored audit data.
+type assetContextProvider struct {
+	llm.Provider
+	assets *db.AssetStore
+	taskID int64
+}
+
+func withAssetContext(provider llm.Provider, assets *db.AssetStore, taskID int64) llm.Provider {
+	if assets == nil || taskID <= 0 {
+		return provider
+	}
+	return assetContextProvider{Provider: provider, assets: assets, taskID: taskID}
+}
+
+// WithTaskAssetContext reuses the role-aware model boundary for host-provided
+// task-bound entry points, including read-only side questions.
+func WithTaskAssetContext(provider llm.Provider, assets *db.AssetStore, taskID int64) llm.Provider {
+	return withAssetContext(provider, assets, taskID)
+}
+
+// FilterTaskAssetRequest runs before a host compresses a stored task snapshot.
+// It returns a model-view copy; the source transcript remains unchanged.
+func FilterTaskAssetRequest(ctx context.Context, assets *db.AssetStore, taskID int64, req llm.CompletionRequest) (llm.CompletionRequest, error) {
+	if assets == nil || taskID <= 0 {
+		return req, nil
+	}
+	return (assetContextProvider{assets: assets, taskID: taskID}).filter(ctx, req)
+}
+
+func (p assetContextProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	filtered, err := p.filter(ctx, req)
+	if err != nil {
+		return llm.Message{}, "", llm.Usage{}, err
+	}
+	return p.Provider.Complete(ctx, filtered)
+}
+
+func (p assetContextProvider) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	return func(yield func(llm.StreamEvent, error) bool) {
+		filtered, err := p.filter(ctx, req)
+		if err != nil {
+			yield(llm.StreamEvent{}, err)
+			return
+		}
+		for event, err := range p.Provider.Stream(ctx, filtered) {
+			if !yield(event, err) {
+				return
+			}
+		}
+	}
+}
+
+func structuredAssetIDs(row map[string]any) []int64 {
+	var ids []int64
+	appendID := func(value any) {
+		if id, ok := value.(float64); ok && id > 0 && id == float64(int64(id)) {
+			ids = append(ids, int64(id))
+		}
+	}
+	appendID(row["asset_id"])
+	if values, ok := row["asset_ids"].([]any); ok {
+		for _, value := range values {
+			appendID(value)
+		}
+	}
+	switch row["type"] {
+	case "root_domain", "subdomain", "ip", "service", "endpoint", "app":
+		appendID(row["id"])
+	}
+	return ids
+}
+
+func filterStructuredAssets(value any, states map[int64]string, collect map[int64]bool) (any, bool) {
+	return filterStructuredRows(value, states, collect, structuredAssetIDs)
+}
+
+func structuredNodeIDs(row map[string]any) []int64 {
+	if _, asset := row["type"]; asset {
+		return nil
+	}
+	var ids []int64
+	if values, ok := row["node_ids"].([]any); ok {
+		for _, value := range values {
+			if id, ok := value.(float64); ok && id > 0 && id == float64(int64(id)) {
+				ids = append(ids, int64(id))
+			}
+		}
+	}
+	if id, ok := row["intent_id"].(float64); ok && id > 0 && id == float64(int64(id)) {
+		ids = append(ids, int64(id))
+	}
+	_, summary := row["summary"]
+	_, state := row["state"]
+	_, kind := row["kind"]
+	if id, ok := row["id"].(float64); ok && id > 0 && (summary || (state && kind)) {
+		ids = append(ids, int64(id))
+	}
+	return ids
+}
+
+func filterStructuredRows(value any, states map[int64]string, collect map[int64]bool, rowIDs func(map[string]any) []int64) (any, bool) {
+	switch row := value.(type) {
+	case map[string]any:
+		for _, id := range rowIDs(row) {
+			if collect != nil {
+				collect[id] = true
+			} else if states[id] != db.ApprovalApproved {
+				return nil, false
+			}
+		}
+		for key, child := range row {
+			filtered, keep := filterStructuredRows(child, states, collect, rowIDs)
+			if collect == nil {
+				if keep {
+					row[key] = filtered
+				} else {
+					delete(row, key)
+				}
+			}
+		}
+	case []any:
+		out := make([]any, 0, len(row))
+		for _, child := range row {
+			if filtered, keep := filterStructuredRows(child, states, collect, rowIDs); keep {
+				out = append(out, filtered)
+			}
+		}
+		return out, true
+	}
+	return value, true
+}
+
+func (p assetContextProvider) filterPlain(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, error) {
+	ri := RunInfoFrom(ctx)
+	main := ri.AgentKey == "mainagent" && ri.TaskID == p.taskID && p.taskID > 0 && ri.IntentID == 0
+	worker := ri.AgentKey == "worker" && ri.TaskID == p.taskID && ri.IntentID > 0
+	req = deduplicateToolHistory(req)
+	var refreshErr error
+	var accessSnapshot *targetAccessSnapshot
+	req, accessSnapshot, refreshErr = p.refreshTargetAccess(ctx, req)
+	if refreshErr != nil {
+		return req, refreshErr
+	}
+	if ri.TaskID == p.taskID && (ri.AgentKey == "planner" || ri.AgentKey == "mainagent") {
+		rule := targetAccessRule
+		if main {
+			rule = mainAssetExecutionRule
+		}
+		req.System = append(append([]string(nil), req.System...), rule)
+	}
+	req, refreshErr = p.refreshApprovalManagementHistory(ctx, req)
+	if refreshErr != nil {
+		return req, refreshErr
+	}
+	template, err := p.assets.WithReadContext(ctx).TaskApprovalTemplate(p.taskID)
+	if err != nil {
+		return req, err
+	}
+	skips, err := p.assets.WithReadContext(ctx).ActiveTaskAssetSkips(p.taskID, guard.AssetSkipScope(ctx))
+	if err != nil {
+		return req, err
+	}
+	policy := "仅用户明确提供或人工批准的域名/IP可测试；其他发现登记后等待用户审批。"
+	switch template {
+	case "all_assets":
+		policy = "所有合法新发现域名/IP由系统自动批准，可直接测试，无需申请审批。"
+	case "related_assets":
+		policy = "用户目标同根域的子域名及有本任务DNS解析依据的IP由系统自动批准，可直接测试；其他发现登记后等待用户审批。"
+	}
+	if worker || main {
+		policy = "你只执行当前已下发意图，不创建新计划。执行中可访问并登记待审批或尚未登记的合法资产、写回事实和漏洞；pending 不限制执行，也不代表自动批准。历史 pending 拦截或等待审批提示已失效。用户封禁、撤回、删除、异常隔离及独立操作约束仍必须遵守。"
+		if main {
+			policy = mainAssetExecutionRule
+		}
+		filtered := skips[:0]
+		for _, skip := range skips {
+			if skip.State != db.ApprovalPending {
+				filtered = append(filtered, skip)
+			}
+		}
+		skips = filtered
+	}
+	req.System = append(append([]string(nil), req.System...), "资产模板："+policy+"审批仅作用于域名/IP，获准主机的所有端口、服务和接口无需单独审批。用户封禁、撤回及删除限制优先。"+db.TaskAssetSkipRule)
+	if list := db.TaskAssetSkipList(skips); list != "" {
+		req.System = append(req.System, list)
+	}
+	type result struct {
+		message, block, content int
+		value                   any
+	}
+	var results []result
+	ids := make(map[int64]bool)
+	nodeIDs := make(map[int64]bool)
+	toolNames := make(map[string]string)
+	for mi, message := range req.Messages {
+		for bi, block := range message.Content {
+			if block.Type == llm.BlockToolUse {
+				toolNames[block.ID] = assetContextCall(block).Name
+			}
+			if block.Type != llm.BlockToolResult {
+				continue
+			}
+			// Only ARTEX structured tools: arbitrary shell/HTTP JSON may use the
+			// same field names for unrelated application data.
+			if !assetStructuredTool(toolNames[block.ToolUseID]) {
+				continue
+			}
+			for ci, content := range block.Content {
+				var value any
+				if content.Type != llm.BlockText || json.Unmarshal([]byte(content.Text), &value) != nil {
+					continue
+				}
+				filterStructuredAssets(value, nil, ids)
+				filterStructuredRows(value, nil, nodeIDs, structuredNodeIDs)
+				results = append(results, result{mi, bi, ci, value})
+			}
+		}
+	}
+	if len(results) == 0 {
+		return req, nil
+	}
+	list := make([]int64, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	var states map[int64]string
+	if accessSnapshot != nil {
+		states = accessSnapshot.assets
+	} else {
+		states, err = p.assets.WithReadContext(ctx).TaskAssetApprovalStates(p.taskID, list)
+	}
+	if err != nil {
+		return req, err
+	}
+	if worker || main {
+		states = workerVisibility(states)
+	}
+	list = list[:0]
+	for id := range nodeIDs {
+		list = append(list, id)
+	}
+	nodeStore := p.assets.WithReadContext(ctx)
+	if worker || main {
+		nodeStore = nodeStore.WithWorkerRead()
+	}
+	var nodeStates map[int64]string
+	if accessSnapshot != nil {
+		nodeStates = map[int64]string{}
+		for id, row := range accessSnapshot.nodes {
+			if row.CanRead {
+				nodeStates[id] = db.ApprovalApproved
+			} else {
+				nodeStates[id] = "unavailable"
+			}
+		}
+	} else {
+		nodeStates, err = nodeStore.TaskNodeApprovalStates(p.taskID, list)
+	}
+	if err != nil {
+		return req, err
+	}
+	req.Messages = append([]llm.Message(nil), req.Messages...)
+	for i := range req.Messages {
+		req.Messages[i].Content = append([]llm.ContentBlock(nil), req.Messages[i].Content...)
+	}
+	for _, r := range results {
+		value, keep := filterStructuredAssets(r.value, states, nil)
+		if keep {
+			value, keep = filterStructuredRows(value, nodeStates, nil, structuredNodeIDs)
+		}
+		if !keep {
+			value = map[string]any{"message": "该结果已从可执行上下文移除，等待用户授权"}
+		}
+		if row, ok := value.(map[string]any); ok {
+			for _, key := range []string{"total", "count", "facts", "findings", "coverage", "asset_approval_counts"} {
+				if _, exists := row[key]; exists {
+					row["counts_are_snapshot"] = true
+					break
+				}
+			}
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return req, err
+		}
+		block := &req.Messages[r.message].Content[r.block]
+		block.Content = append([]llm.ContentBlock(nil), block.Content...)
+		block.Content[r.content].Text = string(encoded)
+	}
+	return req, nil
+}

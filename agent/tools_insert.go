@@ -1,0 +1,864 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/Autumn-27/artex/db"
+	actool "github.com/Autumn-27/norma/tool"
+)
+
+// =====================================================================
+// Unified asset insertion tools
+// =====================================================================
+
+// SetAssetStore wires the asset store and company store onto this ToolSet
+// so the insert_assets, add_company_scope, and list_assets tools are active.
+func (t *ToolSet) SetAssetStore(as *db.AssetStore, cs *db.CompanyStore) {
+	t.as = as
+	t.cs = cs
+}
+
+// assetInputItem is one element of the insert_assets "assets" array.
+type assetInputItem struct {
+	Type string `json:"type"` // root_domain|ip|subdomain|app|service|endpoint
+
+	// ---- root_domain / subdomain ----
+	Domain      string   `json:"domain"`
+	ICP         string   `json:"icp"`
+	RecordType  string   `json:"record_type"`
+	RecordValue []string `json:"record_value"`
+
+	// ---- ip ----
+	IP           string           `json:"ip"`
+	BoundDomains []string         `json:"bound_domains"`
+	OpenPorts    []db.PortService `json:"open_ports"`
+
+	// ---- app ----
+	AppName     string `json:"app_name"`
+	BundleID    string `json:"bundle_id"`
+	Category    string `json:"category"`
+	Description string `json:"description"`
+	AppICP      string `json:"app_icp"`
+	CompanyID   *int64 `json:"company_id"` // explicit company link (app only; others auto-attribute via scope)
+
+	// ---- service (http) ----
+	URL           string           `json:"url"`
+	Technologies  []string         `json:"technologies"`
+	StatusCode    *int             `json:"status_code"`
+	ContentLength *int64           `json:"content_length"`
+	PageTitle     string           `json:"page_title"`
+	FaviconMMH3   string           `json:"favicon_mmh3"`
+	Auth          []map[string]any `json:"auth"`
+	ServiceName   string           `json:"service_name"`
+	ServiceIP     string           `json:"service_ip"` // optional enrichment IP
+
+	// ---- service (other) ----
+	Port  int    `json:"port"`
+	Proto string `json:"proto"`
+
+	// ---- endpoint ----
+	Method string           `json:"method"`
+	Params []map[string]any `json:"params"`
+
+	// Related marks whether this asset is relevant to the CURRENT test task and
+	// should therefore auto-enter the coverage system (task_scope denominator).
+	// nil = default true (relevant → auto-scoped). false = insert into the shared
+	// asset库 but keep it OUT of this task's coverage. Only consulted when the task
+	// has the coverage feature enabled; ignored (no auto-scope either way) when off.
+	Related *bool `json:"related"`
+}
+
+// insertAssets is the unified insert_assets agent tool.
+func (t *ToolSet) insertAssets() actool.CoreTool {
+	return writeTool(
+		"insert_assets",
+		"发现新资产时立即批量插入资产到资产库。支持一次提交多种资产类型：root_domain/ip/subdomain/app/service/endpoint。\n"+
+			"每条资产的字段说明：\n"+
+			"• root_domain：domain(根域名, 必填)、icp(备案, 可选)\n"+
+			"• ip：ip(IP地址, 必填, 必须是 IPv4/IPv6 地址而非主机名)、bound_domains([域名])、open_ports([{port,service}])\n"+
+			"• subdomain：domain(子域名, 必填)、record_type(A/AAAA/CNAME等)、record_value(记录值)、icp(可选)\n"+
+			"• app：app_name(应用名, 必填)、bundle_id(bundle id, 可选)、category、description、app_icp、company_id(归属企业 id, 可选)\n"+
+			"• service(http)：url(必填)、technologies([指纹])、status_code、content_length、page_title、favicon_mmh3、auth([{type,username,password,...}])、service_ip\n"+
+			"• service(other)：service_name(必填)、ip或domain(至少一个)、port(必填)、auth([...])\n"+
+			"• endpoint：url(必填)、method(必填)、params([{location,name,value,type}])、service_ip\n"+
+			"auth/technologies/params 都是【追加合并】(append)，不会覆盖原有值。\n"+
+			"返回当前角色可用资产 results、错误 errors 及待审批/受限数量。Planner 只能对 approved 资产下发意图；主 Agent 可操作并明确下发 pending 资产；Worker 在当前意图执行中可使用 pending 资产，不因未审批反复等待，也不会自动批准。封禁、撤回、删除和非法资产仍禁止访问；端口、服务和接口继承主机限制。",
+		obj(map[string]any{
+			// task_id 不暴露给模型：worker 归属哪个 task 由程序经 SetTaskID 权威赋值(见 handler)。
+			"assets": map[string]any{
+				"type":        "array",
+				"description": "资产数组，每个元素对应一条资产记录",
+				"items": obj(map[string]any{
+					"type": map[string]any{
+						"type":        "string",
+						"enum":        []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"},
+						"description": "资产类型",
+					},
+					// root_domain / subdomain
+					"domain":      str("根域名或子域名（root_domain/subdomain 必填）"),
+					"icp":         str("ICP 备案号（可选）"),
+					"record_type": str("DNS 解析类型：A/AAAA/CNAME/MX 等（subdomain 可选）"),
+					"record_value": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "DNS 解析值列表（subdomain 可选，如 [\"1.2.3.4\",\"2.3.4.5\"]）",
+					},
+					// ip
+					"ip": str("IP 地址，必须是 IPv4/IPv6 地址，不能填主机名（主机名请用 type=subdomain 的 domain 字段）；ip 类型必填；service/endpoint 类型可填，用于关联 IP"),
+					"bound_domains": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "该 IP 绑定的域名列表（ip 类型可选）",
+					},
+					"open_ports": map[string]any{
+						"type":        "array",
+						"description": "开放端口列表（ip 类型可选）",
+						"items": obj(map[string]any{
+							"port":    intp("端口号"),
+							"service": str("服务名称，如 http/ssh/mysql 等（可选）"),
+						}, "port"),
+					},
+					// app
+					"app_name":    str("应用名称（app 类型必填）"),
+					"bundle_id":   str("Bundle ID（app 类型可选）"),
+					"category":    str("应用分类（可选）"),
+					"description": str("应用描述（可选）"),
+					"app_icp":     str("应用 ICP 备案（可选）"),
+					"company_id":  intp("归属企业 id（app 类型可选；app 无法靠 scope 自动归因，需显式指定。id 由 add_company_scope 返回）"),
+					// service (http)
+					"url":         str("完整 URL，含协议和端口（HTTP 服务必填；service_type 自动设为 http）"),
+					"status_code": intp("HTTP 响应状态码，如 200/301/403/404（可选）"),
+					"content_length": map[string]any{
+						"type":        "integer",
+						"description": "HTTP 响应体字节数（可选）",
+					},
+					"page_title":   str("页面 <title> 内容（可选）"),
+					"favicon_mmh3": str("favicon MMH3 哈希（可选）"),
+					"technologies": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "指纹/技术栈列表，如 [\"Nginx\",\"Vue\",\"Bootstrap\"]（可选）",
+					},
+					"auth": map[string]any{
+						"type":        "array",
+						"description": "发现的认证信息列表，每条含 type/username/password 等字段（可选，追加不覆盖）",
+						"items":       map[string]any{"type": "object"},
+					},
+					// service (other，非 HTTP)
+					"service_name": str("服务名称，如 ssh/mysql/redis（service 非 HTTP 时必填）"),
+					"port":         intp("端口号（service 非 HTTP 时必填）"),
+					// endpoint
+					"method": str("HTTP 方法：GET/POST/PUT/PATCH/DELETE 等（endpoint 必填）"),
+					"params": map[string]any{
+						"type":        "array",
+						"description": "请求参数列表，每条含 location(query/body/header/path)/name/value/type（可选，追加不覆盖）",
+						"items":       map[string]any{"type": "object"},
+					},
+					// 覆盖度相关：该资产是否与当前测试任务有关。
+					"related": map[string]any{
+						"type":        "boolean",
+						"description": "该资产是否与【当前测试任务】相关：true(默认)才自动纳入资产覆盖度(测试范围分母)，该资产会进入待测资产中，如果是和任务无关的，例如CDN仅存储静态资源类，必须设置为false或不进行资产插入；false 则只入库、不计入本任务覆盖度(如顺带发现的旁站/无关资产)。仅在任务开启资产覆盖度功能时生效。",
+					},
+				}, "type"),
+			},
+		}, "assets"),
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			if t.as == nil {
+				return actool.Errorf("insert_assets 未启用: AssetStore 未初始化"), nil
+			}
+			var a struct {
+				Assets []assetInputItem `json:"assets"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("invalid input: " + err.Error()), nil
+			}
+			// task_id 由程序权威赋值(worker: SetTaskID)，不接受模型传入——避免模型漏传/错传
+			// 导致资产未归任务或归错任务。无任务上下文的调用方(auto/pentest/chat)其 t.taskID=0。
+			taskID := t.taskID
+			toolUseID, _ := ctx.Value(toolUseContextKey{}).(string)
+			originWorker := RunInfoFrom(ctx).AgentKey
+			if originWorker == "" {
+				originWorker = t.worker
+			}
+
+			type result struct {
+				Index         int    `json:"index"`
+				ID            int64  `json:"id"`
+				Type          string `json:"type"`
+				ApprovalState string `json:"approval_state,omitempty"`
+			}
+			type errEntry struct {
+				Index int    `json:"index"`
+				Error string `json:"error"`
+			}
+
+			var results []result
+			var errs []errEntry
+			pendingCount, restrictedCount := 0, 0
+
+			for i, item := range a.Assets {
+				typ := strings.TrimSpace(item.Type)
+				var id int64
+				var err error
+
+				id, err = t.as.RegisterAgentAssetWithOrigin(taskID, originWorker, t.ownerNode, toolUseID, func(scoped *db.AssetStore) (int64, error) {
+					switch typ {
+					case "root_domain":
+						id, err = scoped.UpsertRootDomain(db.UpsertRootDomainReq{
+							Domain:          item.Domain,
+							ICP:             item.ICP,
+							TaskID:          taskID,
+							AgentDiscovered: true,
+						})
+
+					case "ip":
+						id, err = scoped.UpsertIP(db.UpsertIPReq{
+							IP:              item.IP,
+							BoundDomains:    item.BoundDomains,
+							OpenPorts:       item.OpenPorts,
+							TaskID:          taskID,
+							AgentDiscovered: true,
+						})
+
+					case "subdomain":
+						id, err = scoped.UpsertSubdomain(db.UpsertSubdomainReq{
+							Domain:          item.Domain,
+							RecordType:      item.RecordType,
+							RecordValue:     item.RecordValue,
+							ICP:             item.ICP,
+							TaskID:          taskID,
+							AgentDiscovered: true,
+						})
+
+					case "app":
+						id, err = scoped.UpsertApp(db.UpsertAppReq{
+							Name:            item.AppName,
+							BundleID:        item.BundleID,
+							Category:        item.Category,
+							Description:     item.Description,
+							ICP:             item.AppICP,
+							CompanyID:       item.CompanyID,
+							TaskID:          taskID,
+							AgentDiscovered: true,
+						})
+
+					case "service":
+						// distinguish HTTP vs other by presence of url
+						if item.URL != "" {
+							// agent may send "ip" or "service_ip" for the enrichment IP; accept both
+							svcIP := item.ServiceIP
+							if svcIP == "" {
+								svcIP = item.IP
+							}
+							id, err = scoped.UpsertHTTPService(db.UpsertHTTPServiceReq{
+								URL:             item.URL,
+								Technologies:    item.Technologies,
+								StatusCode:      item.StatusCode,
+								ContentLength:   item.ContentLength,
+								PageTitle:       item.PageTitle,
+								FaviconMMH3:     item.FaviconMMH3,
+								Auth:            item.Auth,
+								IP:              svcIP,
+								TaskID:          taskID,
+								AgentDiscovered: true,
+							})
+						} else {
+							id, err = scoped.UpsertOtherService(db.UpsertOtherServiceReq{
+								Domain:          item.Domain,
+								IP:              item.IP,
+								Port:            item.Port,
+								ServiceName:     item.ServiceName,
+								Auth:            item.Auth,
+								TaskID:          taskID,
+								AgentDiscovered: true,
+							})
+						}
+
+					case "endpoint":
+						id, err = scoped.UpsertEndpoint(db.UpsertEndpointReq{
+							URL:             item.URL,
+							Method:          item.Method,
+							Params:          item.Params,
+							IP:              item.ServiceIP,
+							TaskID:          taskID,
+							AgentDiscovered: true,
+						})
+
+					default:
+						return 0, fmt.Errorf("unknown type: %s", typ)
+					}
+					return id, err
+				})
+
+				if err != nil {
+					errs = append(errs, errEntry{Index: i, Error: err.Error()})
+					continue
+				}
+				approvalState := "approved"
+				if taskID > 0 {
+					var states map[int64]string
+					states, err = t.as.TaskAssetApprovalStates(taskID, []int64{id})
+					approvalState = states[id]
+					if err != nil {
+						if errors.Is(err, db.ErrTaskAssetBlocked) || errors.Is(err, db.ErrTaskAssetNotApproved) {
+							restrictedCount++
+							continue
+						}
+						errs = append(errs, errEntry{Index: i, Error: err.Error()})
+						continue
+					}
+				}
+				if approvalState != db.ApprovalApproved {
+					if approvalState == db.ApprovalPending {
+						pendingCount++
+					} else {
+						restrictedCount++
+					}
+					if (!t.workerExecution && !t.mainExecution) || approvalState != db.ApprovalPending {
+						continue
+					}
+				}
+				if err := t.anchorOwner(id); err != nil {
+					errs = append(errs, errEntry{Index: i, Error: err.Error()})
+					continue
+				}
+				results = append(results, result{Index: i, ID: id, Type: typ, ApprovalState: approvalState})
+				t.writes.Assets++
+				// 自动入测试范围(source='auto')：只对 worker 顶层显式插入的这一项，按其
+				// 类型加保守范围；side-effect 派生的资产不经此处，故范围不盲目扩大。taskID=0 时无操作。
+				// 资产覆盖度功能关闭时不再累积测试范围(分母)；related=false(与当前任务无关)
+				// 的资产也只入库、不计入覆盖度。related 省略/null 视为 true(默认纳入)。
+				related := item.Related == nil || *item.Related
+				if !t.coverageDisabled && related {
+					svcIP := item.ServiceIP
+					if svcIP == "" {
+						svcIP = item.IP
+					}
+					domain := item.Domain
+					if host, metadata, err := db.DNSRecordHost(domain, item.RecordType); metadata && err == nil {
+						domain = host
+					}
+					_ = t.as.AddAutoScope(taskID, typ, domain, item.URL, svcIP)
+				}
+			}
+
+			return jsonResult(map[string]any{
+				"results":          results,
+				"errors":           errs,
+				"pending_count":    pendingCount,
+				"restricted_count": restrictedCount,
+			})
+		},
+	)
+}
+
+// addCompanyScope writes to company_scope table and triggers asset attribution.
+func (t *ToolSet) addCompanyScope() actool.CoreTool {
+	return writeTool(
+		"add_company_scope",
+		"把域名/IP/CIDR/ICP备案/企业关键词加入某公司的【资产范围】——域名、网络和ICP会自动认领命中的资产，关键词只提供给Agent作为范围提示。\n"+
+			"公司名唯一：company 不存在则新建，已存在则复用(只把范围并进去)。\n"+
+			"scope 一行一条，系统自动识别：根域名 / URL / 单个 IP / CIDR 网段 / ICP备案 / 企业关键词。\n"+
+			"务必给 reason 说明归属依据(whois/证书/ASN 等)。\n"+
+			"护栏：拒绝裸 TLD 与过宽网段(IPv4前缀需为/16-/32、IPv6前缀需为/32-/128)，非法行会被跳过并在 errors 返回。",
+		obj(map[string]any{
+			"company": str("公司名(不存在则新建、存在则复用；名称唯一)"),
+			"scope":   str("资产范围，一行一条：域名 / URL / IP / CIDR / ICP备案 / 企业关键词"),
+			"reason":  str("归属依据(证据/来源)，务必填写"),
+			"logo":    str("公司图标 URL(可选；仅新建公司时生效)"),
+		}, "company", "scope"),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			if t.cs == nil {
+				return actool.Errorf("add_company_scope 未启用: CompanyStore 未初始化"), nil
+			}
+			var a struct {
+				Company string `json:"company"`
+				Scope   string `json:"scope"`
+				Reason  string `json:"reason"`
+				Logo    string `json:"logo"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			if strings.TrimSpace(a.Company) == "" {
+				return actool.Errorf("company 不能为空"), nil
+			}
+			companyID, _, err := t.cs.UpsertCompany(a.Company, a.Logo)
+			if err != nil {
+				return actool.Errorf("创建/获取公司失败: " + err.Error()), nil
+			}
+			lines := splitLines(a.Scope)
+			added, skipped, invalid, errMsgs := t.cs.AddScope(companyID, lines, a.Reason)
+			out := map[string]any{
+				"company_id": companyID,
+				"added":      added,
+				"skipped":    skipped,
+				"invalid":    invalid,
+			}
+			if len(errMsgs) > 0 {
+				out["errors"] = errMsgs
+			}
+			return jsonResult(out)
+		},
+	)
+}
+
+// addTaskScope lets the plan agent add test scope to THE CURRENT TASK — the coverage
+// denominator and the task's authorization edge. Worker discoveries are auto-scoped
+// (precise host) by insertAssets; this tool is for DELIBERATELY WIDENING: pull a whole
+// root domain or whole company into scope, or add a specific subdomain / ip.
+func (t *ToolSet) addTaskScope() actool.CoreTool {
+	return writeTool(
+		"add_task_scope",
+		"把测试范围加入【本任务】——这是本任务的授权边界，也是资产测试覆盖度的分母。\n"+
+			"kind 支持：company(整个公司名下资产) / root_domain(整个根域，含所有子域) / subdomain(单个精确子域) / ip / cidr / icp / keyword。\n"+
+			"说明：worker 逐个碰到的主机会被系统【自动】加进范围(精确子域)；本工具用于【主动扩大】——把整个根域/整个公司纳入，或补充指定某子域/IP。\n"+
+			"value：company 传公司名或 id(公司须已存在)；root_domain/subdomain 传域名；ip/cidr 传 IP 或网段；icp/keyword 传备案号或企业关键词。\n"+
+			"务必给 reason 说明依据(可审计)。多条用 entries 数组。",
+		obj(map[string]any{
+			"entries": map[string]any{"type": "array", "description": "批量：[{kind, value}]。kind∈company/root_domain/subdomain/ip/cidr/icp/keyword。", "items": map[string]any{"type": "object"}},
+			"kind":    str("[单条] company / root_domain / subdomain / ip / cidr / icp / keyword"),
+			"value":   str("[单条] 公司名或id / 域名 / IP / CIDR / ICP / 关键词"),
+			"reason":  str("加入依据(用于审计)，务必填写"),
+		}),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			if t.as == nil {
+				return actool.Errorf("add_task_scope 未启用: AssetStore 未初始化"), nil
+			}
+			if t.taskID <= 0 {
+				return actool.Errorf("add_task_scope 需要任务上下文(当前无 task)"), nil
+			}
+			type scopeEntry struct {
+				Kind  string `json:"kind"`
+				Value string `json:"value"`
+			}
+			var a struct {
+				Entries    []scopeEntry `json:"entries"`
+				scopeEntry              // 单条模式
+				Reason     string       `json:"reason"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("参数格式错误: " + err.Error()), nil
+			}
+			items := a.Entries
+			if len(items) == 0 {
+				items = []scopeEntry{a.scopeEntry}
+			}
+			var added []map[string]any
+			errs := map[string]string{}
+			for i, e := range items {
+				ts, err := t.as.AddAgentScope(t.taskID, strings.TrimSpace(e.Kind), e.Value, a.Reason, "agent")
+				if err != nil {
+					errs[strconv.Itoa(i)] = err.Error()
+					continue
+				}
+				added = append(added, map[string]any{"kind": ts.Kind, "domain": ts.Domain, "net": ts.Net, "value": ts.Value, "company_id": ts.CompanyID})
+			}
+			out := map[string]any{"added": added}
+			if len(errs) > 0 {
+				out["errors"] = errs
+			}
+			return jsonResult(out)
+		},
+	)
+}
+
+// listUntestedAssets lets the plan agent pull the current + directly inherited
+// scope's not-yet-tested assets on demand (filter by type, paginated).
+func (t *ToolSet) listUntestedAssets() actool.CoreTool {
+	return readTool(
+		"list_untested_assets",
+		"查询【本任务及直接关联任务】范围内、还没被事实锚点覆盖的资产（关联范围只读，供你自己判断要不要补测，不代替你决策）。\n"+
+			"可选按资产类型过滤：root_domain/subdomain/service/app/endpoint/ip。\n"+
+			"分页：page 从 1 起、page_size 默认 10。返回 {assets:[{id,type,label}], total, page, page_size}。仅任务上下文可用。",
+		obj(map[string]any{
+			"type":      str("资产类型过滤（可选）：root_domain/subdomain/service/app/endpoint/ip"),
+			"page":      intp("页码，从 1 起（默认 1）"),
+			"page_size": intp("每页数量（默认 10）"),
+		}),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			if t.as == nil {
+				return actool.Errorf("list_untested_assets 未启用: AssetStore 未初始化"), nil
+			}
+			if t.taskID <= 0 || t.ts == nil {
+				return actool.Errorf("list_untested_assets 需要任务上下文"), nil
+			}
+			var a struct {
+				Type     string `json:"type"`
+				Page     int    `json:"page"`
+				PageSize int    `json:"page_size"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("参数格式错误: " + err.Error()), nil
+			}
+			if a.Page <= 0 {
+				a.Page = 1
+			}
+			if a.PageSize <= 0 {
+				a.PageSize = 10
+			}
+			offset := (a.Page - 1) * a.PageSize
+			assets, total, err := t.as.ListUntestedAssetsWithSources(t.taskID, strings.TrimSpace(a.Type), a.PageSize, offset)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			return jsonResult(map[string]any{
+				"assets": assets, "total": total, "page": a.Page, "page_size": a.PageSize,
+			})
+		},
+	)
+}
+
+// listAssets lets an agent query the asset table.
+func (t *ToolSet) listAssets() actool.CoreTool {
+	return readTool("list_assets", "查询当前角色可见的任务资产摘要：Planner 仅已批准，主 Agent 和 Worker 也可读取待审批，主动限制仍有效。调用前必须选择且只选择一种查询方式：id（正整数）、ids（非空 ID 数组）或 dsl（非空查询条件）；禁止只传 limit/offset/type。按目标搜索示例：{\"dsl\":\"url=example.com\",\"limit\":50}；将示例域名替换为实际目标。续页必须保留原查询条件并使用 next_offset。DSL 支持 field=value 模糊、== 精确、!= 排除、数字比较、AND/OR 和括号；常用字段 domain/ip/url/port/status_code/technology。详情需 detail=true 和明确 ID；fields 可选 identity/fingerprint/dns/params/auth/extra，认证仅显式 auth 返回。详情延期字段通过 field、index、text_offset 续读。",
+		obj(map[string]any{
+			"dsl": str("与 id、ids 三选一，必须为非空查询文本或 DSL；如 url=example.com 或 port==443 AND technology=nginx。任务审批筛选用 approval_state==approved（approved/pending/blocked/revoked）；status_code==200 表示 HTTP 状态码，status 的整数值仍是 HTTP 状态码。审批筛选不会扩大当前角色的可见范围，Planner 查非批准资产管理摘要应使用 list_task_assets。URL/域名/IP 条件放在这里，不是顶层参数"), "type": str("可选资产类型，仅用于 DSL"),
+			"id": idp("单个正整数资产 ID；与 ids、dsl 三选一"), "ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "非空正整数 ID 数组，与 id、dsl 三选一；最多50个 ID，详情最多5个"},
+			"limit": map[string]any{"type": "integer", "minimum": 1, "description": "仅控制分页，不能单独使用；必须同时提供 id、ids 或 dsl。默认10，每页最多50，超出自动按50处理；续页保留查询条件并使用 next_offset"}, "offset": intp("列表偏移，使用返回的 next_offset；默认0"), "detail": map[string]any{"type": "boolean"},
+			"fields": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "详情字段组，默认 identity/fingerprint"},
+			"field":  str("详情延期字段 JSON Pointer"), "index": intp("详情集合续页"), "text_offset": intp("详情文本字符偏移"), "max_chars": intp("详情字符预算，默认8000，最大24000"),
+		}), func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
+			var a struct {
+				DSL        string   `json:"dsl"`
+				Type       string   `json:"type"`
+				ID         int64    `json:"id"`
+				IDs        []int64  `json:"ids"`
+				Limit      int      `json:"limit"`
+				Offset     int      `json:"offset"`
+				Detail     bool     `json:"detail"`
+				Fields     []string `json:"fields"`
+				Field      string   `json:"field"`
+				Index      int      `json:"index"`
+				TextOffset int      `json:"text_offset"`
+				MaxChars   int      `json:"max_chars"`
+			}
+			if err := decodeToolInput(in, &a); err != nil {
+				return actool.Errorf(err.Error() + `。list_assets 使用 dsl 搜索，没有顶层 url/domain/ip 参数；例如 {"type":"endpoint","dsl":"url=example.com","limit":50}；limit 为1..50，用 offset 续页。`), nil
+			}
+			if a.Limit == 0 {
+				a.Limit = 10
+			}
+			if a.Limit > 50 {
+				a.Limit = 50
+			}
+			if a.Limit < 1 {
+				return actool.Errorf(fmt.Sprintf("limit=%d 超出范围：list_assets 默认10、最大50；请使用 limit=50，并以返回的 next_offset 继续读取。", a.Limit)), nil
+			}
+			if a.Offset < 0 {
+				return actool.Errorf("offset 必须为非负整数，续页使用返回的 next_offset"), nil
+			}
+			if a.ID < 0 {
+				return actool.Errorf("id 必须为正整数；不指定单个资产时省略 id"), nil
+			}
+			if len(a.IDs) > 50 {
+				return actool.Errorf("ids 每次最多50个；请拆分批次，详细模式每次最多5个"), nil
+			}
+			if a.Index < 0 {
+				return actool.Errorf("index 不能为负数"), nil
+			}
+			if a.Type != "" {
+				switch a.Type {
+				case "root_domain", "subdomain", "ip", "service", "endpoint", "app":
+				default:
+					return actool.Errorf("无效资产类型"), nil
+				}
+			}
+			modes := 0
+			if a.ID > 0 {
+				modes++
+			}
+			if len(a.IDs) > 0 {
+				modes++
+			}
+			a.DSL = strings.TrimSpace(a.DSL)
+			if a.DSL != "" {
+				modes++
+			}
+			if modes == 0 {
+				return actool.Errorf(`缺少查询条件：list_assets 的 id、ids、dsl 必须三选一，不能只传 limit/offset/type。请按实际目标重试，例如 {"dsl":"url=example.com","limit":50}（替换为实际目标），或 {"id":123} / {"ids":[123,456]}（使用已知资产 ID）。续页保留原查询条件并设置 offset=next_offset；Planner 如需审批管理视图，使用 list_task_assets。`), nil
+			}
+			if modes > 1 {
+				return actool.Errorf("查询条件冲突：id、ids、dsl 必须三选一，请仅保留一种查询方式后重试"), nil
+			}
+			if a.DSL == "" && a.Type != "" {
+				return actool.Errorf("type 仅用于 DSL；按 id 或 ids 查询时请删除 type 后重试"), nil
+			}
+			for _, id := range a.IDs {
+				if id <= 0 {
+					return actool.Errorf("ids 必须为正整数"), nil
+				}
+			}
+			ids := a.IDs
+			if a.ID > 0 {
+				ids = []int64{a.ID}
+			}
+			w := detailWindow{a.TextOffset, a.MaxChars}
+			if err := w.validate(); err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			if a.Detail && (len(ids) == 0 || len(ids) > 5 || a.Offset != 0) {
+				return actool.Errorf("详细模式必须指定1..5个 ID，且不得指定列表 offset"), nil
+			}
+			if !a.Detail && (len(a.Fields) > 0 || a.Field != "" || a.Index != 0 || a.TextOffset != 0 || a.MaxChars != 0) {
+				return actool.Errorf("字段组与详情分页参数需要 detail=true"), nil
+			}
+			if len(a.Fields) == 0 {
+				a.Fields = []string{"identity", "fingerprint"}
+			}
+			for _, group := range a.Fields {
+				switch group {
+				case "identity", "fingerprint", "dns", "params", "auth", "extra":
+				default:
+					return actool.Errorf("未知字段组: " + group), nil
+				}
+			}
+			if t.as == nil {
+				return actool.Errorf("AssetStore 未初始化"), nil
+			}
+			store := t.as.WithReadContext(ctx).WithToolReadFields(a.Detail, a.Fields)
+			if t.workerExecution {
+				store = store.WithWorkerRead()
+			}
+			var assets []*db.Asset
+			var err error
+			if len(ids) > 0 {
+				assets, err = store.ToolAssetsByIDs(t.taskID, ids)
+			} else if t.taskID > 0 {
+				assets, err = store.QueryDSLByTaskApproval(t.taskID, a.DSL, a.Type, "all", db.ApprovalApproved, a.Limit+1, a.Offset)
+			} else {
+				assets, err = store.QueryDSL(a.DSL, a.Type, 0, a.Limit+1, a.Offset)
+			}
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
+			more := false
+			if !a.Detail {
+				if len(ids) > 0 {
+					start := min(a.Offset, len(assets))
+					assets = assets[start:]
+				}
+				if len(assets) > a.Limit {
+					more = true
+					assets = assets[:a.Limit]
+				}
+			}
+			rows := make([]map[string]any, 0, len(assets))
+			for _, asset := range assets {
+				row := assetSummary(asset, t.taskID > 0)
+				if a.Detail {
+					data := assetFieldGroups(asset, a.Fields)
+					window := w
+					budget := (toolListBudget - 512) / max(1, len(assets))
+					for {
+						projection, err := projectDetail(data, window, a.Field, a.Index)
+						if err != nil {
+							return actool.Errorf(err.Error()), nil
+						}
+						row["details"] = projection
+						encoded, _ := json.Marshal(row)
+						if len([]rune(string(encoded))) <= budget {
+							break
+						}
+						if window.MaxChars <= 1 {
+							return actool.Errorf("详情元数据超出预算，请减少资产数量或指定更具体的 field"), nil
+						}
+						window.MaxChars = max(1, window.MaxChars/2)
+					}
+				}
+				rows = append(rows, row)
+			}
+			cut := false
+			if !a.Detail {
+				rows, cut = budgetRows(rows)
+				more = more || cut
+			}
+			out := map[string]any{"assets": rows, "count": len(rows), "has_more": more, "truncated": cut}
+			if more {
+				out["next_offset"] = a.Offset + len(rows)
+			}
+			return jsonResult(out)
+		})
+}
+
+func assetSummary(a *db.Asset, task bool) map[string]any {
+	identity := *a
+	if u, err := url.Parse(identity.URL); err == nil && u.Host != "" {
+		u.User = nil
+		u.RawQuery = ""
+		u.Fragment = ""
+		identity.URL = u.String()
+	}
+	row := map[string]any{"id": a.ID, "type": a.Type, "target": firstLine(assetValue(&identity), 500)}
+	if a.PageTitle != "" {
+		row["page_title"] = firstLine(a.PageTitle, 160)
+	}
+	if a.StatusCode != nil {
+		row["status_code"] = a.StatusCode
+	}
+	if len(a.Technologies) > 0 {
+		tech := make([]string, 0, min(5, len(a.Technologies)))
+		for _, v := range a.Technologies[:min(5, len(a.Technologies))] {
+			tech = append(tech, firstLine(v, 80))
+		}
+		row["technologies"] = tech
+	}
+	if task {
+		row["approval_state"] = a.ApprovalState
+		row["task_inherited"] = a.TaskInherited
+		row["task_read_only"] = a.TaskReadOnly
+	}
+	return row
+}
+
+func assetFieldGroups(a *db.Asset, groups []string) map[string]any {
+	out := map[string]any{}
+	for _, g := range groups {
+		switch g {
+		case "identity":
+			out[g] = map[string]any{"domain": a.Domain, "ip": a.IP, "url": a.URL, "port": a.Port, "method": a.Method, "app_name": a.AppName, "bundle_id": a.BundleID}
+		case "fingerprint":
+			out[g] = map[string]any{"page_title": a.PageTitle, "status_code": a.StatusCode, "technologies": a.Technologies, "service_name": a.ServiceName, "favicon_mmh3": a.FaviconMMH3}
+		case "dns":
+			out[g] = map[string]any{"record_type": a.RecordType, "record_value": a.RecordValue, "bound_domains": a.BoundDomains, "open_ports": a.OpenPorts}
+		case "params":
+			out[g] = a.Params
+		case "auth":
+			out[g] = a.Auth
+		case "extra":
+			out[g] = a.Extra
+		}
+	}
+	return out
+}
+
+// listCompanies lets an agent enumerate companies (企业) with their scope + asset count.
+func (t *ToolSet) listCompanies() actool.CoreTool {
+	return readTool(
+		"list_companies",
+		"列出资产库中的【企业/公司】及其资产范围(scope)与已归属资产数。用于查看有哪些公司、"+
+			"拿到 company_id（insert_assets 关联 app、list_assets 按 company_id 过滤时用）。"+
+			"可选 search 按公司名模糊过滤(不区分大小写)，留空返回全部。",
+		obj(map[string]any{
+			"search": str("按公司名模糊过滤(可选，不区分大小写)；留空返回全部"),
+		}),
+		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+			if t.cs == nil {
+				return actool.Errorf("list_companies 未启用: CompanyStore 未初始化"), nil
+			}
+			var a struct {
+				Search string `json:"search"`
+			}
+			if err := json.Unmarshal(in, &a); err != nil {
+				return actool.Errorf("参数格式错误: " + err.Error()), nil
+			}
+			cos, err := t.cs.ListCompanies()
+			if err != nil {
+				return actool.Errorf("查询公司失败: " + err.Error()), nil
+			}
+			q := strings.ToLower(strings.TrimSpace(a.Search))
+			type companyOut struct {
+				ID         int64    `json:"id"`
+				Name       string   `json:"name"`
+				AssetCount int      `json:"asset_count"`
+				Scope      []string `json:"scope"`
+			}
+			out := make([]companyOut, 0, len(cos))
+			for _, c := range cos {
+				if q != "" && !strings.Contains(strings.ToLower(c.Name), q) {
+					continue
+				}
+				scope := make([]string, 0, len(c.Scope))
+				for _, r := range c.Scope {
+					scope = append(scope, r.Raw)
+				}
+				out = append(out, companyOut{ID: c.ID, Name: c.Name, AssetCount: c.AssetCount, Scope: scope})
+			}
+			return jsonResult(map[string]any{"count": len(out), "companies": out})
+		},
+	)
+}
+
+// splitLines splits a multi-line string into non-empty trimmed lines.
+func splitLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// WorkerTools returns the tool set for a work agent.
+func (t *ToolSet) WorkerTools() []actool.CoreTool {
+	return []actool.CoreTool{
+		// list_findings 保留：报漏洞前先查本任务已确认漏洞，避免重复上报同一漏洞。
+		t.listFindings(),
+		t.addFinding(), t.recordFact(),
+		// asset management (handlers guard nil store internally)。
+		// add_company_scope 不给 worker：定义企业资产范围属规划/主控/Auto 的职责，worker 只执行探索。
+		t.insertAssets(), t.listAssets(),
+		// 跨 work 回看：worker 也可复用其他 work 的观察，避免重复劳动。
+		// search_all_worker_traces：不必先知道 intent_id，按关键字全局捞命中步骤；
+		// get_worker_trace：锁定某条 work 后列步骤/就地搜/取完整内容。
+		t.searchAllWorkerTraces(), t.getWorkerTrace(),
+		// node_detail：worker 拿到 intent_id/节点 id 后可查该节点完整详情（配合上面的回看）。
+		t.nodeDetail(),
+		// 以下工具仍【不给】worker，只留给 planner/main（读上下文、跨 work 复盘是规划职责，
+		// worker 只做单条意图的执行与写回）：list_facts / list_companies / list_worker_traces。
+	}
+}
+
+// MainAgentTools returns the human-interface tool set.
+func (t *ToolSet) MainAgentTools() []actool.CoreTool {
+	tools := t.mainAgentTools()
+	for i, tool := range tools {
+		tools[i] = mainRoleTool{CoreTool: tool, owner: t}
+	}
+	return tools
+}
+func (t *ToolSet) mainAgentTools() []actool.CoreTool {
+	return []actool.CoreTool{
+		t.listTaskAssets(), t.checkTargetAccess(), t.dispatchIntents(),
+		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(),
+		t.expandDigest(), // cold-digest §6.1
+		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.addHint(), t.addIntent(),
+		// steer_work：人可对某条正在运行的意图(work)实时注入纠偏指令（不打断、不丢进展）。
+		t.steerWorkTool(),
+		// set_goals：人可在运行时给本任务补一个新的最终目标（规划者据此重判是否达成）。
+		t.setGoals(),
+		// set_constraints：人可在运行时给本任务补/改操作约束（allow/deny），约束 planner/worker 的探索边界。
+		t.setConstraints(),
+		// asset management (handlers guard nil store internally)
+		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
+		t.addFinding(), t.recordFact(),
+		t.addTaskScope(),
+		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。
+		t.listUntestedAssets(),
+	}
+}
+
+// AllDomainTools returns the union of all domain tools across all agent types,
+// deduped by name (mainagent order wins). Used by the server to build a registry
+// for injecting domain tools into agents (Auto, custom) that don't own a per-task
+// ToolSet. The caller provides real stores; tools are callable at taskID=0 scope.
+func (t *ToolSet) AllDomainTools() []actool.CoreTool {
+	seen := map[string]bool{}
+	var out []actool.CoreTool
+	all := append(append(t.MainAgentTools(), t.PlannerTools()...), t.WorkerTools()...)
+	for _, tool := range all {
+		if !seen[tool.Name()] {
+			seen[tool.Name()] = true
+			out = append(out, tool)
+		}
+	}
+	return out
+}

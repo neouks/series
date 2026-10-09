@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,381094,t=>{"use strict";var e=t.i(843476),c=t.i(500932),i=t.i(381836);t.s(["InterceptTab",0,function(t){let o,r=(0,c.c)(2),{taskId:s}=t;return r[0]!==s?(o=(0,e.jsx)(i.ApprovalRecords,{taskId:s},s),r[0]=s,r[1]=o):o=r[1],o}])},835525,t=>{t.n(t.i(381094))}]);

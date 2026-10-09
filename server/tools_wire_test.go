@@ -1,0 +1,133 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/db"
+	actool "github.com/Autumn-27/norma/tool"
+)
+
+func names(tools []actool.CoreTool) map[string]actool.CoreTool {
+	m := map[string]actool.CoreTool{}
+	for _, t := range tools {
+		m[t.Name()] = t
+	}
+	return m
+}
+
+// TestWireTools verifies end-to-end against the live dev PG: wireTools seeds the
+// catalog, ToolResolve keeps record_fact for worker but drops it for planner (not
+// bound), and an edited description + injected default flow through.
+func TestWireTools(t *testing.T) {
+	dsn, _, err := db.DSN()
+	if err != nil {
+		t.Skipf("no database config (%v) — skipping", err)
+	}
+	pg, err := db.Open(dsn)
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer pg.Close()
+
+	wireTools(pg, nil) // nil domainReg: test only covers filter/decoration, not injection
+	t.Cleanup(func() { agent.ToolResolve = nil })
+	// Prevent interactive-shell Bash decoration: if the worker agent has
+	// interactive_shell=true in the DB, ToolResolve would append a note to
+	// Bash's description. Disable that for this test; shell-kind custom tools
+	// are intentionally still allowed to append their environment hints.
+	t.Setenv("AGENT_CORE_DISABLE_INTERACTIVE_SHELL", "1")
+
+	// Seeding populated the catalog.
+	rf, err := pg.GetTool("record_fact")
+	if err != nil || rf == nil {
+		t.Fatalf("record_fact not seeded: %v", err)
+	}
+
+	// Build a base as the worker does: its domain tools + defaults, resolved for
+	// "worker" then for "planner".
+	ts := agent.NewToolSet(nil, "")
+	base := append(ts.WorkerTools(), actool.DefaultTools()...)
+	ctx := context.Background()
+
+	worker := names(resolveToolsForTest(t, ctx, "worker", base))
+	if _, ok := worker["record_fact"]; !ok {
+		t.Error("worker lost record_fact")
+	}
+	// SDK generic tools aren't seeded → ToolResolve passes them through unchanged
+	// (same object, original description — not decorated). No startup prune touches
+	// non-catalog rows, so future user-defined custom tools survive too.
+	if bash, ok := worker["Bash"]; !ok {
+		t.Error("worker lost Bash (should pass through)")
+	} else {
+		want := actool.NewBash().Description() + shellToolNote(mustToolRows(t, pg), "worker")
+		if bash.Description() != want {
+			t.Errorf("Bash description = %q, want catalog shell hints appended", bash.Description())
+		}
+	}
+	// planner is not bound to record_fact → resolving a base that contains it drops it.
+	planner := names(resolveToolsForTest(t, ctx, "planner", base))
+	if _, ok := planner["record_fact"]; ok {
+		t.Error("planner should not get record_fact (not bound)")
+	}
+
+	// Edit description + add a default to a scalar param, then confirm the resolved
+	// worker tool reflects both. Restore from code default on cleanup.
+	t.Cleanup(func() { _ = pg.UpsertToolForce(rf.Key, rf.Description, rf.Schema, mustJSON(rf.Agents)) })
+	var schema map[string]any
+	_ = json.Unmarshal(rf.Schema, &schema)
+	if props, ok := schema["properties"].(map[string]any); ok {
+		if conf, ok := props["confidence"].(map[string]any); ok {
+			conf["default"] = "inferred"
+		}
+	}
+	edited := mustJSON(schema)
+	if err := pg.UpdateTool(rf.Key, "EDITED DESC", edited, mustJSON([]string{"worker"}), true); err != nil {
+		t.Fatal(err)
+	}
+
+	worker2 := names(resolveToolsForTest(t, ctx, "worker", base))
+	got := worker2["record_fact"]
+	if got == nil {
+		t.Fatal("record_fact missing after edit")
+	}
+	if got.Description() != baseDescription(base, "record_fact") {
+		t.Errorf("runtime contract replaced by outdated saved text: %q", got.Description())
+	}
+	if saved, err := pg.GetTool(rf.Key); err != nil || saved.Description != "EDITED DESC" {
+		t.Fatal("saved user description was overwritten")
+	}
+	// Default injection: omit confidence → handler input should carry the default.
+	// We can't run the real handler (nil store), but InputSchema must show the default.
+	sc := got.InputSchema()
+	props := sc["properties"].(map[string]any)
+	conf := props["confidence"].(map[string]any)
+	if conf["default"] != "inferred" {
+		t.Errorf("confidence.default = %v, want inferred", conf["default"])
+	}
+}
+
+func baseDescription(tools []actool.CoreTool, name string) string {
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return tool.Description()
+		}
+	}
+	return ""
+}
+
+func mustToolRows(t *testing.T, pg *db.DB) []*db.Tool {
+	t.Helper()
+	rows, err := pg.ListTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
