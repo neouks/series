@@ -34,9 +34,9 @@
 开发预览改用 next dev --webpack，避开既有 Turbopack 相对样式导入解析失败；未修改全局样式。Mock 保留在 http://127.0.0.1:3000/system/mcp 。测试容器用后停止。
 
 ## 截图
-- [MCP 桌面浅色](mcp-shell-review/mcp-desktop-light.png)
-- [MCP 窄屏深色抽屉](mcp-shell-review/mcp-mobile-dark.png)
-- [Shell 测试失败回显](mcp-shell-review/shell-test-dark.png)
+- MCP 桌面浅色（旧品牌截图已移除）
+- MCP 窄屏深色抽屉（旧品牌截图已移除）
+- Shell 测试失败回显（旧品牌截图已移除）
 
 ## 生效
 重新构建前后端并重启后端；启动时自动添加 executable 列。不回填历史 Shell 计数，既有计数保留。未执行提交、推送或重启业务服务。

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/traffic"
+	"github.com/neouks/series/traffic"
 )
 
 const cipCCURL = "https://cip.cc"
@@ -102,7 +102,7 @@ func probeGlobalProxyURL(ctx context.Context, proxy, endpoint string) (cipCCResu
 		return cipCCResult{}, fmt.Errorf("构建 cip.cc 请求失败: %w", err)
 	}
 	req.Header.Set("Accept", "text/plain")
-	req.Header.Set("User-Agent", "ARTEX/global-proxy-probe")
+	req.Header.Set("User-Agent", "SERIES/global-proxy-probe")
 
 	started := time.Now()
 	resp, err := client.Do(req)

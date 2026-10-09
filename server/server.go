@@ -19,30 +19,33 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/artex/llmpool"
-	"github.com/Autumn-27/artex/llmrec"
-	"github.com/Autumn-27/artex/report"
-	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/memory"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/neouks/series/agent"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/intercept"
+	"github.com/neouks/series/llmpool"
+	"github.com/neouks/series/llmrec"
+	"github.com/neouks/series/report"
+	"github.com/neouks/series/traffic"
 )
 
-// BuildVersion is the backend application version, injected from cmd/artex at
+// BuildVersion is the backend application version, injected from cmd/series at
 // startup (which in turn gets it from -ldflags "-X main.version=<tag>").
 // Defaults to "dev" for local builds. Exposed to the frontend via GET /api/health.
 var BuildVersion = "dev"
 
-// Server exposes the ARTEX backend over a JSON HTTP API for the shadcn/ui
+// Server exposes the SERIES backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
-	m      *Manager
-	engine *Engine
-	ctx    context.Context
+	httpAuth     *httpEntryAuth
+	httpAuthOnce sync.Once
+	httpAuthErr  error
+	m            *Manager
+	engine       *Engine
+	ctx          context.Context
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -416,7 +419,7 @@ func (s *Server) executionProfile() actool.ShellProfile {
 	p, err := s.m.ShellProfile()
 	if err != nil {
 		log.Printf("[shell] configured interpreter unavailable: %v", err)
-		return actool.ShellProfile{Mode: "unavailable", ShellPath: "__artex_shell_unavailable__"}
+		return actool.ShellProfile{Mode: "unavailable", ShellPath: "__series_shell_unavailable__"}
 	}
 	return p
 }
@@ -766,6 +769,10 @@ func (s *Server) chatAgentRef() *agent.ChatAgent {
 }
 
 func (s *Server) Handler() http.Handler {
+	s.initHTTPAuth()
+	if s.httpAuthErr != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { entryAuthError(w, 503) })
+	}
 	mux := http.NewServeMux()
 	s.registerSideRoutes(mux)
 
@@ -924,6 +931,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
 	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel) // 按模型聚合本任务 token 用量
 	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
+	mux.HandleFunc("GET /api/settings/http-auth", s.getHTTPAuthSettings)
+	mux.HandleFunc("PUT /api/settings/http-auth", s.putHTTPAuthSettings)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
@@ -1046,19 +1055,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
-	// frontend (public — auth is enforced client-side and on the API). With the
+	// frontend (JWT is enforced client-side and on the API). The optional HTTP
+	// entry gate wraps both, including login and health. With the
 	// no-embed build the webui handler just 404s (run `next dev` separately).
-	api := cors(s.requireAuth(mux))
+	jwtAPI := s.requireAuth(mux)
+	devAPI := cors(jwtAPI)
+	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Context().Value(httpEntryContextKey{}) == true {
+			jwtAPI.ServeHTTP(w, r)
+		} else {
+			devAPI.ServeHTTP(w, r)
+		}
+	})
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
+	if s.httpAuth != nil {
+		return s.httpAuth.wrap(root)
+	}
 	return root
 }
 
 // --- handlers ---
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true, "service": "artex", "version": BuildVersion})
+	writeJSON(w, 200, map[string]any{"ok": true, "service": "series", "version": BuildVersion})
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
@@ -2274,7 +2295,7 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stage, err := os.MkdirTemp("", "artex-finding-export-")
+	stage, err := os.MkdirTemp("", "series-finding-export-")
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -3995,7 +4016,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Series-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(204)
 			return

@@ -49,10 +49,10 @@ tsx --test src/lib/mock/activity-search.test.ts src/lib/mock/asset-origins.test.
 
 ### 本机截图与日志
 
-- [搜索命中工具结果](/tmp/artex-search-check/search.png)
-- [资产来源展开与高亮](/tmp/artex-search-check/source.png)
-- [长代码块段落定位](/tmp/artex-search-check/long-code.png)
-- [动作审批来源兼容](/tmp/artex-search-check/action-approval.png)
+- 搜索命中工具结果（旧品牌截图已移除）
+- 资产来源展开与高亮（旧品牌截图已移除）
+- 长代码块段落定位（旧品牌截图已移除）
+- 动作审批来源兼容（旧品牌截图已移除）
 - 测试脚本及原始日志：`/tmp/artex-search-check/`。
 
 重新构建前后端并重启后端后部署生效。本次仅启动并关闭独立测试服务，保留原有 3000 端口的 Mock 服务。

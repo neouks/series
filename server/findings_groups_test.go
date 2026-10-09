@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 func TestFindingPaginationParam(t *testing.T) {

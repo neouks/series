@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 	"net/http/httptest"
 	"net/url"
 	"strings"

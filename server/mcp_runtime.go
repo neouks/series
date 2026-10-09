@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/db"
 )
 
 // Cache metadata only: clients, credentials and task-bound tool closures are never

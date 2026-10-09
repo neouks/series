@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 func TestDigestAuthorizationAcrossTasks(t *testing.T) {

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { HTTPEntryAuthError } from "@/lib/http-auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,7 +33,7 @@ export default function LoginPage() {
       .then(({ initialized }) => {
         if (!initialized) router.replace("/setup");
       })
-      .catch(() => setError("无法连接到后端服务"))
+      .catch((err) => setError(err instanceof HTTPEntryAuthError ? err.message : "无法连接到后端服务"))
       .finally(() => setChecking(false));
   }, [router]);
 
@@ -41,11 +42,11 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const { token } = await api.login("ARTEX", password);
+      const { token } = await api.login("SERIES", password);
       auth.setToken(token);
       window.location.replace("/function/tasks");
-    } catch {
-      setError("用户名或密码错误");
+    } catch (err) {
+      setError(err instanceof HTTPEntryAuthError ? err.message : "用户名或密码错误");
     } finally {
       setLoading(false);
     }
@@ -68,7 +69,7 @@ export default function LoginPage() {
           <div className="absolute size-60 rounded-full border border-primary-foreground/15" />
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="ARTEX" width={160} height={160} className="relative brightness-0 invert" />
+          <img src="/logo.png" alt="SERIES" width={160} height={160} className="relative brightness-0 invert" />
         </div>
       </div>
 
@@ -77,12 +78,12 @@ export default function LoginPage() {
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
             <h2 className="text-2xl font-medium tracking-tight">登录</h2>
-            <p className="mx-auto max-w-xl text-muted-foreground">欢迎回来，请输入密码以继续使用 ARTEX</p>
+            <p className="mx-auto max-w-xl text-muted-foreground">欢迎回来，请输入密码以继续使用 SERIES</p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="username">用户名</Label>
-              <Input id="username" value="ARTEX" readOnly className="bg-muted text-muted-foreground" />
+              <Input id="username" value="SERIES" readOnly className="bg-muted text-muted-foreground" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">密码</Label>

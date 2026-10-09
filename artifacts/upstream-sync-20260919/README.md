@@ -1,6 +1,6 @@
 # 官方提交同步清单（2026-09-19）
 
-官方仓库：[Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX/commits/main/)。本地基线 `e2653bb`，同步分支 `codex/upstream-sync-20260919`，备份 `codex/backup-before-sync-20260919`。
+官方仓库：[neouks/series](https://github.com/neouks/series/commits/main/)。本地基线 `e2653bb`，同步分支 `codex/upstream-sync-20260919`，备份 `codex/backup-before-sync-20260919`。
 
 工作区开始时干净。隔离工作区整合及验证后，将 main 快进到同步结果；不推送、不重写历史。仅整合下面指定提交及节点搜索所需的播报板基础依赖，不整体合并 upstream/main。
 
@@ -36,10 +36,10 @@
 
 ## 验证
 
-独立 PostgreSQL 17 容器 `artex-sync-20260919`，仅绑定 `127.0.0.1:55449`；数据库为 sync_db / sync_agent / sync_server / sync_browser，未使用业务数据库。以下全部通过：
+独立 PostgreSQL 17 容器 `series-sync-20260919`，仅绑定 `127.0.0.1:55449`；数据库为 sync_db / sync_agent / sync_server / sync_browser，未使用业务数据库。以下全部通过：
 
 ```sh
-# 分别设置 ARTEX_PG_DSN 到上述对应测试库；GOSUMDB=sum.golang.org
+# 分别设置 SERIES_PG_DSN 到上述对应测试库；GOSUMDB=sum.golang.org
 go test ./db -count=1       # 31.301s
 go test ./agent -count=1    # 13.299s
 go test ./server -count=1   # 修正测试隔离后 26.076s
@@ -59,6 +59,6 @@ git diff --check
 - `source-browser.log`：资产来源与动作审批来源详情失败后居中并可重试。
 - `local-browser.log`：主 Agent 多分段、Planner、Worker、继承来源任务、快速切换、未知来源不误定位、迟到结果保留滚动位置、返回最新、两类审批兼容；测试原始审计记录前后聚合校验一致。
 - `web-tests.log`：包括本地资产来源、漏洞删除、Worker 取消/队列、审批来源及流量 mock 回归。
-- 截图：broadcast.png、approval-filter.png、mention.png。
+- 截图：（旧品牌截图已移除）、（旧品牌截图已移除）、（旧品牌截图已移除）。
 
 未执行真实 LLM 扫描，也未把所有官方删除行为宣称为已引入；冲突保留项如上表所列。

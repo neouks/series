@@ -35,4 +35,4 @@ Agent 输入 `www_host`、变量占位符或非法 URL 时，错误项在写入�
 
 - Go：`db/asset_templates_test.go`、`server/asset_templates_test.go` 及原有资产授权、Worker 取消、归档测试。
 - 前端 Mock：在 `web` 下运行 `npx tsx --test src/lib/mock/asset-approval-templates.test.ts`。
-- 数据库测试必须使用独立 `ARTEX_PG_DSN`，不得指向业务库。
+- 数据库测试必须使用独立 `SERIES_PG_DSN`，不得指向业务库。

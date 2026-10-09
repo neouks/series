@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/Autumn-27/artex/db"
+import "github.com/neouks/series/db"
 
 func (t *ToolSet) validateResultAssets(ids []int64) error {
 	if t.mainExecution {

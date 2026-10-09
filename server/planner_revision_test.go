@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/Autumn-27/artex/agent"
+	"github.com/neouks/series/agent"
 )
 
 func TestTaskPendingTriggers(t *testing.T) {

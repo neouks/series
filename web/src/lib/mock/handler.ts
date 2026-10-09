@@ -3241,6 +3241,16 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/traffic/hosts") return mockTraffic.hosts();
   if (path === "/traffic") return mockTraffic.page(q);
   if (path === "/traffic/exchange") return D.trafficDetail;
+  if (path === "/settings/http-auth" && m === "GET") return { ...httpEntrySettings };
+  if (path === "/settings/http-auth" && m === "PUT") {
+    const username = typeof b.username === "string" ? b.username.trim() : "";
+    const password = typeof b.password === "string" ? b.password : "";
+    if (typeof b.enabled !== "boolean" || !username || username.includes(":") || new TextEncoder().encode(username).length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(username)) throw new Error("验证用户名格式错误");
+    if (password && ([...password].length < 8 || new TextEncoder().encode(password).length > 72 || /[\u0000-\u001f\u007f-\u009f]/u.test(password))) throw new Error("验证密码至少 8 个字符、最多 72 字节，且不能包含控制字符");
+    if (b.enabled && !password && !httpEntrySettings.password_set) throw new Error("首次启用访问验证需要设置验证密码");
+    httpEntrySettings = { enabled: b.enabled, username, password_set: httpEntrySettings.password_set || !!password };
+    return { ...httpEntrySettings };
+  }
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") {
     Object.assign(D.settings, b);
@@ -3688,3 +3698,5 @@ export const mockFindingDeletionFeedback: {
   reason: string;
   deleted_at: string;
 }[] = [];
+
+let httpEntrySettings = { enabled: false, username: "entry", password_set: false };

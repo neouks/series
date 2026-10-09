@@ -7,14 +7,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
 )
 
 func TestWorkerProxyPendingAndManualLimits(t *testing.T) {
-	dsn := os.Getenv("ARTEX_PG_DSN")
+	dsn := os.Getenv("SERIES_PG_DSN")
 	if dsn == "" {
-		t.Skip("requires explicit isolated ARTEX_PG_DSN")
+		t.Skip("requires explicit isolated SERIES_PG_DSN")
 	}
 	d, err := db.Open(dsn)
 	if err != nil {

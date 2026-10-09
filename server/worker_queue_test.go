@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/Autumn-27/artex/agent"
+	"github.com/neouks/series/agent"
 	"net/http/httptest"
 	"os"
 	"path/filepath"

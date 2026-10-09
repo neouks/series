@@ -7,10 +7,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noa"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/llmrec"
 )
 
 type compressTestHooks struct {
@@ -42,9 +42,9 @@ func TestCompressSkipsAssetInspectionButPreservesHooks(t *testing.T) {
 }
 
 func TestCompressAssetPolicyIsolation(t *testing.T) {
-	dsn := os.Getenv("ARTEX_PG_DSN")
+	dsn := os.Getenv("SERIES_PG_DSN")
 	if dsn == "" {
-		t.Skip("requires explicit isolated ARTEX_PG_DSN")
+		t.Skip("requires explicit isolated SERIES_PG_DSN")
 	}
 	d, err := db.Open(dsn)
 	if err != nil {

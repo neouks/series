@@ -1,5 +1,6 @@
 "use client";
 
+import { HTTPAuthCard } from "./_components/http-auth-card";
 import * as React from "react";
 
 import {
@@ -323,6 +324,7 @@ export default function SystemSettingsPage() {
           column-gap 只管列间距，行间距要由子元素自己给。 */}
       <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
         <UpdateCard />
+        <HTTPAuthCard />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>

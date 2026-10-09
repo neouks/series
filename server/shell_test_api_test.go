@@ -71,7 +71,7 @@ func TestShellTestRunAndCancellation(t *testing.T) {
 		contains string
 	}{
 		{testToolReq{Action: "check", Executable: "sh"}, false, "sh"},
-		{testToolReq{Action: "check", Executable: "artex_missing_tool_123"}, true, "未找到"},
+		{testToolReq{Action: "check", Executable: "series_missing_tool_123"}, true, "未找到"},
 		{testToolReq{Action: "run", Command: "printf hello"}, false, "hello"},
 		{testToolReq{Action: "run", Command: "printf failed >&2; exit 1"}, true, "failed"},
 	} {

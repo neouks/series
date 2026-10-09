@@ -1,3 +1,4 @@
+import { entryAwareFetch } from "@/lib/http-auth";
 // Real backend client. /api/* is proxied to the Go backend (next.config rewrites).
 // Returns the domain types in lib/types.ts. Shapes match the backend handlers;
 // a few fields the backend serializes differently (e.g. created_at as a unix int)
@@ -79,6 +80,7 @@ import type {
   PromptVersion,
   SessionTokenUsage,
   Settings,
+  HTTPAuthSettings,
   Severity,
   SkillCall,
   SkillItem,
@@ -116,24 +118,24 @@ import type {
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("artex_token");
+  return localStorage.getItem("series_token");
 }
 
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
   const token = getToken();
-  const r = await fetch(`/api${path}`, {
+  const r = await entryAwareFetch(`/api${path}`, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token ? { "X-Series-Token": token } : {}),
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
   if (r.status === 401) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("artex_token");
-      document.cookie = "artex_token=; path=/; max-age=0";
+      localStorage.removeItem("series_token");
+      document.cookie = "series_token=; path=/; max-age=0";
       window.location.href = "/login";
     }
     throw new Error("未授权");
@@ -441,9 +443,9 @@ export const api = {
     const fd = new FormData();
     for (const f of files) fd.append("file", f);
     const token = getToken();
-    const r = await fetch(`/api/workspace/upload?path=${encodeURIComponent(dir)}`, {
+    const r = await entryAwareFetch(`/api/workspace/upload?path=${encodeURIComponent(dir)}`, {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { ...(token ? { "X-Series-Token": token } : {}) },
       body: fd,
     });
     if (!r.ok) throw new Error(`上传失败: ${r.status}`);
@@ -455,8 +457,8 @@ export const api = {
       blob = new Blob([`（demo）${path} 的下载内容示例。`], { type: "text/plain" });
     } else {
       const token = getToken();
-      const r = await fetch(`/api/workspace/download?path=${encodeURIComponent(path)}`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      const r = await entryAwareFetch(`/api/workspace/download?path=${encodeURIComponent(path)}`, {
+        headers: { ...(token ? { "X-Series-Token": token } : {}) },
       });
       if (!r.ok) throw new Error(`下载失败: ${r.status}`);
       blob = await r.blob();
@@ -616,8 +618,8 @@ export const api = {
       filename = payload.filename;
     } else {
       const token = getToken();
-      const r = await fetch(`/api/exploration/findings/export?${p.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const r = await entryAwareFetch(`/api/exploration/findings/export?${p.toString()}`, {
+        headers: token ? { "X-Series-Token": token } : {},
       });
       if (!r.ok) throw new Error(`export: ${r.status}`);
       blob = await r.blob();
@@ -697,9 +699,9 @@ export const api = {
       blob = new Blob([preview.content], { type: "application/octet-stream" });
     } else {
       const token = getToken();
-      const response = await fetch(
+      const response = await entryAwareFetch(
         `/api/exploration/findings/${id}/traffic/${bindingId}/body?side=${side}&download=1${contextTask ? `&context_task=${encodeURIComponent(contextTask)}` : ""}`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+        { headers: token ? { "X-Series-Token": token } : {} },
       );
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: "下载失败" }));
@@ -889,6 +891,9 @@ export const api = {
   // index handed back to the filesystem. Evidence bound to findings is kept.
   trafficDeleteAll: () => del<{ deleted: number; reclaimed: number }>(`/traffic/all`),
 
+  httpAuthSettings: () => get<HTTPAuthSettings>("/settings/http-auth"),
+  saveHTTPAuthSettings: (value: { enabled: boolean; username: string; password: string }) => put<HTTPAuthSettings>("/settings/http-auth", value),
+
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),
   setSettings: (patch: Partial<Settings>) => put<Settings>(`/settings`, patch),
@@ -922,9 +927,9 @@ export const api = {
     const fd = new FormData();
     for (const f of files) fd.append("file", f);
     const token = getToken();
-    const r = await fetch(`/api/chat/upload?scope=${scope}&id=${encodeURIComponent(id)}`, {
+    const r = await entryAwareFetch(`/api/chat/upload?scope=${scope}&id=${encodeURIComponent(id)}`, {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { ...(token ? { "X-Series-Token": token } : {}) },
       body: fd,
     });
     if (!r.ok) throw new Error(`上传失败: ${r.status} ${await r.text()}`);
@@ -1223,10 +1228,10 @@ export const api = {
     const fd = new FormData();
     fd.append("file", file);
     const token = getToken();
-    const r = await fetch(`/api/skills/upload${overwrite ? "?overwrite=true" : ""}`, {
+    const r = await entryAwareFetch(`/api/skills/upload${overwrite ? "?overwrite=true" : ""}`, {
       method: "POST",
       body: fd,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: token ? { "X-Series-Token": token } : {},
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body?.error || `上传失败(${r.status})`);
@@ -1311,8 +1316,8 @@ export const api = {
   interceptGetToolConfig: async (): Promise<{ enabled_tools: string[] }> => {
     if (MOCK) return { enabled_tools: ["bash"] };
     const token = getToken();
-    const r = await fetch("/api/intercept/tool-config", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    const r = await entryAwareFetch("/api/intercept/tool-config", {
+      headers: token ? { "X-Series-Token": token } : {},
     });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
@@ -1320,11 +1325,11 @@ export const api = {
   interceptSetToolConfig: async (enabledTools: string[]): Promise<void> => {
     if (MOCK) return;
     const token = getToken();
-    const r = await fetch("/api/intercept/tool-config", {
+    const r = await entryAwareFetch("/api/intercept/tool-config", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(token ? { "X-Series-Token": token } : {}),
       },
       body: JSON.stringify({ enabled_tools: enabledTools }),
     });

@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/llmrec"
 )
 
 // Compactor performs background cold-node compaction for many explorations.

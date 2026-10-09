@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Autumn-27/artex/agent"
+	"github.com/neouks/series/agent"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/sidequestion"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/sidequestion"
 )
 
 func (s *Server) workerQueue(w http.ResponseWriter, r *http.Request) {

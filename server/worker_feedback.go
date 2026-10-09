@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 // The database commits feedback with the Worker state change. This bounded

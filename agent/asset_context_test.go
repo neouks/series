@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
 )
 
 func TestPendingDiscoveryIsNotReturnedOrScheduled(t *testing.T) {

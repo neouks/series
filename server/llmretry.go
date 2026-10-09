@@ -3,8 +3,8 @@ package server
 import (
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/agent"
+	"github.com/neouks/series/db"
 )
 
 // 重试策略的服务端解析，见 docs/LLM重试设计.md。五层里：

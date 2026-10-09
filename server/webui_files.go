@@ -19,7 +19,12 @@ func serveFileIfExists(w http.ResponseWriter, r *http.Request, fsys fs.FS, name 
 		return false
 	}
 	if strings.HasPrefix(name, "_next/static/") {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		visibility := "public"
+		if r.Context().Value(httpEntryContextKey{}) == true {
+			// Shared caches must not serve a protected asset to anonymous clients.
+			visibility = "private"
+		}
+		w.Header().Set("Cache-Control", visibility+", max-age=31536000, immutable")
 	} else {
 		w.Header().Set("Cache-Control", "no-cache")
 	}

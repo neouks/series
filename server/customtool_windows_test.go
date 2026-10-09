@@ -14,7 +14,7 @@ import (
 )
 
 func TestCustomCommandQuotingWindows(t *testing.T) {
-	if os.Getenv("ARTEX_QUOTE_HELPER") == "1" {
+	if os.Getenv("SERIES_QUOTE_HELPER") == "1" {
 		for i, arg := range os.Args {
 			if arg == "--" {
 				_ = json.NewEncoder(os.Stdout).Encode(os.Args[i+1:])
@@ -51,7 +51,7 @@ func TestCustomCommandQuotingWindows(t *testing.T) {
 						profile.Args = cmdDelayedExpansionArgs(profile.Args)
 					}
 					cmd := exec.Command(profile.ShellPath, append(profile.Args, command)...)
-					cmd.Env = append(os.Environ(), "ARTEX_QUOTE_HELPER=1")
+					cmd.Env = append(os.Environ(), "SERIES_QUOTE_HELPER=1")
 					cmd.Env = append(cmd.Env, paramEnv...)
 					out, err := cmd.CombinedOutput()
 					if err != nil {

@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/agent"
+	"github.com/neouks/series/db"
 )
 
 func TestWorkerTraceBindingsMigration(t *testing.T) {

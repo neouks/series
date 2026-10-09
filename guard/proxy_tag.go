@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const taskProxyUserPrefix = "artex-task-"
+const taskProxyUserPrefix = "series-task-"
 
 var taskProxySecret = func() []byte {
 	secret := make([]byte, 32)
@@ -46,7 +46,7 @@ func TaskProxyCredentials(taskID int64, scopes ...string) (username, password st
 	return taskProxyUserPrefix + taskProxyIdentity(taskID, scopes...), taskProxySignature(taskID, scopes...), true
 }
 
-// ParseTaskProxyAuthorization extracts and verifies ARTEX's signed task tag.
+// ParseTaskProxyAuthorization extracts and verifies SERIES's signed task tag.
 // Ordinary proxy credentials are deliberately reported as untagged.
 func ParseTaskProxyAuthorization(header string) (taskID int64, tagged bool, err error) {
 	taskID, _, tagged, err = ParseTaskProxyScope(header)

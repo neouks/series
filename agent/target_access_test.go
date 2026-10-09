@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
 )
 
 func TestTargetAccessInputAndHistory(t *testing.T) {

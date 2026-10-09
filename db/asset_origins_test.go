@@ -3,8 +3,48 @@ package db
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
+
+func TestAssetOriginStartupRefreshesTransactionNamespace(t *testing.T) {
+	dsn := testDSN(t)
+	d, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	const definition = `SELECT pg_get_functiondef('sync_task_asset_links()'::regprocedure)`
+	var current string
+	if err := d.QueryRow(definition).Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(current, "series.asset_origin") {
+		t.Fatal("current origin transaction namespace missing")
+	}
+	// Simulate an existing installation's older trigger definition. Opening the
+	// database must replace it, without rebuilding tables or rewriting messages.
+	if _, err := d.Exec(strings.ReplaceAll(current, "series.", "previous_project.")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := d.Exec(current); err != nil {
+			t.Errorf("restore trigger: %v", err)
+		}
+	})
+	updated, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer updated.Close()
+	var got string
+	if err := updated.QueryRow(definition).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "previous_project.") || !strings.Contains(got, "series.asset_origin") {
+		t.Fatal("startup did not refresh the transaction namespace")
+	}
+}
 
 func TestAssetOriginRegistration(t *testing.T) {
 	d, err := Open(testDSN(t))

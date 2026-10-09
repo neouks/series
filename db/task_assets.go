@@ -881,7 +881,7 @@ func (s *AssetStore) RegisterTaskAssetScopes(taskID int64, inputs []ScopeInput) 
 	}
 
 	scoped := &AssetStore{db: s.db, company: s.company, tx: tx}
-	if _, err := tx.Exec(`SELECT set_config('artex.user_asset_registration','on',true)`); err != nil {
+	if _, err := tx.Exec(`SELECT set_config('series.user_asset_registration','on',true)`); err != nil {
 		return mutation, err
 	}
 	for _, rule := range parsed {

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Autumn-27/artex/agent"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/agent"
 )
 
 func TestTaskWrapperSchemaMatchesLocalTool(t *testing.T) {

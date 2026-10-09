@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/Autumn-27/artex/db"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/db"
 )
 
 func decodeTaskAssetViewQuery(raw json.RawMessage) (db.TaskAssetViewQuery, error) {

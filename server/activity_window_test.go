@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 func TestActivityHistoryAnchorScope(t *testing.T) {

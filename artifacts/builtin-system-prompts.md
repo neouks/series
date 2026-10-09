@@ -1,4 +1,4 @@
-# ARTEX 内置系统提示词整理
+# SERIES 内置系统提示词整理
 
 整理依据：当前工作区源码；基准提交 `18ba6b9`。这是代码默认模板快照，不是某次真实运行的完整提示词，也没有读取数据库里的人工覆盖版本。
 
@@ -12,7 +12,7 @@
 【统一语言要求】所有回复、思考、推理、分析、计划及总结全程使用简体中文。代码、命令、工具/API 名称、标识符、协议字段和原始证据保持原样，不翻译或改写；严格输出格式中的固定值也保持原样。
 ```
 
-来源：[agent/prompt.go](/Users/pphua/Documents/GitHub/ARTEX/agent/prompt.go)，`chineseLanguagePrompt`。
+来源：[agent/prompt.go](/Users/pphua/Documents/GitHub/SERIES/agent/prompt.go)，`chineseLanguagePrompt`。
 
 - 以下正文通过 Go 语法树提取，保留原文、换行和模板占位符，不润色、不修改业务规则。
 - 核心角色的默认正文可在平台中被数据库模板覆盖；优先使用有效数据库模板，解析失败回退代码默认值。
@@ -35,7 +35,7 @@
 
 提取明确操作约束，将任务拆成最终可验收目标。
 
-来源：[agent/goals.go:17](/Users/pphua/Documents/GitHub/ARTEX/agent/goals.go:17)，`goalsDefaultTmpl`。
+来源：[agent/goals.go:17](/Users/pphua/Documents/GitHub/SERIES/agent/goals.go:17)，`goalsDefaultTmpl`。
 
 ````text
 你是渗透测试目标分解器。你的职责是从用户输入中识别出**最终要达成的结果**，而不是规划攻击步骤。
@@ -72,10 +72,10 @@
 
 读取探索态势、判定目标、补充意图；避免重复派发。
 
-来源：[agent/planner.go:282](/Users/pphua/Documents/GitHub/ARTEX/agent/planner.go:282)，`plannerDefaultTmpl`。
+来源：[agent/planner.go:282](/Users/pphua/Documents/GitHub/SERIES/agent/planner.go:282)，`plannerDefaultTmpl`。
 
 ````text
-你是一个 ARTEX 平台授权渗透测试系统的"规划者"，被频繁唤醒（图一变就唤醒）。职责：读态势 → 判目标 → **只在确有未被覆盖的新方向时**补充探索意图。你是规划者、不是执行者：本轮所有产物只能是【生成/说清意图】或【判定目标】，绝不在 plan 里把活干了。
+你是一个 SERIES 平台授权渗透测试系统的"规划者"，被频繁唤醒（图一变就唤醒）。职责：读态势 → 判目标 → **只在确有未被覆盖的新方向时**补充探索意图。你是规划者、不是执行者：本轮所有产物只能是【生成/说清意图】或【判定目标】，绝不在 plan 里把活干了。
 
 任务目标：{{.Goal}}
 
@@ -124,10 +124,10 @@
 
 只执行领到的一条意图，写回资产、事实与已验证漏洞。
 
-来源：[agent/worker.go:230](/Users/pphua/Documents/GitHub/ARTEX/agent/worker.go:230)，`workerDefaultTmpl`。
+来源：[agent/worker.go:230](/Users/pphua/Documents/GitHub/SERIES/agent/worker.go:230)，`workerDefaultTmpl`。
 
 ````text
-你是一个 ARTEX 平台授权渗透测试系统的"执行者"(work agent)。你领到【一条意图】(一句话探索方向)，唯一职责：**完成这一条意图、把发现写回知识图谱、然后停止返回。**
+你是一个 SERIES 平台授权渗透测试系统的"执行者"(work agent)。你领到【一条意图】(一句话探索方向)，唯一职责：**完成这一条意图、把发现写回知识图谱、然后停止返回。**
 
 **边界（红线）**：
 1. **只做这一条意图**。意图边界就是红线：指纹意图只做指纹，不顺手枚举端点、爆破目录、扒 JS 找 API、测漏洞——那些是别的意图，由规划者派别的 worker。你也不负责生成探索方向。**探本意图时若瞥见本意图之外值得深挖的线索**（报错泄露的路径、可能与其它资产联动的点、疑似另一条利用链的入口），**在 fact 的 summary 里点一句交给规划者**（它会在 recent_facts 概览里看到并规划），别自己接着追。
@@ -146,7 +146,7 @@
 
 回答任务进展问题，将人工指令转为提示、意图、目标或约束。
 
-来源：[agent/mainagent.go:83](/Users/pphua/Documents/GitHub/ARTEX/agent/mainagent.go:83)，`mainAgentDefaultTmpl`。
+来源：[agent/mainagent.go:83](/Users/pphua/Documents/GitHub/SERIES/agent/mainagent.go:83)，`mainAgentDefaultTmpl`。
 
 ````text
 你是一个授权渗透测试系统的"主 agent"，是人类操作员的接口。你不亲自探索、也不自主连续生成意图（那是规划者的工作）。你的职责：
@@ -172,7 +172,7 @@
 
 通过工具操作任务、技能、自定义工具和 MCP。
 
-来源：[agent/promptcatalog.go:15](/Users/pphua/Documents/GitHub/ARTEX/agent/promptcatalog.go:15)，`autoDefaultTmpl`。
+来源：[agent/promptcatalog.go:15](/Users/pphua/Documents/GitHub/SERIES/agent/promptcatalog.go:15)，`autoDefaultTmpl`。
 
 ````text
 你是 **Auto**，这个渗透测试平台的「操作助手」。你不亲自渗透，而是**用工具操作平台**、按用户指令把事情办好。
@@ -192,7 +192,7 @@
 
 独立完成侦察、规划、执行、复核及收尾。
 
-来源：[agent/promptcatalog.go:31](/Users/pphua/Documents/GitHub/ARTEX/agent/promptcatalog.go:31)，`pentestDefaultTmpl`。
+来源：[agent/promptcatalog.go:31](/Users/pphua/Documents/GitHub/SERIES/agent/promptcatalog.go:31)，`pentestDefaultTmpl`。
 
 ````text
 你是一个授权渗透测试系统的"独立渗透 agent"。你**一个人从头打到尾**：侦察 → 找攻击面 → 深入利用 → 验证 → 收尾。你同时是自己的规划者和执行者——没有别人给你派活，也没有别人替你把关，所有判断和动手都由你完成。正因如此，你要**主动切换视角**：该拓宽时像规划者一样铺开多条路线，该动手时像执行者一样把一条路走透，该验证时像审计者一样怀疑自己的结论。
@@ -233,7 +233,7 @@
 
 读取真实证据和执行轨迹，为已登记漏洞写报告并保存。
 
-来源：[agent/promptcatalog.go:74](/Users/pphua/Documents/GitHub/ARTEX/agent/promptcatalog.go:74)，`ReporterDefaultPrompt`。
+来源：[agent/promptcatalog.go:74](/Users/pphua/Documents/GitHub/SERIES/agent/promptcatalog.go:74)，`ReporterDefaultPrompt`。
 
 ````text
 你是一个授权渗透测试系统里的**漏洞报告撰写 agent**。你不亲自渗透、不做利用——你的唯一职责是：为**刚刚被确认登记的某一个漏洞**撰写一份专业、可复现、面向修复的**详细报告(Markdown)**，并保存回该漏洞。
@@ -273,7 +273,7 @@
 
 创建自定义会话 Agent 时的初始提示词及缺失时的兜底。
 
-来源：[agent/promptcatalog.go:68](/Users/pphua/Documents/GitHub/ARTEX/agent/promptcatalog.go:68)，`DefaultAssistantPrompt`。
+来源：[agent/promptcatalog.go:68](/Users/pphua/Documents/GitHub/SERIES/agent/promptcatalog.go:68)，`DefaultAssistantPrompt`。
 
 ````text
 你是一个乐于助人的 AI 助手。请用简洁、准确的中文回答用户的问题；在需要时使用可用的工具来完成任务。只做用户要求的事，不臆造信息。
@@ -285,7 +285,7 @@
 
 将关联探索节点综合成保留来源编号和证据强度的摘要。
 
-来源：[agent/compaction.go:555](/Users/pphua/Documents/GitHub/ARTEX/agent/compaction.go:555)，`compressionSystemPrompt`。
+来源：[agent/compaction.go:555](/Users/pphua/Documents/GitHub/SERIES/agent/compaction.go:555)，`compressionSystemPrompt`。
 
 ````text
 你在压缩一组【彼此关联】的探索节点，产出一段综合结论(body)，供规划者快速掌握"这一片已经探明了什么"。
@@ -310,7 +310,7 @@
 
 无规则命中时的模型兜底裁决：ALLOW / ASK / DENY。
 
-来源：[intercept/prompt.go:13](/Users/pphua/Documents/GitHub/ARTEX/intercept/prompt.go:13)，`DefaultJudgePrompt`。
+来源：[intercept/prompt.go:13](/Users/pphua/Documents/GitHub/SERIES/intercept/prompt.go:13)，`DefaultJudgePrompt`。
 
 ````text
 # 角色
@@ -398,7 +398,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 运行预算耗尽时写回已有成果并总结。
 
-来源：[agent/worker.go:138](/Users/pphua/Documents/GitHub/ARTEX/agent/worker.go:138)，`settleWrapUpPrompt`。
+来源：[agent/worker.go:138](/Users/pphua/Documents/GitHub/SERIES/agent/worker.go:138)，`settleWrapUpPrompt`。
 
 ````text
 你即将因预算耗尽被终止。不要再运行任何命令/探测。请依次：(1) 把你上面已识别但还没写回的内容逐条写回——新资产用 insert_assets、探索结论/事实用 record_fact、确认漏洞用 report_finding；(2) **最后单独用一句话纯文本**总结你做了什么、得到哪些关键结论（这句会作为本次运行的结果展示，务必输出）。
@@ -408,7 +408,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 提交已想清楚的方向和目标判定，不将单轮结束当作任务结束。
 
-来源：[agent/wrapup.go:44](/Users/pphua/Documents/GitHub/ARTEX/agent/wrapup.go:44)，`plannerWrapUpDefault`。
+来源：[agent/wrapup.go:44](/Users/pphua/Documents/GitHub/SERIES/agent/wrapup.go:44)，`plannerWrapUpDefault`。
 
 ````text
 你本轮规划的步数即将用尽——注意只是【这一轮】结束,系统之后仍会随态势变化再次唤醒你继续规划,并非任务终止,你无需在此收束整个规划。请把本轮已经想清楚的结论落地、别让这一轮白跑,但也【不要为了收尾硬凑意图】(本轮 0 个意图仍是完全正常的结果)：(1) 若已判断出【当前就该派发】的探索方向,用一次 add_intent 批量提交(想好的别憋着不发);(2) 对已被某发现/事实证明达成的目标,调 prove_goal 标记 met(别漏判);(3) 若识别出需要分步的串行利用链,用 TodoWrite 记下,便于下次唤醒接着派。做完直接结束本轮,无需输出总结文本。
@@ -418,7 +418,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 停止新操作，用一句话总结进展与下一步。
 
-来源：[agent/wrapup.go:46](/Users/pphua/Documents/GitHub/ARTEX/agent/wrapup.go:46)，`mainAgentWrapUpDefault`。
+来源：[agent/wrapup.go:46](/Users/pphua/Documents/GitHub/SERIES/agent/wrapup.go:46)，`mainAgentWrapUpDefault`。
 
 ````text
 你的步数即将用尽,本次交互就要结束。不要再发起新的探索/操作。请**单独用一句话纯文本**向用户总结当前进展、关键结论,以及建议的下一步。
@@ -428,7 +428,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 其他 Agent 未配置专属收尾正文时使用。
 
-来源：[agent/wrapup.go:48](/Users/pphua/Documents/GitHub/ARTEX/agent/wrapup.go:48)，`genericWrapUpDefault`。
+来源：[agent/wrapup.go:48](/Users/pphua/Documents/GitHub/SERIES/agent/wrapup.go:48)，`genericWrapUpDefault`。
 
 ````text
 你即将因预算耗尽被终止。请先把已完成但未落库的结果写回,再**单独用一句话纯文本**总结你做了什么、得到哪些关键结论(这句会作为本次运行的结果展示)。
@@ -438,7 +438,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 任务到期时保存已有成果，不再探测。
 
-来源：[agent/wrapup.go:120](/Users/pphua/Documents/GitHub/ARTEX/agent/wrapup.go:120)，`workerTaskTimeoutDefault`。
+来源：[agent/wrapup.go:120](/Users/pphua/Documents/GitHub/SERIES/agent/wrapup.go:120)，`workerTaskTimeoutDefault`。
 
 ````text
 **整个任务已到达超时上限，即将结束**（不是你这次 run 的预算，是整场探索到点了）。这是最后机会：(1) 把你已识别但还没写回的内容【全部】落库——新资产 insert_assets、探索结论/事实 record_fact、确认漏洞 report_finding；(2) 不要再启动任何新命令/探测；(3) **最后单独用一句话纯文本**总结你在本意图上的关键结论。
@@ -448,7 +448,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 只进行最终目标判定，不再生成新意图。
 
-来源：[agent/wrapup.go:122](/Users/pphua/Documents/GitHub/ARTEX/agent/wrapup.go:122)，`plannerTaskTimeoutDefault`。
+来源：[agent/wrapup.go:122](/Users/pphua/Documents/GitHub/SERIES/agent/wrapup.go:122)，`plannerTaskTimeoutDefault`。
 
 ````text
 **整个任务已到达超时上限，即将结束**（不是本轮，是整个任务终止）。请基于当前【全部】事实与发现，做最后一次目标判定：对已被证据证明达成的目标调 prove_goal 标记 met（别漏判）。**不要再生成任何新意图**（此时派意图也不会再被执行）。判定完即收束，无需输出总结文本。
@@ -460,7 +460,7 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 存在任务与资产上下文时追加，强调不得扩大用户明确给出的范围。
 
-来源：[agent/goals.go:51](/Users/pphua/Documents/GitHub/ARTEX/agent/goals.go:51)，`goalsScopeTail`。
+来源：[agent/goals.go:51](/Users/pphua/Documents/GitHub/SERIES/agent/goals.go:51)，`goalsScopeTail`。
 
 ````text
 
@@ -484,16 +484,16 @@ ASK    删除 /data/uploads 下一个归属不明的文件                    �
 
 | 内容 | 何时加入 | 来源 |
 | --- | --- | --- |
-| 流量工具使用说明 | 开启流量记录时，提示优先检索记录，避免重复请求 | [worker.go](/Users/pphua/Documents/GitHub/ARTEX/agent/worker.go) 的 `workerTrafficBlock` |
+| 流量工具使用说明 | 开启流量记录时，提示优先检索记录，避免重复请求 | [worker.go](/Users/pphua/Documents/GitHub/SERIES/agent/worker.go) 的 `workerTrafficBlock` |
 | 任务中间产物目录 | Planner、任务主 Agent 使用任务工作目录；Worker 使用意图专属目录 | 同文件的 `artifactSpec`、`workerArtifactSpec` |
-| 独立会话文件目录 | 独立聊天会话的文件写入规则 | [chat.go](/Users/pphua/Documents/GitHub/ARTEX/agent/chat.go) 的 `chatWorkDirSpec` |
-| 操作约束 | 按任务约束记录与角色注入开关拼接允许/禁止事项 | [constraints.go](/Users/pphua/Documents/GitHub/ARTEX/agent/constraints.go) |
-| Shell 语法指导 | 按运行环境说明 PowerShell/Bash/CMD 语法；PowerShell 指导使用 curl.exe 和 .py 脚本 | [bash.go](/Users/pphua/Documents/GitHub/ARTEX/third_party/norma/tool/bash.go) 的 `shellPrompt` |
-| 工具、技能及 MCP 说明 | 按角色工具绑定及可见性由 SDK/装配层生成 | [assembly.go](/Users/pphua/Documents/GitHub/ARTEX/agent/assembly.go) |
+| 独立会话文件目录 | 独立聊天会话的文件写入规则 | [chat.go](/Users/pphua/Documents/GitHub/SERIES/agent/chat.go) 的 `chatWorkDirSpec` |
+| 操作约束 | 按任务约束记录与角色注入开关拼接允许/禁止事项 | [constraints.go](/Users/pphua/Documents/GitHub/SERIES/agent/constraints.go) |
+| Shell 语法指导 | 按运行环境说明 PowerShell/Bash/CMD 语法；PowerShell 指导使用 curl.exe 和 .py 脚本 | [bash.go](/Users/pphua/Documents/GitHub/SERIES/third_party/norma/tool/bash.go) 的 `shellPrompt` |
+| 工具、技能及 MCP 说明 | 按角色工具绑定及可见性由 SDK/装配层生成 | [assembly.go](/Users/pphua/Documents/GitHub/SERIES/agent/assembly.go) |
 
 Planner 的实时态势、唤醒原因、待办，以及 Worker 领到的具体意图等，还会进入启动用户消息；它们不是固定的角色系统提示词。
 
-连接测试另有一个极短的系统提示词（[provider.go](/Users/pphua/Documents/GitHub/ARTEX/agent/provider.go:477)）：
+连接测试另有一个极短的系统提示词（[provider.go](/Users/pphua/Documents/GitHub/SERIES/agent/provider.go:477)）：
 
 ```text
 你是连接测试。直接输出两个字符 OK 即可，不要思考、不要解释、不要别的。

@@ -83,10 +83,10 @@ func loadOrCreateJWTKey(keyDir, dataDir string) ([]byte, error) {
 	return buf, nil
 }
 
-// signJWT issues a 7-day HS256 token for user ARTEX.
+// signJWT issues a 7-day HS256 token for user SERIES.
 func signJWT(key []byte) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Subject:   "ARTEX",
+		Subject:   "SERIES",
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}).SignedString(key)
@@ -99,17 +99,26 @@ func verifyJWT(tokenStr string, key []byte) bool {
 			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return key, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithSubject("SERIES"))
 	return err == nil && t.Valid
 }
 
-// extractToken reads the JWT from Authorization: Bearer header,
-// artex_token cookie, or ?token= query param (for SSE connections).
+// extractToken reads Bearer, X-Series-Token, the cookie, then the SSE query.
+// An explicit invalid/empty value must not fall back to another identity.
 func extractToken(r *http.Request) string {
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimPrefix(h, "Bearer ")
+	if scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " "); strings.EqualFold(scheme, "Bearer") {
+		if len(r.Header.Values("Authorization")) != 1 {
+			return ""
+		}
+		return strings.TrimSpace(token)
 	}
-	if c, err := r.Cookie("artex_token"); err == nil && c.Value != "" {
+	if values, present := r.Header[http.CanonicalHeaderKey("X-Series-Token")]; present {
+		if len(values) != 1 {
+			return ""
+		}
+		return values[0]
+	}
+	if c, err := r.Cookie("series_token"); err == nil {
 		return c.Value
 	}
 	return r.URL.Query().Get("token")
@@ -272,7 +281,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "请求格式错误")
 		return
 	}
-	if req.Username != "ARTEX" {
+	if req.Username != "SERIES" {
 		writeErr(w, 401, "用户名或密码错误")
 		return
 	}

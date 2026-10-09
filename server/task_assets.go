@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 const maxTaskAssetRequestBytes = 512 << 10
@@ -54,7 +54,7 @@ func writeTaskAssetError(w http.ResponseWriter, err error) {
 }
 
 func taskAssetActor(_ *http.Request) string {
-	return "ARTEX"
+	return "SERIES"
 }
 
 func (s *Server) listTaskAssetApprovals(w http.ResponseWriter, r *http.Request) {

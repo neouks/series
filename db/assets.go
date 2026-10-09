@@ -245,7 +245,7 @@ func (s *AssetStore) enableAgentDiscoveryMode() error {
 	if s.tx == nil {
 		return errors.New("agent discovery mode requires an asset transaction")
 	}
-	_, err := s.tx.Exec(`SELECT set_config('artex.agent_discovery', 'on', true)`)
+	_, err := s.tx.Exec(`SELECT set_config('series.agent_discovery', 'on', true)`)
 	return err
 }
 

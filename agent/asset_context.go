@@ -6,9 +6,9 @@ import (
 	"iter"
 	"net"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
 )
 
 func (t *ToolSet) authorizedScope(rows []db.TaskScope) []db.TaskScope {
@@ -247,7 +247,7 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 			if block.Type != llm.BlockToolResult {
 				continue
 			}
-			// Only ARTEX structured tools: arbitrary shell/HTTP JSON may use the
+			// Only SERIES structured tools: arbitrary shell/HTTP JSON may use the
 			// same field names for unrelated application data.
 			if !assetStructuredTool(toolNames[block.ToolUseID]) {
 				continue

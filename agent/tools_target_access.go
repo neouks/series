@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Autumn-27/artex/db"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/db"
 )
 
 const targetAccessRule = "当前结构化可见结果已复核授权，可直接使用；限制状态只适用于列出的 ID，未列出不代表已授权。已知不可用候选本轮跳过，继续已授权方向；未知 asset_ids/node_ids 用 check_target_access 一次批量预检，不逐项查询、不轮询审批、不删资产或替换父节点绕过。全部不可用则结束本轮，不凑意图。历史错误仅记录当时结果，资产和节点 access 元数据已刷新；审批变化后可重新考虑，执行时仍校验最新状态。"

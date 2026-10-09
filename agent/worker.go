@@ -12,9 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
-	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -22,6 +19,9 @@ import (
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
+	"github.com/neouks/series/intercept"
 )
 
 // ErrWorkerAssetAuthorization identifies a worker admission failure that must
@@ -106,17 +106,39 @@ func WorkerSessionID(explorationID, intentID int64) string {
 	return fmt.Sprintf("exp%d-worker-i%d", explorationID, intentID)
 }
 
-const workerChatMarkerPrefix = "<!-- ARTEX_WORKER_CHAT:"
+const workerChatMarkerPrefix = "<!-- SERIES_WORKER_CHAT:"
 
 func workerChatMarker(requestID string) string {
 	return workerChatMarkerPrefix + requestID + " -->"
 }
 
 func hasWorkerChatMessage(messages []llm.Message, requestID string) bool {
-	marker := workerChatMarker(requestID)
+	if requestID == "" {
+		return false
+	}
 	for _, message := range messages {
-		if message.Role == llm.RoleUser && strings.Contains(message.Text(), marker) {
-			return true
+		if message.Role != llm.RoleUser {
+			continue
+		}
+		// Branding is presentation; the persisted request ID defines delivery.
+		// Read complete comment records so resumed sessions survive a rebrand
+		// without rewriting their transcript or matching prose/substrings.
+		text := message.Text()
+		for {
+			_, rest, ok := strings.Cut(text, "<!-- ")
+			if !ok {
+				break
+			}
+			record, tail, ok := strings.Cut(rest, " -->")
+			if !ok {
+				break
+			}
+			kind, id, ok := strings.Cut(record, ":")
+			if ok && strings.HasSuffix(kind, "_WORKER_CHAT") && id == requestID &&
+				!strings.ContainsAny(kind, " \t\r\n<>") {
+				return true
+			}
+			text = tail
 		}
 	}
 	return false
@@ -227,7 +249,7 @@ func proxyEnv(proxyAddr, caCert string) []string {
 	return env
 }
 
-// TaskProxyAddr tags requests sent through ARTEX's recording proxy with their
+// TaskProxyAddr tags requests sent through SERIES's recording proxy with their
 // task id. The proxy consumes this process-local signed credential before
 // forwarding and performs a second authorization check at the actual HTTP
 // egress boundary.

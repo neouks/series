@@ -11,10 +11,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/traffic"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/agent"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/traffic"
 )
 
 // Constructors are metadata-only; no Tool.Call, model or network access. Cache

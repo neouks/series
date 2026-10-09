@@ -17,7 +17,7 @@
 
 ## 验证结果
 
-独立 PostgreSQL 17 容器 artex-sync-20260919，端口 127.0.0.1:55449，测试库 perf_db / perf_server / perf_agent / perf_browser。全部通过：
+独立 PostgreSQL 17 容器 series-sync-20260919，端口 127.0.0.1:55449，测试库 perf_db / perf_server / perf_agent / perf_browser。全部通过：
 
 - `go test ./db -count=1`：36.672s，含摘要上限、125 条关联完整分页、40,000 中文字符正文重建、任务隔离、取消查询、原正文未修改及搜索索引表达式可用性测试。
 - `go test ./server -count=1`：21.479s，含新详情 HTTP 的任务隔离、非法分页输入及列表不返回证据正文。

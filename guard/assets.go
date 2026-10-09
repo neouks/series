@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noa"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/llmrec"
 )
 
 // TaskAssetPolicy preflights explicit asset IDs, structured targets and URLs.

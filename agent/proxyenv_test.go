@@ -57,7 +57,7 @@ func TestTaskProxyAddrTagsOnlyRecordingProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.User == nil || parsed.User.Username() != "artex-task-42" {
+	if parsed.User == nil || parsed.User.Username() != "series-task-42" {
 		t.Fatalf("tagged proxy=%q", got)
 	}
 	if password, ok := parsed.User.Password(); !ok || len(password) != 64 {

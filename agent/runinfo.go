@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/llmrec"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/llmrec"
 )
 
 // RunInfo identifies WHICH run a tool call belongs to. Tool assembly only receives

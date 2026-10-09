@@ -94,10 +94,10 @@ func TestShellQuoteForProfiles(t *testing.T) {
 func TestRenderCommandTemplateCmdUsesDelayedExpansion(t *testing.T) {
 	value := "space quote\" slash\\ & | < > ^ %PATH% !bang!\nnext"
 	cmd, env := renderCommandTemplate("probe.exe --value={value}", map[string]any{"value": value}, actool.ShellProfile{Mode: "cmd"})
-	if cmd != `probe.exe --value="!ARTEX_TOOL_PARAM_0!"` {
+	if cmd != `probe.exe --value="!SERIES_TOOL_PARAM_0!"` {
 		t.Fatalf("cmd template = %q", cmd)
 	}
-	want := "ARTEX_TOOL_PARAM_0=space quote\\\" slash\\ & | < > ^ %PATH% !bang!\nnext"
+	want := "SERIES_TOOL_PARAM_0=space quote\\\" slash\\ & | < > ^ %PATH% !bang!\nnext"
 	if len(env) != 1 || env[0] != want {
 		t.Fatalf("cmd env = %#v, want %q", env, want)
 	}

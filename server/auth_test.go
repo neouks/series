@@ -6,7 +6,39 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+func TestJWTRequiresCurrentIdentityAndAlgorithm(t *testing.T) {
+	key := []byte("isolated-brand-test-signing-key")
+	current, err := signJWT(key)
+	if err != nil || !verifyJWT(current, key) {
+		t.Fatalf("current identity rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name, subject string
+		method        jwt.SigningMethod
+	}{
+		{"previous identity", "previous-product", jwt.SigningMethodHS256},
+		{"missing identity", "", jwt.SigningMethodHS256},
+		{"wrong algorithm", "SERIES", jwt.SigningMethodHS384},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := jwt.NewWithClaims(tc.method, jwt.RegisteredClaims{
+				Subject:   tc.subject,
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			}).SignedString(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if verifyJWT(token, key) {
+				t.Fatal("unexpectedly accepted token")
+			}
+		})
+	}
+}
 
 // GetSetting 对"键不存在"和"读取出错"的返回值只差一个 error：两种情况 value 都是
 // 空串。密码相关的 handler 一旦把 error 当成"还没设置密码"，就会在数据库抖动期间

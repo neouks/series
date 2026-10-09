@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/agent"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
 )
 
 func (s *Server) setExecutionMode(w http.ResponseWriter, r *http.Request) {

@@ -1,22 +1,22 @@
 // Real-backend browser regression. Use only an isolated fixture task containing
 // an old insert_assets command/result; no mock responses except injected 503s.
-// ARTEX_TEST_FIXTURE: JSON {task, anchor, result, approval?}; ARTEX_TEST_TOKEN:
-// test-server auth token; ARTEX_TEST_WEB defaults to http://127.0.0.1:3125.
+// SERIES_TEST_FIXTURE: JSON {task, anchor, result, approval?}; SERIES_TEST_TOKEN:
+// test-server auth token; SERIES_TEST_WEB defaults to http://127.0.0.1:3125.
 // PLAYWRIGHT_MODULE optionally points to an installed playwright package.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
 async function main() {
-  const fixture = JSON.parse(fs.readFileSync(process.env.ARTEX_TEST_FIXTURE, "utf8"));
-  const token = process.env.ARTEX_TEST_TOKEN;
-  assert.ok(token, "ARTEX_TEST_TOKEN is required");
-  const base = process.env.ARTEX_TEST_WEB || "http://127.0.0.1:3125";
+  const fixture = JSON.parse(fs.readFileSync(process.env.SERIES_TEST_FIXTURE, "utf8"));
+  const token = process.env.SERIES_TEST_TOKEN;
+  assert.ok(token, "SERIES_TEST_TOKEN is required");
+  const base = process.env.SERIES_TEST_WEB || "http://127.0.0.1:3125";
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
-    await page.context().addCookies([{ name: "artex_token", value: token, url: base }]);
-    await page.addInitScript((value) => localStorage.setItem("artex_token", value), token);
+    await page.context().addCookies([{ name: "series_token", value: token, url: base }]);
+    await page.addInitScript((value) => localStorage.setItem("series_token", value), token);
     const paths = [
       `/function/tasks/detail?id=${fixture.task}&tab=sessions&session=main:0&activity=${fixture.anchor}`,
     ];

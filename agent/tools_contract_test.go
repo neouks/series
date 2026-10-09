@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 func TestPlannerToolContractMatchesPrefetchedPrompt(t *testing.T) {

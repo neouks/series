@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/Autumn-27/artex/db"
+import "github.com/neouks/series/db"
 
 // Never attached to the shared ToolSet or reused across model requests. The
 // provider still revalidates every returned asset/node before sending history.

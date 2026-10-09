@@ -58,7 +58,7 @@ import { cn } from "@/lib/utils";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
 
-const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
+const FINDING_LIST_PREFERENCE_KEY = "series_finding_list_preferences";
 
 // 列表视图:flat = 跨任务平铺大表(默认);grouped = 按任务分组折叠;
 // asset = 左侧资产树 + 右侧该子树下的发现。
@@ -212,7 +212,7 @@ export default function FindingsPage() {
   }, []);
 
   // 勾选导出:按 finding_id(独立表 id)记选中项,跨页保留。
-  const presentation = useFindingPresentation("artex_global_findings_layout");
+  const presentation = useFindingPresentation("series_global_findings_layout");
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   // 导出弹窗状态:范围(当前筛选/全部/选中) × 格式(md 单文件/md 分文件 zip/csv/json)。
   const [exportOpen, setExportOpen] = React.useState(false);

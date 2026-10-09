@@ -15,13 +15,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	pgdb "github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/enrich"
-	"github.com/Autumn-27/artex/guard"
-	"github.com/Autumn-27/artex/intercept"
-	"github.com/Autumn-27/artex/traffic"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/agent"
+	pgdb "github.com/neouks/series/db"
+	"github.com/neouks/series/enrich"
+	"github.com/neouks/series/guard"
+	"github.com/neouks/series/intercept"
+	"github.com/neouks/series/traffic"
 )
 
 // Task is one engagement: a description + goal + its own exploration store,
@@ -849,7 +849,7 @@ func (m *Manager) ProxyCACert() string {
 	return m.traffic.CACertPath()
 }
 
-// TaskProxyAddr keeps task-bound HTTP traffic behind ARTEX's local policy proxy
+// TaskProxyAddr keeps task-bound HTTP traffic behind SERIES's local policy proxy
 // even when traffic persistence is disabled. Independent chats continue to use
 // ProxyAddr and therefore have no task asset policy.
 func (m *Manager) TaskProxyAddr() string {

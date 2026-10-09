@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/evidence"
-	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/evidence"
+	"github.com/neouks/series/guard"
 )
 
 type workerIndependentRestriction struct{}

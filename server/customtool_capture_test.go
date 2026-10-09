@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/db"
 )
 
 func TestHTTPToolPassesCaptureContext(t *testing.T) {

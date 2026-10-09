@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Autumn-27/artex/guard"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
+	"github.com/neouks/series/guard"
 )
 
 func TestProxyTaskID(t *testing.T) {
@@ -23,10 +23,10 @@ func TestProxyTaskID(t *testing.T) {
 	if _, tagged, err := guard.ParseTaskProxyAuthorization("Basic " + base64.StdEncoding.EncodeToString([]byte("ordinary:user"))); err != nil || tagged {
 		t.Fatalf("ordinary credentials tagged=%v err=%v", tagged, err)
 	}
-	if _, tagged, err := guard.ParseTaskProxyAuthorization("Basic " + base64.StdEncoding.EncodeToString([]byte("artex-task-nope:invalid"))); err == nil || !tagged {
+	if _, tagged, err := guard.ParseTaskProxyAuthorization("Basic " + base64.StdEncoding.EncodeToString([]byte("series-task-nope:invalid"))); err == nil || !tagged {
 		t.Fatalf("invalid internal credentials tagged=%v err=%v", tagged, err)
 	}
-	if _, tagged, err := guard.ParseTaskProxyAuthorization("Basic " + base64.StdEncoding.EncodeToString([]byte("artex-task-74:"+password))); err == nil || !tagged {
+	if _, tagged, err := guard.ParseTaskProxyAuthorization("Basic " + base64.StdEncoding.EncodeToString([]byte("series-task-74:"+password))); err == nil || !tagged {
 		t.Fatalf("tampered task credentials tagged=%v err=%v", tagged, err)
 	}
 }

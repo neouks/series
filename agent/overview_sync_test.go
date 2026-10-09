@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Autumn-27/artex/db"
+	"github.com/neouks/series/db"
 )
 
 // Fixed fixture for comparing overview input size and SQL calls across syncs.
@@ -38,7 +38,7 @@ func TestOverviewSyncFixture(t *testing.T) {
 	tools := NewToolSet(store, "planner")
 	tools.SetTaskID(task.ID)
 	tools.SetAssetStore(d.Assets(), d.Companies())
-	measure := os.Getenv("ARTEX_MEASURE_OVERVIEW") == "1"
+	measure := os.Getenv("SERIES_MEASURE_OVERVIEW") == "1"
 	if measure {
 		if _, err = d.Exec(`CREATE EXTENSION IF NOT EXISTS pg_stat_statements`); err != nil {
 			t.Fatal(err)

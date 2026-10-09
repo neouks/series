@@ -73,7 +73,7 @@ func (s *AssetStore) RegisterDescriptionAsset(taskID int64, kind, value, evidenc
 		return 0, fmt.Errorf("资产与原文目标不一致，不能扩大授权范围")
 	}
 	return s.withCompanyScopeMutation(func(scoped *AssetStore) (int64, error) {
-		if _, err := scoped.tx.Exec(`SELECT set_config('artex.user_asset_registration','on',true)`); err != nil {
+		if _, err := scoped.tx.Exec(`SELECT set_config('series.user_asset_registration','on',true)`); err != nil {
 			return 0, err
 		}
 		root := ""

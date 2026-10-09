@@ -54,7 +54,7 @@ ORDER BY a.id DESC LIMIT 1`, taskID, toolUseID, nodeID, worker).Scan(&o.Activity
 			}
 		}
 	}
-	_, err := s.tx.Exec(`SELECT set_config('artex.asset_origin',$1,true),set_config('artex.origin_task',$2,true)`, encoded, fmt.Sprint(taskID))
+	_, err := s.tx.Exec(`SELECT set_config('series.asset_origin',$1,true),set_config('series.origin_task',$2,true)`, encoded, fmt.Sprint(taskID))
 	return err
 }
 

@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Autumn-27/artex/agent"
-	"github.com/Autumn-27/artex/db"
-	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/agent"
+	"github.com/neouks/series/db"
+	"github.com/neouks/series/guard"
 )
 
 // 本文件实现自定义工具执行器(docs/自定义工具设计.md)。system=false 的 tools 行按
@@ -610,7 +610,7 @@ func renderCommandTemplate(tmpl string, params map[string]any, profile actool.Sh
 	out := tmpl
 	env := make([]string, 0, len(keys))
 	for i, key := range keys {
-		name := fmt.Sprintf("ARTEX_TOOL_PARAM_%d", i)
+		name := fmt.Sprintf("SERIES_TOOL_PARAM_%d", i)
 		out = strings.ReplaceAll(out, "{"+key+"}", `"!`+name+`!"`)
 		env = append(env, name+"="+cmdQuoteContent(valToStr(params[key])))
 	}

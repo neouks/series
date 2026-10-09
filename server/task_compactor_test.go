@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Autumn-27/artex/agent"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/agent"
 )
 
 func TestTaskPlannerAdvancesColdCompactionRounds(t *testing.T) {

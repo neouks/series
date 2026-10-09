@@ -158,8 +158,8 @@ func TestShellPromptMatchesProfile(t *testing.T) {
 		t.Fatalf("PowerShell prompt advertises Bash heredocs: %s", powerShell)
 	}
 
-	wsl := shellPrompt(ShellProfile{Mode: "wsl", PathStyle: "wsl", WorkingDir: `E:\AI\ARTEX\tasks\12`})
-	for _, want := range []string{"POSIX shell chaining", "WSL form", "/mnt/e/AI/ARTEX/tasks/12"} {
+	wsl := shellPrompt(ShellProfile{Mode: "wsl", PathStyle: "wsl", WorkingDir: `E:\AI\SERIES\tasks\12`})
+	for _, want := range []string{"POSIX shell chaining", "WSL form", "/mnt/e/AI/SERIES/tasks/12"} {
 		if !strings.Contains(wsl, want) {
 			t.Fatalf("WSL prompt missing %q: %s", want, wsl)
 		}

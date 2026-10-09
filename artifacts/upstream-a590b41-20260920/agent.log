@@ -25,4 +25,4 @@
 === RUN   TestNoaUsesConfiguredModelWindow
 --- PASS: TestNoaUsesConfiguredModelWindow (0.00s)
 PASS
-ok  	github.com/Autumn-27/artex/agent	0.300s
+ok  	github.com/neouks/series/agent	0.300s

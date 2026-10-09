@@ -2,7 +2,7 @@
 
 本项目的重要变更记录在此文件中，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [Unreleased]
+## Unreleased
 
 ### 拦截
 
@@ -49,7 +49,7 @@
 
 - **修复任务间资产互串**（#59）：`list_assets` 此前把任务 id 写死为 0、裸查整个共享资产库，模型又无从写出范围过滤条件，于是把别的任务的资产（尤其 IP）当成本任务目标，测试方向被带偏。现在它只返回落在【本任务及直接关联任务】测试范围(`task_scope`)内的资产，按**归属**匹配而非字面值：范围里有某根域即可查到其名下全部子域/服务/接口，有某网段即可查到段内主机及服务；按 id 直取范围外资产同样取不到。非任务上下文(Auto/pentest)无范围可依，仍回退全库。顺带修复 IP 直连主机(如 `http://1.2.3.4/api`)无法被网段范围命中的归属盲区。UI 的「测试资产」视图（按任务生产者过滤）不受影响。
 
-## [0.3.9] - 2026-09-11
+## 0.3.9 - 2026-09-11
 
 ### Agent
 
@@ -125,13 +125,13 @@
 #### 新增的功能
 
 - 支持**页面一键更新**：系统配置页新增「版本与更新」卡片，顶栏在有新版时亮出提示。流程为下载发布包 → 校验 `SHA256SUMS` → 冒烟测试 → 暂存 → 退出由守护脚本重新拉起完成换装，页面自动刷新。
-- 新增守护启动脚本 `start.sh` / `start.bat` 作为正式启动入口（发布包与 Docker 镜像均已带上，`install.sh` 不变），按退出码决定是否重新拉起，并负责把 SIGTERM 转发给 artex。校验与换装逻辑都在 Go 里，脚本保持傻瓜化。
+- 新增守护启动脚本 `start.sh` / `start.bat` 作为正式启动入口（发布包与 Docker 镜像均已带上，`install.sh` 不变），按退出码决定是否重新拉起，并负责把 SIGTERM 转发给 series。校验与换装逻辑都在 Go 里，脚本保持傻瓜化。
 - 失败自动兜底：校验或冒烟不通过就丢弃、继续跑当前版本；新版连续 3 次启动失败则回滚上一版本。设置页另有手动回滚（注意数据库结构不会回退）。
 - 更新只认 GitHub 域名且强制 HTTPS，发布源不可配置；开发构建禁用一键更新。GitHub 查询结果缓存 30 分钟，避免顶栏提示耗尽 API 配额。
 
 #### 已知限制
 
-- Docker 下只换程序、不换镜像：工具链不会跟着升级，且重建容器会退回镜像自带版本，需要时仍用 `docker compose pull artex`。
+- Docker 下只换程序、不换镜像：工具链不会跟着升级，且重建容器会退回镜像自带版本，需要时仍用 `./build-docker.sh`。
 - 不同步发布包里的 `skills/`，新版新增的内置 skill 不会自动生效。
 - 更新即重启，会中断正在运行的任务。
 
@@ -146,7 +146,7 @@
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@RuoJi6](https://github.com/RuoJi6)
 
-## [0.3.8] - 2026-09-09
+## 0.3.8 - 2026-09-09
 
 ### LLM
 
@@ -218,7 +218,7 @@
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
-## [0.3.7] - 2026-08-31
+## 0.3.7 - 2026-08-31
 
 ### LLM
 
@@ -282,7 +282,7 @@
 - [@neouks](https://github.com/neouks)
 - [@begininvoke](https://github.com/begininvoke)
 
-## [0.3.6] - 2026-08-27
+## 0.3.6 - 2026-08-27
 
 ### LLM
 
@@ -313,7 +313,7 @@
 
 - [@Autumn-27](https://github.com/Autumn-27)
 
-## [0.3.5] - 2026-08-25
+## 0.3.5 - 2026-08-25
 
 ### LLM
 
@@ -355,14 +355,14 @@
 
 #### 新增的功能
 
-- 新增 `reset-password.sh` 重置管理员（用户名固定 `ARTEX`）密码：支持 local / docker 两种部署，连接信息可显式指定或自动从 `--dsn`/`$ARTEX_PG_DSN`/`config.json` 读取；在库内用 `pgcrypto` 生成与后端登录兼容的 bcrypt 哈希并写回 `settings.auth.password_hash`，重置后无需重启服务。密码经环境变量传入、不进入进程 argv，并做转义防注入。
+- 新增 `reset-password.sh` 重置管理员（用户名固定 `SERIES`）密码：支持 local / docker 两种部署，连接信息可显式指定或自动从 `--dsn`/`$SERIES_PG_DSN`/`config.json` 读取；在库内用 `pgcrypto` 生成与后端登录兼容的 bcrypt 哈希并写回 `settings.auth.password_hash`，重置后无需重启服务。密码经环境变量传入、不进入进程 argv，并做转义防注入。
 
 ### 贡献者
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
 
-## [0.3.4] - 2026-08-24
+## 0.3.4 - 2026-08-24
 
 ### UI
 
@@ -411,7 +411,7 @@
 
 - [@neouks](https://github.com/neouks)
 
-## [0.3.3] - 2026-08-23
+## 0.3.3 - 2026-08-23
 
 ### Worker
 
@@ -450,7 +450,7 @@
 - LLM 配置页改为配置卡片列表和右侧抽屉编辑，并提供 Pool 轮询顺序、优先级、排除项、健康状态和恢复操作。
 - 配置链耗尽信息支持窄屏换行；当前模型由会话列表图标改为当前会话标题旁的文字标签和完整 Tooltip。
 - 任务内各角色解析 LLM 的顺序调整为「Agent 绑定 → 任务配置链 → 全局」：显式绑定模型的角色始终跑在该模型上，未绑定角色才落到任务链，任务链为空时再落到全局。
-- 出站代理留空即直连，不再回退 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量（显式 `ARTEX_LLM_PROXY` 不受影响）；代理输入支持带账号密码的 `socks5://user:pass@host:port`。
+- 出站代理留空即直连，不再回退 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量（显式 `SERIES_LLM_PROXY` 不受影响）；代理输入支持带账号密码的 `socks5://user:pass@host:port`。
 
 #### 修复的问题
 
@@ -560,7 +560,7 @@
 
 - [@neouks](https://github.com/neouks)
 
-## [0.3.2] - 2026-08-20
+## 0.3.2 - 2026-08-20
 
 ### Added
 
@@ -600,13 +600,3 @@
 
 - [@Autumn-27](https://github.com/Autumn-27)
 - [@neouks](https://github.com/neouks)
-
-[Unreleased]: https://github.com/Autumn-27/ARTEX/compare/v0.3.9...HEAD
-[0.3.9]: https://github.com/Autumn-27/ARTEX/compare/v0.3.8...v0.3.9
-[0.3.8]: https://github.com/Autumn-27/ARTEX/compare/v0.3.7...v0.3.8
-[0.3.7]: https://github.com/Autumn-27/ARTEX/compare/v0.3.6...v0.3.7
-[0.3.6]: https://github.com/Autumn-27/ARTEX/compare/v0.3.5...v0.3.6
-[0.3.5]: https://github.com/Autumn-27/ARTEX/compare/v0.3.4...v0.3.5
-[0.3.4]: https://github.com/Autumn-27/ARTEX/compare/v0.3.3...v0.3.4
-[0.3.3]: https://github.com/Autumn-27/ARTEX/compare/v0.3.2...v0.3.3
-[0.3.2]: https://github.com/Autumn-27/ARTEX/compare/v0.3.1...v0.3.2

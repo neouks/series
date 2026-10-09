@@ -21,9 +21,9 @@ export function FindingsTab({ taskId }: { taskId: string }) {
   return <TaskFindings key={taskId} taskId={taskId} />;
 }
 function TaskFindings({ taskId }: { taskId: string }) {
-  const presentation = useFindingPresentation("artex_task_findings_layout");
+  const presentation = useFindingPresentation("series_task_findings_layout");
   const beginRead = useNotificationRead("findings");
-  const [sort, setSort] = useStoredSortPreference("artex_task_findings_sort", FIELDS, "time", "desc");
+  const [sort, setSort] = useStoredSortPreference("series_task_findings_sort", FIELDS, "time", "desc");
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(20);
   const [data, setData] = React.useState<FindingsPage | null>(null);

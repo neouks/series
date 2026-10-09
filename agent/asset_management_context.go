@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/db"
 )
 
 // Revalidate management identities once per model request. Original counts are

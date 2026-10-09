@@ -2,11 +2,11 @@
 
 ## 范围与保护
 
-官方来源：`upstream`（`https://github.com/Autumn-27/ARTEX.git`）。仅整合以下 15 项指定提交的效果。
+官方来源：`upstream`（`https://github.com/neouks/series.git`）。仅整合以下 15 项指定提交的效果。
 
 - 原 `main` 的已跟踪及未跟踪改动已保存为 `8c1426b`（资产审批来源定位、排序等）。
 - 备份引用：`codex/backup-before-official-sync-20260916` → `8c1426b`。
-- 同步分支：`codex/sync-official-20260916`；隔离工作区：`/tmp/artex-sync-official-20260916`。
+- 同步分支：`codex/sync-official-20260916`；隔离工作区：`/tmp/series-sync-official-20260916`。
 - 功能整合提交：`6aff823`；noa 修复提交：`65b2c68`；随后文档提交为交付端点。
 - 用户随后要求修复 noa：原 4 项官方失败已修复，完成最终回归后将 `main` 快进到本报告所在提交。
 - 不推送远端、不重写历史。未引入 `f4d89c6`、`8ee8907` 的补丁。
@@ -46,7 +46,7 @@
 
 ## 验证结果
 
-Go 工具链命令使用 `GOSUMDB=sum.golang.org`。测试 PostgreSQL 使用专用 Docker 容器 `artex-sync-tests`，绑定 `127.0.0.1:55440`，各包独立测试库，未连接业务数据库。
+Go 工具链命令使用 `GOSUMDB=sum.golang.org`。测试 PostgreSQL 使用专用 Docker 容器 `series-sync-tests`，绑定 `127.0.0.1:55440`，各包独立测试库，未连接业务数据库。
 
 | 检查 | 结果 |
 | --- | --- |
@@ -79,8 +79,8 @@ Go 工具链命令使用 `GOSUMDB=sum.golang.org`。测试 PostgreSQL 使用专�
 - 提醒增长单位保留窗口的 5%，下限由 50,000 改为 2,000，上限仍为 50,000；提醒最小间隔由 20,000 改为 1,000，使小窗口可以在溢出前再次请求压缩。
 - 连续失败后的增长仅允许一次重试，不再重置整批尝试次数；重复拒绝时逐步增加间隔，最多为窗口的四分之一（或显式配置的最小间隔）。压缩成功及新用户输入继续重置失败记录，避免反复提醒不配合的模型。
 - 溢出检测接入真实窗口解析，兼容 `prompt is too long: … > … maximum`；未知格式保留已学习上限，后续重试不会扩大已知限制，也不会从非上下文错误学习。
-- ARTEX 将模型已配置的 ContextWindow 传给 noa，不再总是使用 200k 默认窗口。
-- 更新与旧默认常量绑定的单元测试，保留原 4 项失败测试；新增退避、跨重试窗口学习及 ARTEX 小窗口接入回归。未删除、跳过或放宽原 4 项失败断言。
+- SERIES 将模型已配置的 ContextWindow 传给 noa，不再总是使用 200k 默认窗口。
+- 更新与旧默认常量绑定的单元测试，保留原 4 项失败测试；新增退避、跨重试窗口学习及 SERIES 小窗口接入回归。未删除、跳过或放宽原 4 项失败断言。
 
 **最终 norma 全量测试全部通过。**默认关闭、集中归档、失败回退、本地授权刷新与删除反馈设计不变。Agent / 服务端使用独立测试库再次全量通过；新增溢出和退避相关竞态测试通过。未使用真实 LLM 长会话测试，本次长会话验证使用确定性模拟模型。
 
@@ -92,5 +92,5 @@ Go 工具链命令使用 `GOSUMDB=sum.golang.org`。测试 PostgreSQL 使用专�
 - [本地 norma 全量输出](upstream-sync-20260916/norma-local.log)
 - [未修改官方 noa 输出](upstream-sync-20260916/norma-upstream.log)
 - [浏览器断言结果](upstream-sync-20260916/browser.log)
-- [资产来源截图](upstream-sync-20260916/asset-source.png)
-- [动作审批来源截图](upstream-sync-20260916/action-source.png)
+- 资产来源截图（旧品牌截图已移除）
+- 动作审批来源截图（旧品牌截图已移除）

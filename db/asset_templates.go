@@ -142,7 +142,7 @@ func (s *AssetStore) RegisterUserAssetWithSource(taskID int64, source, evidence 
 		return 0, fmt.Errorf("%w: invalid user asset source %q", ErrTaskAssetInvalid, source)
 	}
 	return s.withCompanyScopeMutation(func(scoped *AssetStore) (int64, error) {
-		if _, err := scoped.tx.Exec(`SELECT set_config('artex.user_asset_registration','on',true)`); err != nil {
+		if _, err := scoped.tx.Exec(`SELECT set_config('series.user_asset_registration','on',true)`); err != nil {
 			return 0, err
 		}
 		if taskID > 0 {

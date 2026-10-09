@@ -36,7 +36,7 @@
 
 ## 验证
 
-测试数据库为专用容器 `artex-sync-seven-20260929`，PostgreSQL 17，仅监听 `127.0.0.1:55459`，未挂载业务数据。DB、Agent、Server 分别使用独立库。
+测试数据库为专用容器 `series-sync-seven-20260929`，PostgreSQL 17，仅监听 `127.0.0.1:55459`，未挂载业务数据。DB、Agent、Server 分别使用独立库。
 
 - DB 完整测试通过：35.251 秒；随后新增祖先授权断言的定向测试通过。
 - Agent 完整测试通过：23.550 秒；随后新增摘要溢出 ID 授权断言的定向测试通过。
@@ -71,9 +71,9 @@
 
 截图：
 
-- [任务列表](verification-20260929/task-severity.png)
-- [来源定位](verification-20260929/asset-origin.png)
-- [探索链路](verification-20260929/exploration-graph.png)
+- 任务列表（旧品牌截图已移除）
+- 来源定位（旧品牌截图已移除）
+- 探索链路（旧品牌截图已移除）
 
 ## 生效
 

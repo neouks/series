@@ -15,7 +15,7 @@ import {
   parseNotificationCursor,
 } from "@/lib/task-notifications";
 
-const changeEvent = "artex:task-unread-changed";
+const changeEvent = "series:task-unread-changed";
 const baselineKey = `${notificationStoragePrefix}baseline`;
 const memory = new Map<string, NotificationCursor>();
 function preferred(key: string, old: NotificationCursor | undefined, incoming: NotificationCursor) {

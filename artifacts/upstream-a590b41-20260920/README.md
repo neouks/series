@@ -22,8 +22,8 @@
 ## 验证
 
 - 本地 norma：go test ./... -count=1 全量通过，见 norma.log。
-- ARTEX：go test ./... -run '^$' 全包编译通过。
-- Agent：noa 开关、归档失败回退、模型窗口、审批刷新、延迟工具与 Skill 解锁回归通过，见 agent.log。使用独立容器 artex-sync-20260919 的 perf_agent 测试库；不使用业务库。
+- SERIES：go test ./... -run '^$' 全包编译通过。
+- Agent：noa 开关、归档失败回退、模型窗口、审批刷新、延迟工具与 Skill 解锁回归通过，见 agent.log。使用独立容器 series-sync-20260919 的 perf_agent 测试库；不使用业务库。
 - Server：MCPRuntime、NormalizeMCPServer、MeterMCPTool 回归及 race 检查通过。
 - noa/noaadapter：新计量与二级压缩专项 race 检查见 noa-race.log。
 - git diff --check 通过。

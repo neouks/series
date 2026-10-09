@@ -6,7 +6,7 @@ export type NotificationCursor = { snapshot: string; observed_at: number };
 export type NotificationQuery = { task_id: string } & Record<NotificationCategory, string>;
 export type NotificationCounts = { task_id: string } & Record<NotificationCategory, number>;
 export type NotificationSummary = NotificationCursor & { items: NotificationCounts[] };
-export const notificationStoragePrefix = `artex:task-unread:v1:${MOCK ? "mock:" : ""}`;
+export const notificationStoragePrefix = `series:task-unread:v1:${MOCK ? "mock:" : ""}`;
 
 export function notificationKey(task: string, category: NotificationCategory) {
   return `${notificationStoragePrefix}${encodeURIComponent(task)}:${category}`;

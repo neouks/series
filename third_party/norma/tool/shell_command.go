@@ -34,24 +34,24 @@ func shellCommand(profile ShellProfile, workDir, command string) (string, []stri
 const powerShellCompatibility = `
 $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 if (Get-Alias curl -ErrorAction SilentlyContinue) { Remove-Item Alias:curl -Force }
-$artexCurl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
-if ($artexCurl) { Set-Alias curl $artexCurl.Source }
+$seriesCurl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
+if ($seriesCurl) { Set-Alias curl $seriesCurl.Source }
 if (-not (Get-Command head -ErrorAction SilentlyContinue)) {
     # Pipeline-only fallback, not a replacement for the full Unix utility.
     function head {
         begin {
-            $artexTake = 10
+            $seriesTake = 10
             if ($args.Count -eq 1 -and "$($args[0])" -match '^-(\d+)$') {
-                $artexTake = [int]$Matches[1]
+                $seriesTake = [int]$Matches[1]
             } elseif ($args.Count -eq 2 -and "$($args[0])" -eq '-n' -and "$($args[1])" -match '^\d+$') {
-                $artexTake = [int]$args[1]
+                $seriesTake = [int]$args[1]
             } elseif ($args.Count -ne 0) {
                 throw 'head compatibility supports pipelines only: head, head -n N, head -N. Use Get-Content for files.'
             }
-            $artexSeen = 0
+            $seriesSeen = 0
         }
         process {
-            if ($artexSeen -lt $artexTake) { $_; $artexSeen++ }
+            if ($seriesSeen -lt $seriesTake) { $_; $seriesSeen++ }
         }
     }
 }

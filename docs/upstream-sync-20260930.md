@@ -6,7 +6,7 @@
 - 备份：`codex/backup-before-sync-20260930-25133ab`。
 - 隔离分支：`codex/sync-four-20260930`；复用已有托管工作区。
 - 顺序：`69fe935 → 25b6018 → 7179472 → 02b1dbe`。
-- Git 拉取因 GitHub TLS 连接失败；改用 GitHub 官方 REST API 核对指定提交及 norma 标签之间的精确差异。只移植这些差异，没有合入官方 main 或未指定的 ARTEX 父提交。
+- Git 拉取因 GitHub TLS 连接失败；改用 GitHub 官方 REST API 核对指定提交及 norma 标签之间的精确差异。只移植这些差异，没有合入官方 main 或未指定的 SERIES 父提交。
 - 保留 `replace github.com/Autumn-27/norma => ./third_party/norma`；实际修复合入本地副本，依赖声明与校验值升至 v0.4.3。
 - 验证通过后快进本地 main；不推送、不重写历史。
 
@@ -14,10 +14,10 @@
 
 | 官方提交 | 内容 | 本地对应 | 处理 |
 | --- | --- | --- | --- |
-| [69fe9357d3a2912a61346ca0e02864d13b5c7e22](https://github.com/Autumn-27/ARTEX/commit/69fe9357d3a2912a61346ca0e02864d13b5c7e22) | norma v0.4.2、noa thinking/tool 修复 | `6407f06` | 移植压缩投影和请求兜底；保留本地严格工具配对 |
-| [25b601881838d2d99b4af111384606ab520ccff1](https://github.com/Autumn-27/ARTEX/commit/25b601881838d2d99b4af111384606ab520ccff1) | 一次性模型调用的会话头 | `d310590` | 目标分解／后台图压缩使用独立稳定会话；修正本地运行归属 |
-| [71794729fc894377efedc8a9bfdbd679fca56d89](https://github.com/Autumn-27/ARTEX/commit/71794729fc894377efedc8a9bfdbd679fca56d89) | MCP／自定义工具 Capture | `4c7d369` | 传递 ToolContext，统一截断和落盘；保留授权、代理和统计包装 |
-| [02b1dbe6f8e151856d54d9af015a5e22e5079863](https://github.com/Autumn-27/ARTEX/commit/02b1dbe6f8e151856d54d9af015a5e22e5079863) | norma v0.4.3、统一 CaptureOnce | `115aa68` | 本地执行入口增加兜底；收紧幂等识别并保护 UTF-8 |
+| 69fe9357d3a2912a61346ca0e02864d13b5c7e22 | norma v0.4.2、noa thinking/tool 修复 | `6407f06` | 移植压缩投影和请求兜底；保留本地严格工具配对 |
+| 25b601881838d2d99b4af111384606ab520ccff1 | 一次性模型调用的会话头 | `d310590` | 目标分解／后台图压缩使用独立稳定会话；修正本地运行归属 |
+| 71794729fc894377efedc8a9bfdbd679fca56d89 | MCP／自定义工具 Capture | `4c7d369` | 传递 ToolContext，统一截断和落盘；保留授权、代理和统计包装 |
+| 02b1dbe6f8e151856d54d9af015a5e22e5079863 | norma v0.4.3、统一 CaptureOnce | `115aa68` | 本地执行入口增加兜底；收紧幂等识别并保护 UTF-8 |
 
 兼容补充提交：`b736625`，保留长结构化结果的审批复核能力。以上采用移植整合，官方 SHA 并非本地分支的直接祖先。
 
@@ -51,7 +51,7 @@ norma 对应源码：v0.4.1…v0.4.2 的 `253be336` 修复，以及 v0.4.2…v0.
 
 审查发现，全局直接截断 JSON 会导致资产上下文层解析失败，从而无法对旧结果进行动态审批复核。补充有界 JSON 封装：
 
-- 正常大小的成功结果协议保持原样；长 ARTEX 结构化结果返回 `output_truncated`、资产／节点 ID 和历史预览，原文仍归档一次。
+- 正常大小的成功结果协议保持原样；长 SERIES 结构化结果返回 `output_truncated`、资产／节点 ID 和历史预览，原文仍归档一次。
 - 预览与原文入口保留全部所需身份；身份放不下预算时只提示缩小范围，不保留敏感正文或入口。
 - 延迟工具历史按实际目标名称／参数复核；主 Agent、Planner、Worker 均执行各自原有角色策略。
 - 任一相关目标不可读取时，整条截断预览及入口保守移除；不尝试从不完整预览中拆出其他记录。之后审批恢复时仍可重新复核。
@@ -59,7 +59,7 @@ norma 对应源码：v0.4.1…v0.4.2 的 `253be336` 修复，以及 v0.4.2…v0.
 
 ## 验证记录
 
-专用 PostgreSQL 17 容器 `artex-sync-four-20260930`，只监听 `127.0.0.1:55460`，未挂载业务数据。各测试包使用独立库；测试结束后清理容器与匿名卷。
+专用 PostgreSQL 17 容器 `series-sync-four-20260930`，只监听 `127.0.0.1:55460`，未挂载业务数据。各测试包使用独立库；测试结束后清理容器与匿名卷。
 
 | 检查 | 结果 |
 | --- | --- |
