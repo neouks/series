@@ -173,6 +173,10 @@ type Traffic struct {
 	upstream  atomic.Pointer[url.URL]
 	assets    *db.AssetStore
 	recording atomic.Bool
+	// smart decides per request whether traffic to a host should exit via the
+	// proxy pool instead of dialing directly. Nil until SetSmartProxy is called;
+	// when nil or disabled the upstream callback keeps the legacy behaviour.
+	smart *SmartProxy
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -222,7 +226,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	// a direct dial. When a global egress proxy IS configured (SetUpstreamProxy),
 	// every captured request — intercepted AND transparently tunneled — is
 	// forwarded through it instead, so no host leaks the real source IP.
-	p.SetUpstreamProxy(func(*http.Request) (*url.URL, error) { return t.upstream.Load(), nil })
+	p.SetUpstreamProxy(t.chooseUpstream)
 	// Fail-open: MITM every host by default, EXCEPT ones a prior request proved we
 	// can't intercept without breaking (see maybePassthrough). Those are tunneled
 	// transparently so the request still reaches the target instead of being killed.
@@ -333,6 +337,12 @@ func (t *Traffic) authorizeTaskRequest(_ http.ResponseWriter, req *http.Request)
 	if !tagged {
 		return true, nil
 	}
+	// Propagate the identity to the upstream callback BEFORE the credential is
+	// consumed below: that callback runs later and can no longer read the header.
+	// In-place assignment is required (verified experimentally).
+	if t.smart != nil {
+		WithTaskID(req, taskID)
+	}
 	// Consume the internal tag; it must never reach the target or traffic log.
 	req.Header.Del("Proxy-Authorization")
 	if t.assets == nil {
@@ -390,6 +400,43 @@ func (t *Traffic) SetUpstreamProxy(raw string) error {
 	return nil
 }
 
+// chooseUpstream resolves which egress a captured request should use.
+//
+// Priority (matches the design doc, and is pinned by unit tests):
+//  1. smart proxy enabled AND this task marked this host → the proxy pool
+//  2. a global egress proxy is configured               → that proxy
+//  3. neither applies                                   → nil (direct dial)
+//
+// Step 2 is easy to lose: an earlier version returned nil immediately after the
+// smart check failed, which silently bypassed a configured global proxy whenever
+// the smart switch was on — while the settings UI still claimed the global proxy
+// was in effect. Keeping this as a named method makes that regression testable.
+//
+// Verified experimentally: this single callback covers BOTH plain HTTP and
+// HTTPS (both paths converge on proxy.getUpstreamProxyUrl). For HTTPS it fires
+// once per CONNECT, i.e. the decision is connection-scoped.
+func (t *Traffic) chooseUpstream(req *http.Request) (*url.URL, error) {
+	if t.smart != nil && t.smart.Enabled() {
+		host := hostOnly(req.Host)
+		if host == "" && req.URL != nil {
+			host = req.URL.Hostname()
+		}
+		if u, ok := t.smart.ShouldProxy(TaskIDFrom(req), host); ok {
+			return u, nil
+		}
+		// Not marked → fall through to the global proxy below.
+	}
+	return t.upstream.Load(), nil
+}
+
+// SetSmartProxy installs the per-request proxy selector. Nil disables the
+// feature and restores the legacy single-upstream behaviour.
+func (t *Traffic) SetSmartProxy(s *SmartProxy) { t.smart = s }
+
+// SmartProxy exposes the installed selector (nil when unset), so callers can
+// inspect or persist the marks.
+func (t *Traffic) SmartProxy() *SmartProxy { return t.smart }
+
 // ValidateProxyURL parses and checks a proxy URL (http/https/socks5, optional
 // user:pass), returning the parsed URL. Exposed so callers can validate a global
 // proxy before persisting it even when the traffic proxy itself is disabled.
@@ -409,7 +456,44 @@ func ValidateProxyURL(raw string) (*url.URL, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("代理 %q 缺少主机地址", raw)
 	}
+	// Guard the most common misconfiguration FIRST, so the message names the real
+	// mistake: pasting a provider's "get an exit IP" API endpoint instead of the
+	// proxy endpoint. Such URLs carry an API-looking path and/or known query keys
+	// (secret_id/token/signature). Checking this before the port test matters,
+	// because those endpoints usually also omit the port — reporting "missing
+	// port" would send the user chasing the wrong problem.
+	if u.Path != "" && u.Path != "/" || looksLikeProviderAPI(u.RawQuery) {
+		return nil, fmt.Errorf("代理 %q 看起来是「取 IP 的 API 地址」而非代理服务器地址；"+
+			"请填 协议://[账号:密码@]主机:端口（例如 socks5://user:pass@host:15818）", raw)
+	}
+	// A proxy address must name a host AND a port. Reproduced experimentally: a
+	// URL without a port parses fine but makes go-mitmproxy's dial fail instantly
+	// with "missing port in address", surfacing to agents as an empty 502 within
+	// milliseconds — indistinguishable from a WAF block, so a malformed proxy
+	// config looks like an unreachable target. Catch it here instead.
+	if _, _, err := net.SplitHostPort(u.Host); err != nil {
+		return nil, fmt.Errorf("代理 %q 缺少端口(应形如 协议://[账号:密码@]主机:端口)", raw)
+	}
 	return u, nil
+}
+
+// looksLikeProviderAPI reports whether a query string carries the credential
+// keys used by proxy providers' "get exit IP" endpoints (快代理 gettps,
+// 芝麻/讯代理 etc.), which is a strong signal the user pasted the wrong URL.
+func looksLikeProviderAPI(rawQuery string) bool {
+	if rawQuery == "" {
+		return false
+	}
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return false
+	}
+	for _, k := range []string{"secret_id", "secret_key", "signature", "format", "sep", "num"} {
+		if _, ok := q[k]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // CACertPath returns the PEM CA cert clients must trust to verify HTTPS through
