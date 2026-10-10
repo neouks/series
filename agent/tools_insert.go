@@ -828,6 +828,7 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 func (t *ToolSet) mainAgentTools() []actool.CoreTool {
 	return []actool.CoreTool{
 		t.listTaskAssets(), t.checkTargetAccess(), t.dispatchIntents(),
+		t.markHostProxy(), t.checkHostProxy(),
 		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(),
 		t.expandDigest(), // cold-digest §6.1
 		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.addHint(), t.addIntent(),
