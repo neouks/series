@@ -118,7 +118,11 @@ func unwrapShellCommand(args []string) string {
 	return ""
 }
 
-func shellUsageKeys(command string, rows []*db.Tool, agentKey string) (keys, ambiguous []string) {
+func shellUsageKeys(command string, rows []*db.Tool, agentKey string, configRoot ...string) (keys, ambiguous []string) {
+	root := ""
+	if len(configRoot) > 0 {
+		root = configRoot[0]
+	}
 	matched := map[string]bool{}
 	for _, cmd := range shellCommands(command) {
 		candidates := []string{}
@@ -126,8 +130,7 @@ func shellUsageKeys(command string, rows []*db.Tool, agentKey string) (keys, amb
 			if row.System || row.Kind != "shell" || !row.Enabled || !contains(row.Agents, agentKey) {
 				continue
 			}
-			target := row.ShellCommand()
-			if (filepath.IsAbs(target) && filepath.Clean(target) == filepath.Clean(cmd)) || (!strings.ContainsAny(target, "/\\") && target == filepath.Base(cmd)) {
+			if shellCommandMatches(cmd, row, root) {
 				candidates = append(candidates, row.Key)
 			}
 		}
@@ -144,12 +147,40 @@ func shellUsageKeys(command string, rows []*db.Tool, agentKey string) (keys, amb
 	return
 }
 
+// A directory narrows absolute-path calls to that exact configured executable.
+// A bare command has no reliable resolved path at this layer, so it continues
+// to match by name. Relative paths are not resolved against an unobserved cd.
+func shellCommandMatches(cmd string, row *db.Tool, configRoot string) bool {
+	target := row.ShellCommand()
+	if filepath.IsAbs(target) {
+		return filepath.IsAbs(cmd) && filepath.Clean(target) == filepath.Clean(cmd)
+	}
+	if strings.ContainsAny(target, "/\\") {
+		return false
+	}
+	if cmd == target {
+		return true
+	}
+	if !filepath.IsAbs(cmd) {
+		return strings.TrimSpace(row.Directory) == "" && filepath.Base(cmd) == target
+	}
+	directory := strings.TrimSpace(row.Directory)
+	if directory == "" {
+		return filepath.Base(cmd) == target
+	}
+	if !filepath.IsAbs(directory) && filepath.IsAbs(configRoot) {
+		directory = filepath.Join(configRoot, directory)
+	}
+	return filepath.IsAbs(directory) && filepath.Clean(filepath.Join(directory, target)) == filepath.Clean(cmd)
+}
+
 type shellMeteredTool struct {
 	actool.CoreTool
 	recorder     toolUsageRecorder
 	declarations []*db.Tool
 	agentKey     string
 	ri           agent.RunInfo
+	configRoot   string
 }
 
 func (m *shellMeteredTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
@@ -157,7 +188,7 @@ func (m *shellMeteredTool) Call(ctx context.Context, in json.RawMessage, tc *act
 		Command string `json:"command"`
 	}
 	if json.Unmarshal(in, &input) == nil && ctx.Err() == nil {
-		keys, conflicts := shellUsageKeys(input.Command, m.declarations, m.agentKey)
+		keys, conflicts := shellUsageKeys(input.Command, m.declarations, m.agentKey, m.configRoot)
 		for _, conflict := range conflicts {
 			log.Printf("[toolusage] ambiguous shell declarations: %s", conflict)
 		}

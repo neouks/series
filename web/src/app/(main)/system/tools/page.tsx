@@ -844,11 +844,11 @@ function CustomToolDialog({
                   placeholder={key || "如 nmap 或 /opt/nmap/bin/nmap"}
                 />
                 <FieldDescription>
-                  留空使用 Key；命令名或绝对路径，不含参数。用于检测与 Bash 调用统计。
+                  填写实际执行文件名（如 gogo_linux_amd64）或绝对路径，不含参数；留空仅按 Key 匹配。若实际文件名与 Key 不同，必须填写此项才能统计 Bash 调用。
                 </FieldDescription>
                 {conflicts.length > 0 && (
                   <p role="alert" className="text-destructive text-xs">
-                    命令归属与 {conflicts.map((tool) => tool.key).join("、")} 存在歧义，匹配多个配置时不计数。
+                    与 {conflicts.map((tool) => tool.key).join("、")} 的命令名可能重复；绝对路径按配置目录匹配，仍有多个配置命中时不计数。
                   </p>
                 )}
               </Field>
@@ -861,7 +861,7 @@ function CustomToolDialog({
                   value={directory}
                   onChange={(e) => setDirectory(e.target.value)}
                 />
-                <FieldDescription>检测时优先查找此目录；不会改变 Bash 或其他工具的工作目录。</FieldDescription>
+                <FieldDescription>检测时优先查找此目录；统计时与文件名组合匹配绝对路径。不会改变 Bash 或其他工具的工作目录。</FieldDescription>
               </Field>
               <Field>
                 <FieldLabel htmlFor="custom-tool-usage-help">工具用法帮助</FieldLabel>

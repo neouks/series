@@ -215,7 +215,11 @@ func seedPrompts(pg *db.DB) {
 // tool-assembly time each built-in tool is filtered by its agent binding / enabled
 // flag and, if kept, wrapped so the model sees the DB-overridden description/schema
 // and缺省入参 get injected. MCP/skill/host tools have no row and pass through.
-func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
+func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...string) {
+	root := ""
+	if len(configRoot) > 0 {
+		root = configRoot[0]
+	}
 	agent.FindingTrafficBindingEnabled = func() bool { return pg.GetBool(settingAgentTrafficBinding, false) }
 	// Seed the built-in domain tools (first-insert only; DO NOTHING preserves edits).
 	// No startup prune: rows we didn't seed are left alone so future user-defined
@@ -307,7 +311,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 				if _, known := byKey["Bash"]; !known {
 					tool = meterTool(tool, pg, "Bash", agentKey, runInfo)
 				}
-				out[i] = &shellMeteredTool{CoreTool: tool, recorder: pg, declarations: rows, agentKey: agentKey, ri: runInfo}
+				out[i] = &shellMeteredTool{CoreTool: tool, recorder: pg, declarations: rows, agentKey: agentKey, ri: runInfo, configRoot: root}
 			}
 		}
 		// shell hints: user-defined kind="shell" tools are not callable — they are
