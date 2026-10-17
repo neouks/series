@@ -292,6 +292,14 @@ type Manager struct {
 const (
 	settingTrafficCapture      = "traffic_capture"
 	settingAgentTrafficBinding = "agent_traffic_binding"
+	// settingTrafficSkipStatic + settingTrafficSkipTypes control the front-end
+	// static-asset recording filter (HTML/JS/CSS/images/fonts/media); the types
+	// value is a comma-separated rule list, empty = built-in default.
+	settingTrafficSkipStatic = "traffic_skip_static"
+	settingTrafficSkipTypes  = "traffic_skip_types"
+	// settingTrafficRetentionDays bounds how long recorded exchanges stay on
+	// disk; 0 disables the sweeper.
+	settingTrafficRetentionDays = "traffic_retention_days"
 	settingWebSearchOn         = "web_search_enabled"
 	settingWebSearchBackend    = "web_search_backend"
 	settingBraveKey            = "brave_search_api_key"
@@ -418,6 +426,12 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	// Agent-issued curl/wget default to a browser User-Agent via startup files
+	// under <data>/tool-http (existing files are preserved). Injected into every
+	// Bash session by proxyEnv; an explicit -A on the command line still wins.
+	if err := agent.ConfigureToolUA(filepath.Join(dir, "tool-http")); err != nil {
+		log.Printf("[manager] curl/wget 默认 UA 配置失败（不影响启动）：%v", err)
+	}
 	dsn, source, err := pgdb.DSN()
 	if err != nil {
 		return nil, err
@@ -477,6 +491,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
 	if m.traffic != nil {
 		m.traffic.SetRecordingEnabled(m.trafficOn)
+		m.applyTrafficDiskSettings(pg)
 	}
 	// LLM 录制开关（默认关）。录制器每次调用时读取此标志。
 	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
@@ -540,6 +555,68 @@ func (m *Manager) SetTrafficEnabled(on bool) error {
 	// which re-spawns the MCP with the new args/env.
 	m.syncPlaywrightMCPProxy()
 	return nil
+}
+
+// applyTrafficDiskSettings pushes the disk-saving knobs (static-asset filter,
+// retention window) from persisted settings into the recorder.
+func (m *Manager) applyTrafficDiskSettings(pg *pgdb.DB) {
+	m.traffic.SetSkipStatic(pg.GetBool(settingTrafficSkipStatic, true))
+	if v, ok, _ := pg.GetSetting(settingTrafficSkipTypes); ok && strings.TrimSpace(v) != "" {
+		m.traffic.SetSkipRules(strings.Split(v, ","))
+	} else {
+		m.traffic.SetSkipRules(nil)
+	}
+	days := int64(30)
+	if v, ok, _ := pg.GetSetting(settingTrafficRetentionDays); ok {
+		if parsed, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && parsed >= 0 {
+			days = parsed
+		}
+	}
+	m.traffic.SetRetention(days)
+}
+
+// SetTrafficDiskSettings persists and applies any of the traffic disk knobs.
+// Each argument is optional (nil = leave unchanged); an empty skip-types string
+// restores the built-in default list.
+func (m *Manager) SetTrafficDiskSettings(skipStatic *bool, skipTypes *string, retentionDays *int64) error {
+	if skipStatic != nil {
+		if err := m.pg.SetBool(settingTrafficSkipStatic, *skipStatic); err != nil {
+			return err
+		}
+	}
+	if skipTypes != nil {
+		if err := m.pg.SetSetting(settingTrafficSkipTypes, strings.TrimSpace(*skipTypes)); err != nil {
+			return err
+		}
+	}
+	if retentionDays != nil {
+		if *retentionDays < 0 {
+			*retentionDays = 0
+		}
+		if err := m.pg.SetSetting(settingTrafficRetentionDays, strconv.FormatInt(*retentionDays, 10)); err != nil {
+			return err
+		}
+	}
+	if m.traffic != nil {
+		m.applyTrafficDiskSettings(m.pg)
+	}
+	return nil
+}
+
+// TrafficSkipRules reports the effective static-skip rule list for the UI.
+func (m *Manager) TrafficSkipRules() []string {
+	if m.traffic == nil {
+		return nil
+	}
+	return m.traffic.SkipRules()
+}
+
+// TrafficRetentionDays reports the retention window in days (0 = keep forever).
+func (m *Manager) TrafficRetentionDays() int64 {
+	if m.traffic == nil {
+		return 30
+	}
+	return m.traffic.RetentionDays()
 }
 
 // LLMRecordEnabled reports whether LLM request/response recording is on
@@ -1291,8 +1368,11 @@ func (m *Manager) ApplyTaskAdmission(id, expectedStatus, status string, queued b
 	    END,
 	    deadline_at=CASE
 	        WHEN $6='timeout' AND $2 NOT IN ('done','failed','timeout') THEN NULL
+	        -- 暂停不烧超时预算：恢复时把截止时刻顺延整个暂停时长（仅带时限且确实暂停过）。
+	        WHEN paused_at IS NOT NULL AND deadline_at IS NOT NULL THEN deadline_at + (now() - paused_at)
 	        ELSE deadline_at
-	    END
+	    END,
+	    paused_at=NULL
 	WHERE id=$1 AND deleted_at IS NULL AND status=$6
 	RETURNING queued_at, queue_mode, completed_at, first_run_at, deadline_at`, n, status, queued, mode, preservePosition, expectedStatus).
 		Scan(&queuedAt, &committedMode, &completedAt, &firstRunAt, &deadlineAt)
@@ -1345,7 +1425,7 @@ func (m *Manager) ApplyTaskPause(id string) error {
 	}
 	var mode string
 	err = m.pg.QueryRow(`UPDATE tasks
-		SET paused=true, queued=false, queued_at=NULL
+		SET paused=true, paused_at=now(), queued=false, queued_at=NULL
 		WHERE id=$1 AND deleted_at IS NULL AND paused=false
 		  AND status NOT IN ('done','failed','timeout')
 		RETURNING COALESCE(queue_mode,'')`, n).Scan(&mode)

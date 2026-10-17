@@ -797,6 +797,10 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	}
 	if _, loaded := e.started.LoadOrStore(t.ID, true); loaded {
 		e.deleteMu.RUnlock()
+		// Resume shifted deadline_at by the paused interval in the admission
+		// UPDATE; drop the stale in-process copy so taskDeadline re-seeds from
+		// the task state instead of the pre-pause value.
+		e.deadline.Delete(t.ID)
 		if state := t.lifecycleSnapshot(); state.ExecutionMode == db.ExecutionManual && !state.Paused && !state.Queued && !e.IsPaused(t.ID) && !isTerminalStatus(state.Status) {
 			e.stampFirstRun(t) // A paused manual task may begin only on this resume.
 		}

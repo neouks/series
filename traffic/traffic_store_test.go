@@ -167,7 +167,9 @@ func TestLargeBodySpillsButStaysSearchable(t *testing.T) {
 	}
 	tr.record(newFlow(host, "GET", "/backup.sql", nil, big, withRespType("application/sql")))
 
-	// Stored under a single bucket level, named by hash.
+	// Stored under a single bucket level, named by hash. The body is highly
+	// compressible, so it lands as a ".zst" frame smaller than the plaintext
+	// (whose sha256 still names the file).
 	var hash string
 	if err := tr.DB().QueryRow(`SELECT resp_blob FROM exchange_bodies`).Scan(&hash); err != nil {
 		t.Fatal(err)
@@ -175,13 +177,13 @@ func TestLargeBodySpillsButStaysSearchable(t *testing.T) {
 	if len(hash) != 64 {
 		t.Fatalf("resp_blob=%q，应为 64 位 sha256", hash)
 	}
-	blob := filepath.Join(dir, "_blobs", "sha256", hash[:2], hash+".bin")
+	blob := filepath.Join(dir, "_blobs", "sha256", hash[:2], hash+".zst")
 	st, err := os.Stat(blob)
 	if err != nil {
 		t.Fatalf("blob 未落盘到单层桶 %s：%v", blob, err)
 	}
-	if st.Size() != int64(len(big)) {
-		t.Fatalf("blob 大小 %d，应为 %d", st.Size(), len(big))
+	if st.Size() >= int64(len(big)) {
+		t.Fatalf("压缩 blob 大小 %d 不应超过原文 %d", st.Size(), len(big))
 	}
 
 	// The reference is registered, which is what GC consults.
@@ -313,14 +315,14 @@ func TestGCCollectsBlobsAndEmptyBuckets(t *testing.T) {
 		t.Fatal(err)
 	}
 	bucket := filepath.Join(dir, "_blobs", "sha256", hash[:2])
-	if _, err := os.Stat(filepath.Join(bucket, hash+".bin")); err != nil {
+	if _, err := os.Stat(filepath.Join(bucket, hash+".zst")); err != nil {
 		t.Fatal(err)
 	}
 
 	if n, err := tr.DeleteHostsExact([]string{host}); err != nil || n != 1 {
 		t.Fatalf("DeleteHostsExact=(%d,%v)，应为 (1,nil)", n, err)
 	}
-	if _, err := os.Stat(filepath.Join(bucket, hash+".bin")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(bucket, hash+".zst")); !os.IsNotExist(err) {
 		t.Fatalf("失去引用的 blob 未被回收：%v", err)
 	}
 	if _, err := os.Stat(bucket); !os.IsNotExist(err) {

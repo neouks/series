@@ -961,6 +961,11 @@ export interface TrafficHost {
 export interface Settings {
   traffic_capture: boolean;
   agent_traffic_binding: boolean; // Agent 自动绑定流量证据，默认关闭；不影响人工绑定
+  // 流量磁盘优化：静态资源过滤（HTML/JS/CSS/图片/字体/音视频默认不录制，可关）与
+  // 规则清单（逗号分隔；空串 = 恢复内置默认），以及保留天数（0 = 永久，默认 30）。
+  traffic_skip_static: boolean;
+  traffic_skip_types: string;
+  traffic_retention_days: number;
   llm_record: boolean; // LLM 录制开关（默认关）；关闭时不记录任何 LLM 调用
   // Web search. brave_key_set / tavily_key_set reflect whether a key is stored
   // (the values are never returned). On PUT, send the corresponding field to set/clear.

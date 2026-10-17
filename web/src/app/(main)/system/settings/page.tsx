@@ -33,6 +33,11 @@ import { UpdateCard } from "./_components/update-card";
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);
   const [agentTrafficBinding, setAgentTrafficBinding] = React.useState(false);
+  // 流量磁盘优化：静态资源过滤 + 保留期。
+  const [skipStatic, setSkipStatic] = React.useState(true);
+  const [skipTypesInput, setSkipTypesInput] = React.useState("");
+  const [retentionDays, setRetentionDays] = React.useState("30");
+  const [savingDisk, setSavingDisk] = React.useState(false);
   const [webSearch, setWebSearch] = React.useState(false);
   const [backend, setBackend] = React.useState("ddgs");
   const [braveKeySet, setBraveKeySet] = React.useState(false);
@@ -66,6 +71,9 @@ export default function SystemSettingsPage() {
   const apply = React.useCallback((s: Settings) => {
     setTrafficCapture(!!s.traffic_capture);
     setAgentTrafficBinding(!!s.agent_traffic_binding);
+    setSkipStatic(s.traffic_skip_static !== false);
+    setSkipTypesInput(s.traffic_skip_types ?? "");
+    setRetentionDays(String(s.traffic_retention_days ?? 30));
     setWebSearch(!!s.web_search_enabled);
     setBackend(s.web_search_backend || "ddgs");
     setBraveKeySet(!!s.brave_key_set);
@@ -134,6 +142,36 @@ export default function SystemSettingsPage() {
       .then(apply)
       .catch(() => setTrafficCapture(!v)) // revert on failure
       .finally(() => setSaving(false));
+  };
+
+  const saveTrafficDisk = (patch: Partial<Settings>, okMsg: string, revert?: () => void) => {
+    setSavingDisk(true);
+    api
+      .setSettings(patch)
+      .then((s) => {
+        apply(s);
+        toast.success(okMsg);
+      })
+      .catch((e) => {
+        revert?.();
+        toast.error(`保存失败：${(e as Error).message}`);
+      })
+      .finally(() => setSavingDisk(false));
+  };
+
+  const toggleSkipStatic = (v: boolean) => {
+    setSkipStatic(v);
+    saveTrafficDisk({ traffic_skip_static: v }, v ? "已开启静态资源跳过" : "已关闭静态资源跳过", () => setSkipStatic(!v));
+  };
+
+  const saveSkipTypes = () => {
+    saveTrafficDisk({ traffic_skip_types: skipTypesInput.trim() }, "已保存跳过清单");
+  };
+
+  const saveRetention = () => {
+    const days = Math.max(0, Math.floor(Number(retentionDays) || 0));
+    setRetentionDays(String(days));
+    saveTrafficDisk({ traffic_retention_days: days }, days > 0 ? `流量保留 ${days} 天，过期自动清理` : "流量永久保留");
   };
 
   const toggleInjectPlanner = (v: boolean) => {
@@ -332,24 +370,86 @@ export default function SystemSettingsPage() {
               <RadioTowerIcon className="size-4" />
               流量捕获
             </CardTitle>
-            <CardDescription>
-              开启后，所有 Agent 的 HTTP 流量经记录代理全量落库，并向 Agent 注入 traffic_search / traffic_get
-              工具与代理配置（提示词含代理说明）。
-              <br />
-              关闭（默认）时不记录任何流量：Agent
-              <b>不会</b>拿到代理配置与流量工具，提示词也<b>不含</b>代理相关内容。切换后会即时重建 Agent 生效。
-            </CardDescription>
+          <CardDescription>
+            开启后，所有 Agent 的 HTTP 流量经记录代理全量落库，并向 Agent 注入 traffic_search / traffic_get
+            工具与代理配置（提示词含代理说明）。正文以 zstd 压缩存储，磁盘占用大幅降低。
+            <br />
+            关闭（默认）时不记录任何流量：Agent
+            <b>不会</b>拿到代理配置与流量工具，提示词也<b>不含</b>代理相关内容。切换后会即时重建 Agent 生效。
+          </CardDescription>
           </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
-              {trafficCapture ? "已开启 · 正在记录流量并注入代理" : "已关闭 · 不记录、不注入代理"}
-            </Label>
-            <Switch
-              id="traffic-capture"
-              checked={trafficCapture}
-              disabled={!loaded || saving}
-              onCheckedChange={toggleTraffic}
-            />
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
+                {trafficCapture ? "已开启 · 正在记录流量并注入代理" : "已关闭 · 不记录、不注入代理"}
+              </Label>
+              <Switch
+                id="traffic-capture"
+                checked={trafficCapture}
+                disabled={!loaded || saving}
+                onCheckedChange={toggleTraffic}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 border-t pt-4">
+              <div className="min-w-0">
+                <Label htmlFor="traffic-skip-static" className="text-sm">
+                  跳过静态资源录制
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  HTML / JS / CSS / 图片 / 字体 / 音视频等前端资源不落库（不可再搜索/回看）。API 与接口响应不受影响。
+                </p>
+              </div>
+              <Switch
+                id="traffic-skip-static"
+                checked={skipStatic}
+                disabled={!loaded || saving || savingDisk}
+                onCheckedChange={toggleSkipStatic}
+              />
+            </div>
+
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="traffic-skip-types">静态资源跳过清单</FieldLabel>
+                <div className="flex gap-2">
+                  <Input
+                    id="traffic-skip-types"
+                    value={skipTypesInput}
+                    disabled={!loaded || savingDisk}
+                    placeholder="text/html, javascript, image/, .png, .woff2 …（留空使用内置默认清单）"
+                    onChange={(e) => setSkipTypesInput(e.target.value)}
+                  />
+                  <Button variant="outline" disabled={!loaded || savingDisk} onClick={saveSkipTypes}>
+                    保存
+                  </Button>
+                </div>
+                <FieldDescription>
+                  逗号分隔。以 <code>/</code> 结尾按 Content-Type 前缀匹配（如 <code>image/</code>）；以 <code>.</code>
+                  开头按 URL 扩展名匹配（如 <code>.js</code>）；其余按 Content-Type 匹配（如 <code>javascript</code>
+                  覆盖 application/javascript 等）。留空恢复内置默认清单。
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="traffic-retention">流量保留天数</FieldLabel>
+                <div className="flex gap-2">
+                  <Input
+                    id="traffic-retention"
+                    type="number"
+                    min={0}
+                    value={retentionDays}
+                    disabled={!loaded || savingDisk}
+                    className="w-32"
+                    onChange={(e) => setRetentionDays(e.target.value)}
+                  />
+                  <Button variant="outline" disabled={!loaded || savingDisk} onClick={saveRetention}>
+                    保存
+                  </Button>
+                </div>
+                <FieldDescription>
+                  每小时自动清理超过保留期的流量（沿用删除回收，磁盘随之释放）。0 = 永久保留；默认 30 天。
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
           </CardContent>
         </Card>
 

@@ -81,6 +81,7 @@ func (t *Traffic) readEvidence(id string, consume func(EvidenceExchange) error) 
 	if err != nil {
 		return err
 	}
+	req, resp = decompressInline(req), decompressInline(resp)
 	e.Request = bytes.NewReader(req)
 	e.Response = bytes.NewReader(resp)
 	if reqBlob.Valid && reqBlob.String != "" {

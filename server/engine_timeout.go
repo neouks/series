@@ -147,7 +147,9 @@ func (e *Engine) startDeadlineCoordinator(ctx context.Context, t *Task) {
 }
 
 // deadlineCoordinator waits until the task's absolute deadline, then runs the settle
-// sequence. Absolute wall-clock: it keeps counting through pauses.
+// sequence. A paused task holds its budget: the coordinator idles while paused, and
+// the resume admission shifts deadline_at forward by the paused interval, so the
+// countdown continues where it stopped instead of burning through the pause.
 func (e *Engine) deadlineCoordinator(ctx context.Context, t *Task) {
 	for {
 		select {
@@ -157,6 +159,12 @@ func (e *Engine) deadlineCoordinator(ctx context.Context, t *Task) {
 		}
 		if isTerminalStatus(e.m.TaskStatus(t.ID)) {
 			return // already finished (goals met / failed) — nothing to time out
+		}
+		if t.lifecycleSnapshot().Paused || e.IsPaused(t.ID) {
+			if sleepCtx(ctx, deadlinePollInterval) { // paused: clock is frozen
+				return
+			}
+			continue
 		}
 		dl := e.taskDeadline(t)
 		if dl <= 0 {

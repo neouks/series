@@ -111,6 +111,11 @@ FROM exchange_bodies WHERE id=?`, item.ID).Scan(&item.ReqHead, &item.ReqBody, &r
 		if err != nil {
 			return 0, err
 		}
+		// Archives carry plaintext blobs: the file name is the sha256 of the
+		// content, so ImportArchive's checksum only holds uncompressed.
+		if data, err = decodeBlob(data, strings.HasSuffix(source, ".zst")); err != nil {
+			return 0, err
+		}
 		if err := os.WriteFile(filepath.Join(dir, "blobs", hash+".bin"), data, 0o600); err != nil {
 			return 0, err
 		}
@@ -161,13 +166,27 @@ func (t *Traffic) ImportArchive(dir string) (int64, error) {
 		if hex.EncodeToString(sum[:]) != hash {
 			return 0, fmt.Errorf("traffic blob checksum mismatch: %s", hash)
 		}
-		destination := filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash+".bin")
+		// Verified plaintext goes back into the hot store in its compressed form
+		// when that is smaller; either extension already present counts as done.
+		packed, compressed := encodeBlob(data)
+		ext := ".bin"
+		if compressed {
+			ext = ".zst"
+		}
+		other := ".zst"
+		if compressed {
+			other = ".bin"
+		}
+		blobDir := filepath.Join(t.dir, "_blobs", "sha256", hash[:2])
+		destination := filepath.Join(blobDir, hash+ext)
 		if _, err := os.Stat(destination); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-				return 0, err
-			}
-			if err := os.WriteFile(destination, data, 0o644); err != nil {
-				return 0, err
+			if _, altErr := os.Stat(filepath.Join(blobDir, hash+other)); altErr != nil {
+				if err := os.MkdirAll(blobDir, 0o755); err != nil {
+					return 0, err
+				}
+				if err := os.WriteFile(destination, packed, 0o644); err != nil {
+					return 0, err
+				}
 			}
 		}
 	}
@@ -205,7 +224,9 @@ VALUES(?,?,?,?,?,?,?)`, item.ID, item.ReqHead, item.ReqBody, nullIfEmpty(item.Re
 			if err := tx.QueryRow(`SELECT rowid FROM exchanges WHERE id=?`, item.ID).Scan(&rowID); err != nil {
 				return imported, err
 			}
-			content := strings.Join([]string{item.URL, item.ReqHead, string(item.ReqBody), item.RespHead, string(item.RespBody)}, "\n")
+			// Archived inline bodies may be compressed; the index needs plaintext.
+			content := strings.Join([]string{item.URL, item.ReqHead,
+				string(decompressInline(item.ReqBody)), item.RespHead, string(decompressInline(item.RespBody))}, "\n")
 			if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowID, content); err != nil {
 				return imported, err
 			}

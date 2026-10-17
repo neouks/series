@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -173,6 +174,13 @@ type Traffic struct {
 	upstream  atomic.Pointer[url.URL]
 	assets    *db.AssetStore
 	recording atomic.Bool
+	// skipStaticOn + skipRules gate recording of front-end static assets
+	// (HTML/JS/CSS/images/fonts/media), which dominate capture volume while
+	// rarely being what a pentest replays or searches. Hot-swappable from
+	// settings via SetSkipStatic / SetSkipRules.
+	skipStaticOn  atomic.Bool
+	skipRules     atomic.Value // []string
+	retentionDays atomic.Int64
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -204,6 +212,9 @@ func Open(dir, addr string) (*Traffic, error) {
 		return nil, err
 	}
 	t.recording.Store(true)
+	t.skipStaticOn.Store(true)
+	t.skipRules.Store([]string(DefaultSkipStaticRules))
+	go t.retentionLoop()
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
 		Addr:        addr,
@@ -324,6 +335,147 @@ func (t *Traffic) SetAssetPolicyStore(store *db.AssetStore) { t.assets = store }
 // SetRecordingEnabled controls persistence without stopping the proxy. This
 // lets task agents keep the authorization backstop when traffic capture is off.
 func (t *Traffic) SetRecordingEnabled(enabled bool) { t.recording.Store(enabled) }
+
+// DefaultSkipStaticRules lists what "static asset" means when the operator has
+// not customized the list. Content-type families end with "/" and match by
+// prefix; entries starting with "." match the URL path's extension; everything
+// else matches the response content-type exactly or as a subtype marker
+// ("javascript" covers application/javascript, text/javascript, …).
+var DefaultSkipStaticRules = []string{
+	"text/html", "text/css", "javascript", "ecmascript",
+	"image/", "audio/", "video/", "font/",
+	".html", ".htm", ".js", ".mjs", ".css", ".map",
+	".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".bmp", ".ico",
+	".woff", ".woff2", ".ttf", ".otf", ".eot",
+	".mp4", ".webm", ".mp3", ".wav",
+}
+
+// SetSkipStatic toggles static-asset filtering without touching the rule list.
+func (t *Traffic) SetSkipStatic(enabled bool) { t.skipStaticOn.Store(enabled) }
+
+// SetSkipRules replaces the static-asset rule list. Entries are normalized
+// (lowercased, trimmed); an empty list keeps the built-in default.
+func (t *Traffic) SetSkipRules(rules []string) {
+	normalized := make([]string, 0, len(rules))
+	for _, r := range rules {
+		if r = strings.ToLower(strings.TrimSpace(r)); r != "" {
+			normalized = append(normalized, r)
+		}
+	}
+	if len(normalized) == 0 {
+		normalized = []string(DefaultSkipStaticRules)
+	}
+	t.skipRules.Store(normalized)
+}
+
+// SkipRules reports the effective rule list (for the settings UI).
+func (t *Traffic) SkipRules() []string {
+	rules, _ := t.skipRules.Load().([]string)
+	return rules
+}
+
+// RetentionDays reports the retention window in days (0 = keep forever).
+func (t *Traffic) RetentionDays() int64 { return t.retentionDays.Load() }
+
+// shouldSkipStatic reports whether one completed exchange is a front-end static
+// asset not worth recording. The response content-type decides; the request's
+// URL extension is the fallback for mislabeled servers.
+func (t *Traffic) shouldSkipStatic(f *mproxy.Flow) bool {
+	if !t.skipStaticOn.Load() {
+		return false
+	}
+	rules, _ := t.skipRules.Load().([]string)
+	if len(rules) == 0 {
+		return false
+	}
+	ct := strings.ToLower(strings.TrimSpace(f.Response.Header.Get("Content-Type")))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	ext := strings.ToLower(path.Ext(f.Request.URL.Path))
+	for _, rule := range rules {
+		switch {
+		case strings.HasSuffix(rule, "/"):
+			if strings.HasPrefix(ct, rule) {
+				return true
+			}
+		case strings.HasPrefix(rule, "."):
+			if ext == rule {
+				return true
+			}
+		default:
+			if ct == rule || strings.Contains(ct, rule) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SetRetention bounds how long recorded exchanges stay on disk. Zero disables
+// the sweeper (keep forever).
+func (t *Traffic) SetRetention(days int64) {
+	if days < 0 {
+		days = 0
+	}
+	t.retentionDays.Store(days)
+}
+
+// retentionLoop drops exchanges older than the retention window once an hour.
+// Deletion reuses the same four-table path and background reclamation as a
+// manual host delete, so space is actually returned to the filesystem.
+func (t *Traffic) retentionLoop() {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-t.closed:
+			return
+		case <-ticker.C:
+			days := t.retentionDays.Load()
+			if days <= 0 {
+				continue
+			}
+			cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+			if n, err := t.DeleteOlderThan(cutoff); err != nil {
+				log.Printf("[traffic] 保留期清理失败：%v", err)
+			} else if n > 0 {
+				log.Printf("[traffic] 保留期 %d 天：清理 %d 条过期流量", days, n)
+			}
+		}
+	}
+}
+
+// DeleteOlderThan removes every exchange recorded before the unix cutoff and
+// returns how many went away. Reclamation and blob GC run in the background
+// afterwards, exactly like DeleteHost.
+func (t *Traffic) DeleteOlderThan(cutoff int64) (int64, error) {
+	t.wmu.Lock()
+	defer t.wmu.Unlock()
+	tx, err := t.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	n, err := t.deleteWhere(tx, "ts<?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		go func() {
+			t.reclaim()
+			t.wmu.Lock()
+			defer t.wmu.Unlock()
+			if err := t.gcBlobs(); err != nil {
+				log.Printf("[traffic] 过期流量 blob 清理失败：%v", err)
+			}
+		}()
+	}
+	return n, nil
+}
 
 func (t *Traffic) authorizeTaskRequest(_ http.ResponseWriter, req *http.Request) (bool, error) {
 	taskID, scope, tagged, err := guard.ParseTaskProxyScope(req.Header.Get("Proxy-Authorization"))
@@ -456,6 +608,9 @@ func (s *sink) Response(f *mproxy.Flow) {
 	if !s.t.recording.Load() || f.Request == nil || f.Response == nil {
 		return
 	}
+	if s.t.shouldSkipStatic(f) {
+		return
+	}
 	s.t.record(f)
 }
 
@@ -585,7 +740,8 @@ type storedBody struct {
 // written to the content-addressed store and keep a readable preview inline so a
 // reader can identify them without fetching the blob. Either way, text bodies
 // are handed to the full-text index in full (up to maxIndexBody) — indexing is
-// independent of where the bytes end up.
+// independent of where the bytes end up, and both storage forms are compressed
+// (see compress.go) while the index still gets the in-memory plaintext.
 func (t *Traffic) spill(body []byte, contentType string) storedBody {
 	if len(body) == 0 {
 		return storedBody{}
@@ -598,28 +754,41 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 		return string(clipBytes(body, maxIndexBody))
 	}
 	if len(body) <= maxInlineBody {
-		return storedBody{inline: body, index: indexText()}
+		return storedBody{inline: compressInline(body), index: indexText()}
 	}
 
 	sum := sha256.Sum256(body)
 	h := hex.EncodeToString(sum[:])
 	// One bucket level (256 buckets) is enough to keep any single directory small;
 	// the store only ever holds bodies above maxInlineBody, deduplicated by hash.
+	// The hash names the plaintext, so a compressed frame and a raw copy of the
+	// same body are one identity and either extension satisfies a lookup.
 	blobDir := filepath.Join(t.dir, "_blobs", "sha256", h[:2])
 	if err := os.MkdirAll(blobDir, 0o755); err != nil {
 		log.Printf("[traffic] 创建 blob 目录失败：%v", err)
-		return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
+		return storedBody{inline: compressInline(clipBytes(body, blobPreview)), index: indexText()}
 	}
-	blobPath := filepath.Join(blobDir, h+".bin")
+	packed, compressed := encodeBlob(body)
+	ext := ".bin"
+	if compressed {
+		ext = ".zst"
+	}
+	other := ".zst"
+	if compressed {
+		other = ".bin"
+	}
+	blobPath := filepath.Join(blobDir, h+ext)
 	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
-		if err := os.WriteFile(blobPath, body, 0o644); err != nil {
-			log.Printf("[traffic] 写 blob %s 失败：%v", h, err)
-			return storedBody{inline: clipBytes(body, blobPreview), index: indexText()}
+		if _, altErr := os.Stat(filepath.Join(blobDir, h+other)); altErr != nil {
+			if err := os.WriteFile(blobPath, packed, 0o644); err != nil {
+				log.Printf("[traffic] 写 blob %s 失败：%v", h, err)
+				return storedBody{inline: compressInline(clipBytes(body, blobPreview)), index: indexText()}
+			}
 		}
 	}
 	sb := storedBody{hash: h, index: indexText()}
 	if text {
-		sb.inline = []byte(truncateUTF8(body, blobPreview))
+		sb.inline = compressInline([]byte(truncateUTF8(body, blobPreview)))
 	} else {
 		sb.inline = []byte(binaryTag(contentType, body))
 	}
@@ -744,9 +913,10 @@ func sanitize(s string) string {
 
 var blobHashRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// blobPath locates a stored blob. Current writes use one bucket level; blobs
-// written before that change used two, so both layouts are probed rather than
-// migrated.
+// blobPath locates a stored blob. Current writes use one bucket level and a
+// compressed ".zst" extension (raw ".bin" when the body does not compress);
+// blobs written before either change used two levels and ".bin", so all
+// layouts are probed rather than migrated.
 func (t *Traffic) blobPath(hash string) (string, error) {
 	hash = strings.ToLower(strings.TrimSpace(hash))
 	// Validated as pure hex before touching the filesystem, so a crafted hash can
@@ -755,6 +925,7 @@ func (t *Traffic) blobPath(hash string) (string, error) {
 		return "", fmt.Errorf("非法的 blob hash")
 	}
 	for _, p := range []string{
+		filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash+".zst"),
 		filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash+".bin"),
 		filepath.Join(t.dir, "_blobs", "sha256", hash[:2], hash[2:4], hash+".bin"),
 	} {
@@ -765,35 +936,41 @@ func (t *Traffic) blobPath(hash string) (string, error) {
 	return "", fmt.Errorf("blob %s 不存在", hash)
 }
 
-// Blob opens a spilled body for streaming; the caller must close the file.
-// Streaming matters here: the driver exposes no incremental BLOB API, so keeping
-// large bodies on disk is what lets them be served without loading them whole.
-func (t *Traffic) Blob(hash string) (*os.File, int64, error) {
+// readBlobBytes loads one blob as plaintext: ".zst" frames are decoded, legacy
+// ".bin" files pass through. Bodies above the proxy's streaming threshold are
+// never recorded, so the decoded size is bounded (~5MiB) and holding it in
+// memory for a reader is safe.
+func (t *Traffic) readBlobBytes(hash string) ([]byte, error) {
 	p, err := t.blobPath(hash)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	f, err := os.Open(p)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	return decodeBlob(data, strings.HasSuffix(p, ".zst"))
+}
+
+// Blob exposes a spilled body as plaintext for streaming; the caller must
+// close the reader.
+func (t *Traffic) Blob(hash string) (io.ReadCloser, int64, error) {
+	data, err := t.readBlobBytes(hash)
 	if err != nil {
 		return nil, 0, err
 	}
-	st, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, 0, err
-	}
-	return f, st.Size(), nil
+	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 }
 
 // BlobRange reads at most length bytes of a blob from offset, and reports the
 // blob's total size. Used by the agent tool to page through a large body without
 // pulling all of it into the model's context.
 func (t *Traffic) BlobRange(hash string, offset, length int64) (data []byte, total int64, err error) {
-	f, size, err := t.Blob(hash)
+	rc, size, err := t.Blob(hash)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
+	defer rc.Close()
 	if offset < 0 {
 		offset = 0
 	}
@@ -803,9 +980,12 @@ func (t *Traffic) BlobRange(hash string, offset, length int64) (data []byte, tot
 	if length <= 0 || offset+length > size {
 		length = size - offset
 	}
+	if _, err := io.CopyN(io.Discard, rc, offset); err != nil && !errors.Is(err, io.EOF) {
+		return nil, size, err
+	}
 	buf := make([]byte, length)
-	n, err := f.ReadAt(buf, offset)
-	if err != nil && !errors.Is(err, io.EOF) {
+	n, err := io.ReadFull(rc, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, size, err
 	}
 	return buf[:n], size, nil
@@ -1019,6 +1199,7 @@ func (t *Traffic) Get(id string) (req, resp string, err error) {
 FROM exchange_bodies b JOIN exchanges e ON e.id=b.id WHERE b.id=?`, id).
 		Scan(&reqHead, &reqBody, &reqBlob, &respHead, &respBody, &respBlob, &reqLen, &respLen)
 	if err == nil {
+		reqBody, respBody = decompressInline(reqBody), decompressInline(respBody)
 		return assembleRaw(reqHead, reqBody, reqBlob, reqLen), assembleRaw(respHead, respBody, respBlob, respLen), nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -1897,7 +2078,7 @@ func (t *Traffic) gcBlobs() error {
 			}
 			return nil
 		}
-		h := strings.TrimSuffix(d.Name(), ".bin")
+		h := strings.TrimSuffix(strings.TrimSuffix(d.Name(), ".zst"), ".bin")
 		if _, ok := refs[h]; !ok {
 			os.Remove(p)
 		}

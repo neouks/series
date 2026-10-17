@@ -225,18 +225,24 @@ func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 // GIT_SSL_CAINFO→git, NODE_EXTRA_CA_CERTS→node; NODE_USE_ENV_PROXY makes Node 24+
 // honor the proxy vars. ALL_PROXY is set too so a socks5 egress proxy (which curl
 // only reads from ALL_PROXY, not HTTP(S)_PROXY) works in the capture-off path.
-// Empty proxyAddr → nil (direct, unchanged env).
+// Independently of the proxy, the curl/wget browser User-Agent entries from
+// ConfigureToolUA are always appended — capture-off sessions keep the default UA.
+// Returns nil only when there is nothing to add at all.
 func proxyEnv(proxyAddr, caCert string) []string {
+	env := append([]string(nil), currentToolUAEnv()...)
 	if proxyAddr == "" {
-		return nil
+		if len(env) == 0 {
+			return nil
+		}
+		return env
 	}
-	env := []string{
-		"HTTP_PROXY=" + proxyAddr, "HTTPS_PROXY=" + proxyAddr,
-		"http_proxy=" + proxyAddr, "https_proxy=" + proxyAddr,
-		"ALL_PROXY=" + proxyAddr, "all_proxy=" + proxyAddr, // socks5 egress: curl reads only this
+	env = append(env,
+		"HTTP_PROXY="+proxyAddr, "HTTPS_PROXY="+proxyAddr,
+		"http_proxy="+proxyAddr, "https_proxy="+proxyAddr,
+		"ALL_PROXY="+proxyAddr, "all_proxy="+proxyAddr, // socks5 egress: curl reads only this
 		"NO_PROXY=", "no_proxy=", // task targets (including loopback) must not bypass the policy proxy
 		"NODE_USE_ENV_PROXY=1", // Node 24+: honor HTTP(S)_PROXY in built-in fetch/http
-	}
+	)
 	if caCert != "" {
 		env = append(env,
 			"SSL_CERT_FILE="+caCert,

@@ -12,12 +12,28 @@ import (
 // bulkRecord fills the index with inline bodies — the ones that actually make
 // index.sqlite grow. Binary content type keeps them out of the full-text index so
 // the test stays fast; the FTS side is covered by TestReclaimMergesFTSTombstones.
+// The bodies are pseudo-random: inline storage is compressed now, and repeated
+// filler would deflate to nothing instead of growing the database.
 func bulkRecord(tr *Traffic, host string, n, size int) {
-	body := []byte(strings.Repeat("A", size))
+	body := incompressibleBytes(size)
 	for i := 0; i < n; i++ {
 		tr.record(newFlow(host, "GET", fmt.Sprintf("/blob/%d", i), nil, body,
 			withRespType("application/octet-stream")))
 	}
+}
+
+// incompressibleBytes fills n bytes from a deterministic xorshift stream — same
+// bytes on every run, no compression gain.
+func incompressibleBytes(n int) []byte {
+	out := make([]byte, n)
+	var state uint64 = 0x9E3779B97F4A7C15
+	for i := range out {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		out[i] = byte(state >> 32)
+	}
+	return out
 }
 
 func TestNewIndexEnablesIncrementalVacuum(t *testing.T) {
