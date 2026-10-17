@@ -107,11 +107,12 @@ AND b.block_kind<>'invalid' AND (b.asset_id=a.id OR b.asset_key=task_asset_ident
 			summary = fmt.Sprintf("Worker 意图 #%d 通过 insert_assets 登记", ownerNode)
 		}
 		// Deleted host identities must not be reattached by discovery. Active
-		// manual blocks retain their links and test history.
+		// manual blocks retain their links and test history. Deletion is per
+		// host: subdomains of a deleted domain stay discoverable.
 		if _, err := scoped.tx.Exec(`UPDATE assets a SET task_ids=array_remove(a.task_ids,$1)
 WHERE $1=ANY(a.task_ids) AND EXISTS(SELECT 1 FROM task_asset_blocks b
 WHERE b.task_id=$1 AND b.block_kind='deleted' AND b.asset_type IN ('root_domain','subdomain','ip')
-AND task_asset_host_within(task_asset_host(a),b.host_key))`, taskID); err != nil {
+AND task_asset_host(a)=b.host_key)`, taskID); err != nil {
 			return 0, err
 		}
 		var linked bool

@@ -3362,14 +3362,6 @@ export const skills: SkillItem[] = [
     usage_agents: ["worker"],
     last_used: "2026-08-19T21:40:00Z",
   },
-  {
-    name: "scopesentry",
-    description: "从 ScopeSentry 拉取资产并归并到公司范围；批量导入资产时使用。",
-    files: ["SKILL.md", "assets/mapping.md"],
-    calls: 0,
-    tasks: 0,
-    usage_agents: [],
-  },
 ];
 
 export const skillCalls: SkillCall[] = [
@@ -4092,69 +4084,6 @@ export function assetRefsFor(_assetId: number) {
     facts: [{ id: 34, kind: "fact", state: "confirmed", summary: "search?q= 参数可注入，报错回显 MySQL 语法错误" }],
     findings: [{ id: 41, kind: "finding", state: "confirmed", summary: "[高] SQL 注入 www.acme.com/search?q=" }],
   };
-}
-
-// ── 工作空间文件管理器（/workspace/*，demo：静态示例树）──
-const WS_TREE: Record<string, { name: string; dir: boolean; size: number; content?: string }[]> = {
-  "": [
-    { name: "t-001", dir: true, size: 0 },
-    { name: "transcripts", dir: true, size: 0 },
-    {
-      name: "notes.md",
-      dir: false,
-      size: 96,
-      content: "# 工作区笔记\n\n（demo）这是工作空间根目录下的示例文件，可在线编辑并保存。\n",
-    },
-  ],
-  "t-001": [
-    { name: "i12", dir: true, size: 0 },
-    { name: "recon.txt", dir: false, size: 64, content: "acme.com\nwww.acme.com\napi.acme.com\nadmin.acme.com\n" },
-  ],
-  "t-001/i12": [
-    {
-      name: "exploit.py",
-      dir: false,
-      size: 220,
-      content:
-        "#!/usr/bin/env python3\n# (demo) SQLi PoC — www.acme.com/search?q=\nimport requests\n\nr = requests.get('https://www.acme.com/search', params={'q': \"1' OR '1'='1\"})\nprint(r.status_code, len(r.text))\n",
-    },
-    {
-      name: "response.html",
-      dir: false,
-      size: 180,
-      content: "<!-- (demo) 抓到的响应体片段 -->\n<html><body>MySQL error near ''1'='1'</body></html>\n",
-    },
-  ],
-  transcripts: [
-    { name: "exp1-worker-i12.jsonl", dir: false, size: 512, content: "（demo）原始 LLM 对话记录示例，此处省略。" },
-  ],
-};
-
-const wsClean = (p: string) => p.replace(/^\/+|\/+$/g, "");
-
-export function workspaceList(path: string) {
-  const key = wsClean(path);
-  const items = WS_TREE[key] ?? [];
-  const now = Date.parse("2026-08-09T03:00:00Z");
-  return {
-    path: key,
-    entries: items.map((it, i) => ({
-      name: it.name,
-      path: key ? `${key}/${it.name}` : it.name,
-      dir: it.dir,
-      size: it.size,
-      mtime: now - i * 3_600_000,
-    })),
-  };
-}
-
-export function workspaceRead(path: string) {
-  const key = wsClean(path);
-  const slash = key.lastIndexOf("/");
-  const parent = slash >= 0 ? key.slice(0, slash) : "";
-  const name = slash >= 0 ? key.slice(slash + 1) : key;
-  const f = (WS_TREE[parent] ?? []).find((x) => x.name === name && !x.dir);
-  return { path: key, size: f?.size ?? 0, binary: false, content: f?.content ?? "" };
 }
 
 // ── 工具执行历史（/commands）──

@@ -87,3 +87,62 @@ func TestWorkerProxyPendingAndManualLimits(t *testing.T) {
 		t.Fatal("completed worker token usable")
 	}
 }
+
+// Blocking a domain is per host: the proxy stops egress to that exact host but
+// a subdomain host keeps its own state (pending stays worker-executable).
+func TestProxyBlockIsPerHost(t *testing.T) {
+	dsn := os.Getenv("SERIES_PG_DSN")
+	if dsn == "" {
+		t.Skip("requires explicit isolated SERIES_PG_DSN")
+	}
+	d, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("proxy per host", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	es := d.Exploration(task.ExplorationID)
+	intent, err := es.AddNode(db.KindIntent, map[string]any{"summary": "proxy per host work"}, 1, "running", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := &Traffic{assets: d.Assets()}
+	request := func(scope, host string) bool {
+		t.Helper()
+		user, pass, ok := guard.TaskProxyCredentials(task.ID, scope)
+		if !ok {
+			t.Fatal("proxy signing unavailable")
+		}
+		req := httptest.NewRequest("GET", "https://"+host+"/x", nil)
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+pass)))
+		allowed, err := tr.authorizeTaskRequest(httptest.NewRecorder(), req)
+		if allowed && err != nil {
+			t.Fatal(err)
+		}
+		return allowed
+	}
+	root := "perhost.proxy.test"
+	id, err := d.Assets().UpsertRootDomain(db.UpsertRootDomainReq{Domain: root, TaskID: task.ID, AgentDiscovered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Assets().BlockTaskAssets(task.ID, []int64{id}, "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	if request("mainagent", root) || request(fmt.Sprintf("worker:%d", intent), root) {
+		t.Fatal("blocked root host allowed")
+	}
+	if !request("mainagent", "sub."+root) {
+		t.Fatal("root block cascaded to subdomain host")
+	}
+	if !request(fmt.Sprintf("worker:%d", intent), "sub."+root) {
+		t.Fatal("root block cascaded to subdomain host for worker")
+	}
+	if request("planner", "sub."+root) {
+		t.Fatal("subdomain host is approved for planner without its own approval")
+	}
+}

@@ -4,8 +4,6 @@ import {
   Brain,
   Bug,
   ClipboardList,
-  FolderOpen,
-  FolderSync,
   LayoutDashboard,
   type LucideIcon,
   MessageSquare,
@@ -72,8 +70,6 @@ export const sidebarItems: NavGroup[] = [
       { id: "commands", title: "工具执行", url: "/function/commands", icon: Terminal },
       { id: "llm-records", title: "LLM 录制", url: "/function/llm-records", icon: Radio },
       { id: "assets", title: "资产", url: "/function/assets", icon: Network },
-      { id: "sync", title: "资产同步", url: "/function/sync", icon: FolderSync },
-      { id: "workspace", title: "工作空间", url: "/function/workspace", icon: FolderOpen },
     ],
   },
   {

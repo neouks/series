@@ -49,7 +49,7 @@ func TestHTTPEntryAllRoutesAndTwoLayers(t *testing.T) {
 	s := &Server{httpAuth: g, jwtKey: []byte("test-key")}
 	h := s.Handler()
 	requestNumber := 0
-	for _, path := range []string{"/", "/login/", "/setup/", "/_next/static/app.js", "/favicon.ico", "/api/auth/status", "/api/auth/init", "/api/health", "/api/workspace/download?path=x", "/api/tasks/1/events", "/missing"} {
+	for _, path := range []string{"/", "/login/", "/setup/", "/_next/static/app.js", "/favicon.ico", "/api/auth/status", "/api/auth/init", "/api/health", "/api/assets", "/api/tasks/1/events", "/missing"} {
 		for _, method := range []string{"GET", "POST", "OPTIONS", "HEAD"} {
 			t.Run(method+path, func(t *testing.T) {
 				r := httptest.NewRequest(method, path, nil)

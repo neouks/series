@@ -831,14 +831,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/tasks/{id}/asset-approvals/approve", func(w http.ResponseWriter, r *http.Request) { s.updateTaskAssetApprovals(w, r, true) })
 	mux.HandleFunc("POST /api/tasks/{id}/asset-approvals/revoke", func(w http.ResponseWriter, r *http.Request) { s.updateTaskAssetApprovals(w, r, false) })
 
-	// 工作空间文件管理器（针对 workDir）
-	mux.HandleFunc("GET /api/workspace/list", s.wsList)
-	mux.HandleFunc("GET /api/workspace/read", s.wsRead)
-	mux.HandleFunc("POST /api/workspace/write", s.wsWrite)
-	mux.HandleFunc("POST /api/workspace/mkdir", s.wsMkdir)
-	mux.HandleFunc("DELETE /api/workspace/delete", s.wsDelete)
-	mux.HandleFunc("GET /api/workspace/download", s.wsDownload)
-	mux.HandleFunc("POST /api/workspace/upload", s.wsUpload)
 	mux.HandleFunc("GET /api/tasks/{id}/scope", s.taskScopeList)
 	mux.HandleFunc("POST /api/tasks/{id}/scope", s.taskScopeAdd)
 	mux.HandleFunc("DELETE /api/tasks/{id}/scope/{sid}", s.taskScopeDelete)
@@ -999,12 +991,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mcp/{id}/tools", s.pgMCPTools)
 	mux.HandleFunc("GET /api/mcp/{id}/usage", s.pgMCPUsage)
 	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.pgRefreshMCP)
-	// 资产同步 — ScopeSentry 数据源
-	mux.HandleFunc("GET /api/sync/scopesentry/status", s.syncSSStatus)
-	mux.HandleFunc("POST /api/sync/scopesentry/datasource", s.syncSSDatasource)
-	mux.HandleFunc("GET /api/sync/scopesentry/projects", s.syncSSProjects)
-	mux.HandleFunc("GET /api/sync/scopesentry/tasks", s.syncSSTasks)
-	mux.HandleFunc("POST /api/sync/scopesentry/sync", s.syncSSRun)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)

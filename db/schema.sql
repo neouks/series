@@ -774,6 +774,9 @@ SELECT CASE asset.type
     ELSE asset.type||':'||asset.id::text END;
 $$ LANGUAGE SQL IMMUTABLE;
 
+-- Authorization is per host: a tombstone matches only its exact host, never a
+-- subdomain of it. Blocking, revoking or deleting a domain is therefore a
+-- standalone decision about that host.
 CREATE OR REPLACE FUNCTION task_asset_blocked(p_task_id BIGINT, p_asset_id BIGINT)
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -787,13 +790,16 @@ RETURN EXISTS (
       AND (block.asset_id=p_asset_id
            OR block.asset_key=task_asset_identity_key(t)
            OR (block.asset_type IN ('root_domain','subdomain','ip') AND block.host_key<>''
-               AND task_asset_host_within(task_asset_host(t),block.host_key)))
+               AND task_asset_host(t)=block.host_key))
 );
 END;
 $$ LANGUAGE plpgsql STABLE;
 
--- Services/endpoints inherit their exact host. Synthetic pending ancestors do
--- not override it, but explicit ancestor revocations and blocks always win.
+-- Authorization is per host: only assets on the target's exact host influence
+-- it (same-host DNS siblings and the service/endpoint on that host inherit the
+-- host decision). A parent domain's approval, revocation, block or deletion
+-- never changes a different-host subdomain. Synthetic pending ancestors do not
+-- override the host decision.
 CREATE OR REPLACE FUNCTION task_asset_owner_approval_state(p_task_id BIGINT,p_asset_id BIGINT)
 RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
 DECLARE
@@ -807,15 +813,14 @@ BEGIN
  WHERE a.id=p_asset_id AND l.task_id=p_task_id;
  IF NOT FOUND THEN RETURN 'revoked'; END IF;
  IF target_type NOT IN ('root_domain','subdomain','ip','service','endpoint') THEN RETURN 'approved'; END IF;
- -- Hosts are normalized on asset writes; only matching parents need their
- -- authorization/tombstone checked. Keep normalized parent reads together.
+ -- Hosts are normalized on asset writes; only same-host assets share
+ -- authorization. Keep normalized parent reads together.
  WITH parents AS MATERIALIZED (
   SELECT p.id,task_asset_host(p) AS host,l.approval_state
   FROM task_asset_links l JOIN assets p ON p.id=l.asset_id
   WHERE l.task_id=p_task_id AND p.type IN ('root_domain','subdomain','ip')
  ), matching AS MATERIALIZED (
-  SELECT * FROM parents WHERE host<>'' AND target_host<>'' AND
-   (host=target_host OR (try_inet(host) IS NULL AND right(target_host,length(host)+1)='.'||host))
+  SELECT * FROM parents WHERE host<>'' AND target_host<>'' AND host=target_host
  )
  SELECT count(*),bool_or(approval_state='blocked' OR task_asset_blocked(p_task_id,id)),
   bool_or(approval_state='revoked'),bool_or(host=target_host AND approval_state='pending'),
@@ -1127,13 +1132,6 @@ ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS insecure BOOLEAN NOT NULL DEFAU
 DROP TRIGGER IF EXISTS trg_mcp_upd ON mcp_servers;
 CREATE TRIGGER trg_mcp_upd BEFORE UPDATE ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- 默认数据源占位：ScopeSentry 资产同步 MCP（地址与认证均留空、未启用）。
--- 供「资产同步」页检测数据源是否已配置；用户在页面填入 url 与 X-API-Key 后再启用。
--- 仅在缺失时插入，绝不覆盖用户已配置/已启用的服务器（schema.sql 每次启动都会 Exec）。
-INSERT INTO mcp_servers (name, transport, url, env, enabled)
-VALUES ('ScopeSentry', 'http', NULL, '{"X-API-Key":""}', false)
-ON CONFLICT (name) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS mcp_tools_cache (
     id            BIGSERIAL PRIMARY KEY,

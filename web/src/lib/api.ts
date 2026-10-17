@@ -84,8 +84,6 @@ import type {
   Severity,
   SkillCall,
   SkillItem,
-  SSProject,
-  SSTask,
   Stats,
   Task,
   TaskArchive,
@@ -112,8 +110,6 @@ import type {
   TrafficResp,
   UpdateCheck,
   UsageStats,
-  WorkspaceFile,
-  WorkspaceListing,
 } from "@/lib/types";
 
 function getToken(): string | null {
@@ -430,48 +426,6 @@ export const api = {
   deleteTaskScope: (id: string, scopeId: number) => del<{ ok: boolean }>(`/tasks/${id}/scope/${scopeId}`),
   // 某资产在本任务里关联的意图 / 事实 / 发现（覆盖图节点抽屉用）。
   taskAssetRefs: (id: string, assetId: number) => get<CoverageAssetRefs>(`/tasks/${id}/asset-refs?asset_id=${assetId}`),
-
-  // ---- workspace file manager (workDir) ----
-  workspaceList: (path = "") => get<WorkspaceListing>(`/workspace/list?path=${encodeURIComponent(path)}`),
-  workspaceRead: (path: string) => get<WorkspaceFile>(`/workspace/read?path=${encodeURIComponent(path)}`),
-  workspaceWrite: (path: string, content: string) =>
-    post<{ ok: boolean; path: string }>(`/workspace/write`, { path, content }),
-  workspaceMkdir: (path: string) => post<{ ok: boolean; path: string }>(`/workspace/mkdir`, { path }),
-  workspaceDelete: (path: string) => del<{ ok: boolean }>(`/workspace/delete?path=${encodeURIComponent(path)}`),
-  workspaceUpload: async (dir: string, files: File[]) => {
-    if (MOCK) return { uploaded: files.length };
-    const fd = new FormData();
-    for (const f of files) fd.append("file", f);
-    const token = getToken();
-    const r = await entryAwareFetch(`/api/workspace/upload?path=${encodeURIComponent(dir)}`, {
-      method: "POST",
-      headers: { ...(token ? { "X-Series-Token": token } : {}) },
-      body: fd,
-    });
-    if (!r.ok) throw new Error(`上传失败: ${r.status}`);
-    return r.json() as Promise<{ uploaded: number }>;
-  },
-  workspaceDownload: async (path: string) => {
-    let blob: Blob;
-    if (MOCK) {
-      blob = new Blob([`（demo）${path} 的下载内容示例。`], { type: "text/plain" });
-    } else {
-      const token = getToken();
-      const r = await entryAwareFetch(`/api/workspace/download?path=${encodeURIComponent(path)}`, {
-        headers: { ...(token ? { "X-Series-Token": token } : {}) },
-      });
-      if (!r.ok) throw new Error(`下载失败: ${r.status}`);
-      blob = await r.blob();
-    }
-    const objUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objUrl;
-    a.download = path.split("/").pop() || "download";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objUrl);
-  },
 
   // ---- assets ----
   // Server-side paginated: pass limit/offset, get back the page + full match total.
@@ -1181,35 +1135,6 @@ export const api = {
       enabled: boolean;
     }>,
   ) => post<{ ok: boolean; results: MCPImportResult[] }>("/mcp/import", { servers }),
-
-  // ---- 资产同步 (ScopeSentry 数据源) ----
-  ssStatus: () =>
-    get<{ exists: boolean; configured: boolean; enabled: boolean; reachable: boolean; url?: string; tools: string[] }>(
-      "/sync/scopesentry/status",
-    ),
-  ssDatasource: (body: { url?: string; api_key?: string }) =>
-    post<{ id: number; enabled: boolean }>("/sync/scopesentry/datasource", body),
-  ssProjects: (page = 1, size = 50, search = "") =>
-    get<{ projects: SSProject[]; tag: Record<string, number> }>(
-      `/sync/scopesentry/projects?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
-    ).then((r) => ({ projects: arr(r.projects), tag: r.tag ?? {} })),
-  ssTasks: (page = 1, size = 50, search = "") =>
-    get<{ tasks: SSTask[] }>(
-      `/sync/scopesentry/tasks?page=${page}&size=${size}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
-    ).then((r) => arr(r.tasks)),
-  ssSync: (body: {
-    dimension: "project" | "task";
-    targets: string[];
-    asset_types: string[];
-    create_company?: boolean;
-    page_size?: number;
-  }) =>
-    post<{
-      synced: Record<string, number>;
-      companies: string[] | null;
-      warnings: string[] | null;
-      errors: string[] | null;
-    }>("/sync/scopesentry/sync", body),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

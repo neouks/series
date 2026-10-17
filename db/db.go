@@ -273,9 +273,18 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 		ON CONFLICT (name) DO NOTHING`); err != nil {
 		return fmt.Errorf("seed builtin mcps: %w", err)
 	}
-	// NOTE: the placeholder ScopeSentry data-source MCP (empty URL + empty X-API-Key,
-	// disabled) is seeded directly in schema.sql §F so a raw `psql < schema.sql` init
-	// also gets it. schema.sql is Exec'd on every startup, so it stays idempotent.
+	// The ScopeSentry asset-sync module (page + /api/sync/scopesentry/* + skill) was
+	// removed. Drop its seeded/configured MCP row (mcp_tools_cache cascades via FK),
+	// any agent MCP-visibility rows left orphaned, and the skill's visibility
+	// bindings (TEXT keys, no FK). Already-synced assets are ordinary asset rows
+	// and stay.
+	if _, err := d.Exec(`
+		DELETE FROM mcp_servers WHERE name='ScopeSentry';
+		DELETE FROM agent_visibility WHERE resource_kind='mcp'
+		  AND NOT EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=agent_visibility.resource_id);
+		DELETE FROM agent_skill_visibility WHERE skill_name='scopesentry'`); err != nil {
+		return fmt.Errorf("cleanup scopesentry: %w", err)
+	}
 	if err := d.seedBuiltinSkillVisibility(); err != nil {
 		return fmt.Errorf("seed skill visibility: %w", err)
 	}
@@ -294,10 +303,8 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 // builtinSkillVisibility maps a shipped skill's directory name → the built-in
 // agent keys that should see it by default. The skill FILES themselves live on the
 // filesystem (SkillDir, loaded by norma at runtime); DB only carries this visibility
-// binding. Skills omitted here (e.g. playwright-cli, scopesentry) ship invisible by
-// default — the user turns them on per-agent when needed. scopesentry additionally
-// declares `mcps: ScopeSentry`, which only takes effect once it's made visible and
-// that MCP is enabled/configured.
+// binding. Skills omitted here (e.g. playwright-cli) ship invisible by default —
+// the user turns them on per-agent when needed.
 var builtinSkillVisibility = map[string][]string{
 	"api-recon": {"auto", "pentest", "worker"},
 }

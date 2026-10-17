@@ -393,26 +393,6 @@ export interface CoverageAssetRefs {
   findings: CoverageAssetRef[];
 }
 
-// ---- Workspace file manager (workDir) ----
-export interface WorkspaceEntry {
-  name: string;
-  path: string; // workspace-relative, forward slashes
-  dir: boolean;
-  size: number;
-  mtime: number; // unix millis
-}
-export interface WorkspaceListing {
-  path: string;
-  entries: WorkspaceEntry[];
-}
-export interface WorkspaceFile {
-  path: string;
-  size: number;
-  binary: boolean;
-  too_large?: boolean;
-  content?: string;
-}
-
 // 任务测试范围的一条（覆盖度分母 + 授权边界）。
 export interface TaskScopeRow {
   id: number;
@@ -1361,24 +1341,6 @@ export interface InterceptApprovalRow extends InterceptPending {
   conv_title: string; // "" if no linked conversation
   conv_agent_key: string; // "" if no linked conversation
   rule_name: string; // "" if rule was deleted
-}
-
-// ── 资产同步 (ScopeSentry 数据源) ──────────────────────────────────────────────
-export interface SSProject {
-  id: string; // MongoDB ObjectID — used as filter.project
-  name: string;
-  logo?: string;
-  AssetCount?: number;
-  tag?: string;
-}
-
-export interface SSTask {
-  id: string;
-  name: string; // used as filter.task
-  status?: number;
-  progress?: number;
-  creatTime?: string;
-  endTime?: string;
 }
 
 // ConvTokenSummary — one conversation's token total (+ profile/date) for merging

@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -121,6 +123,22 @@ func uniqueUploadPath(dir, name string) string {
 			return cand
 		}
 	}
+}
+
+// saveUpload streams one multipart file to dest.
+func saveUpload(hdr *multipart.FileHeader, dest string) error {
+	src, err := hdr.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, src)
+	return err
 }
 
 // composeAgentMessage appends an attachment manifest to the user's message so the agent

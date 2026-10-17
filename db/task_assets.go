@@ -115,17 +115,6 @@ func normalizeTaskAssetHost(value string) string {
 	return strings.TrimSuffix(value, ".")
 }
 
-func taskAssetHostWithin(host, parent string) bool {
-	host, parent = normalizeTaskAssetHost(host), normalizeTaskAssetHost(parent)
-	if host == "" || parent == "" {
-		return false
-	}
-	if net.ParseIP(parent) != nil {
-		return host == parent
-	}
-	return host == parent || strings.HasSuffix(host, "."+parent)
-}
-
 func operatorApprovedTaskAssetSource(source string) bool {
 	switch strings.TrimSpace(strings.ToLower(source)) {
 	case "manual", "direct", "company", "api", "task", "legacy":
@@ -276,7 +265,7 @@ func (s *AssetStore) ValidateTaskAssetsApproved(taskID int64, assetIDs []int64) 
 		case "":
 			return ErrTaskAssetAssetNotFound
 		case ApprovalBlocked:
-			return fmt.Errorf("%w: asset %d 或其父资产已封禁", ErrTaskAssetBlocked, id)
+			return fmt.Errorf("%w: asset %d 已封禁", ErrTaskAssetBlocked, id)
 		default:
 			return fmt.Errorf("%w: asset %d 状态为 %s", ErrTaskAssetNotApproved, id, states[id])
 		}
@@ -649,7 +638,8 @@ WHERE l.task_id=$1 AND l.asset_id=ANY($2::bigint[]) FOR UPDATE OF l`, taskID, id
 }
 
 // RunningIntentIDsForAssets returns current-task running intents anchored to
-// the supplied assets. Callers use it to cancel only affected Workers.
+// the supplied assets or any asset on the same host. Authorization is per
+// host, so revoking or blocking a domain never selects a subdomain's Worker.
 func (s *AssetStore) RunningIntentIDsForAssets(taskID int64, assetIDs []int64) ([]int64, error) {
 	ids, err := normalizeTaskAssetIDs(assetIDs)
 	if err != nil {
@@ -659,8 +649,8 @@ func (s *AssetStore) RunningIntentIDsForAssets(taskID int64, assetIDs []int64) (
  SELECT task_asset_host(assets) AS host FROM assets WHERE id=ANY($2::bigint[]) AND type IN ('root_domain','subdomain','ip')
 ), targets AS (
  SELECT a.id FROM assets a WHERE a.id=ANY($2::bigint[]) AND a.type IN ('root_domain','subdomain','ip')
- UNION SELECT child.id FROM assets child JOIN selected s ON s.host<>'' AND (
-   task_asset_host_within(task_asset_host(child),s.host))
+ UNION SELECT sibling.id FROM assets sibling JOIN selected s
+   ON s.host<>'' AND task_asset_host(sibling)=s.host
 )
 SELECT DISTINCT n.id
 FROM tasks t JOIN exploration_nodes n ON n.exploration_id=t.exploration_id AND n.kind='intent' AND n.state='running'
@@ -672,7 +662,7 @@ SELECT DISTINCT access.intent_id FROM task_worker_asset_access access
 JOIN tasks t ON t.id=access.task_id
 JOIN exploration_nodes n ON n.id=access.intent_id AND n.exploration_id=t.exploration_id AND n.state='running'
 WHERE access.task_id=$1 AND (access.asset_id IN (SELECT id FROM targets)
- OR EXISTS(SELECT 1 FROM selected WHERE host<>'' AND task_asset_host_within(access.host,selected.host)))`, taskID, ids)
+ OR EXISTS(SELECT 1 FROM selected WHERE host<>'' AND access.host=selected.host))`, taskID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -804,7 +794,7 @@ func (s *AssetStore) taskAssetBlockInfo(taskID, assetID int64) (bool, *time.Time
 FROM task_asset_blocks b JOIN assets a ON a.id=$2
 WHERE b.task_id=$1 AND (b.asset_type IN ('root_domain','subdomain','ip') OR b.block_kind='invalid')
 AND (b.asset_id=a.id OR b.asset_key=task_asset_identity_key(a)
- OR (b.asset_type IN ('root_domain','subdomain','ip') AND task_asset_host_within(task_asset_host(a),b.host_key)))
+ OR (b.asset_type IN ('root_domain','subdomain','ip') AND task_asset_host(a)=b.host_key))
 ORDER BY b.blocked_at DESC LIMIT 1`, taskID, assetID).Scan(&at, &reason, &actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil, "", "", nil
@@ -1264,7 +1254,7 @@ FROM ranked WHERE ordinal=1`, taskID, ids)
 				asset.BlockDirect = true
 				break
 			}
-			if matched == nil && isParentAssetType(block.assetType) && taskAssetHostWithin(host, block.host) {
+			if matched == nil && isParentAssetType(block.assetType) && host == block.host {
 				matched = block
 			}
 		}
@@ -1288,7 +1278,7 @@ FROM ranked WHERE ordinal=1`, taskID, ids)
 		if asset.ApprovalState == "blocked" {
 			asset.Blocked = true
 			if asset.BlockReason == "" {
-				asset.BlockReason = "资产或父域名/IP已封禁"
+				asset.BlockReason = "资产已封禁"
 			}
 		}
 		if asset.Type == "service" || asset.Type == "endpoint" {

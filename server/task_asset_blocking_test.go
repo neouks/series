@@ -119,3 +119,80 @@ func TestAssetBlockAPICancelsOnlyCurrentTaskWorkers(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Blocking a domain is a per-host decision: only workers on that exact host
+// are cancelled; a different-host subdomain worker keeps running.
+func TestAssetBlockAPIDoesNotCancelSubdomainWorkers(t *testing.T) {
+	dsn, _, err := db.DSN()
+	if err != nil {
+		t.Skip(err)
+	}
+	pg, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pg.Close()
+	assets := pg.Assets()
+	manager := &Manager{pg: pg, assets: assets, tasks: map[string]*Task{}}
+	engine := &Engine{m: manager, work: map[int64]*workExecution{}}
+	s := &Server{m: manager, engine: engine}
+	task, err := pg.CreateTaskWithOptions("block API per host", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pg.DeleteTask(task.ID)
+	key := strconv.FormatInt(task.ID, 10)
+	manager.tasks[key] = &Task{ID: key, ExpID: task.ExplorationID}
+	host := fmt.Sprintf("block-api-sub-%d.test", task.ID)
+	rootID, err := assets.UpsertRootDomain(db.UpsertRootDomainReq{Domain: host, TaskID: task.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := assets.UpsertHTTPService(db.UpsertHTTPServiceReq{URL: "https://" + host, TaskID: task.ID, AgentDiscovered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subHost := "www." + host
+	subID, err := assets.UpsertSubdomain(db.UpsertSubdomainReq{Domain: subHost, TaskID: task.ID, AgentDiscovered: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assets.ApproveTaskAssets(task.ID, []int64{subID}, "user", "approve subdomain"); err != nil {
+		t.Fatal(err)
+	}
+	es := pg.Exploration(task.ExplorationID)
+	spawn := func(summary string, assetIDs []int64) (context.Context, int64) {
+		t.Helper()
+		intent, err := es.AddIntent(map[string]any{"summary": summary}, 5, assetIDs, "planner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := es.ClaimIntent(intent, "worker"); err != nil || !ok {
+			t.Fatalf("claim %s: %v %v", summary, ok, err)
+		}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		t.Cleanup(func() { cancel(nil) })
+		engine.registerWork(intent, cancel)
+		return ctx, intent
+	}
+	rootCtx, _ := spawn("root host service", []int64{child})
+	subCtx, _ := spawn("subdomain asset", []int64{subID})
+
+	body, _ := json.Marshal(map[string]any{"asset_ids": []int64{rootID}})
+	r := httptest.NewRequest(http.MethodPost, "/api/tasks/"+key+"/asset-approvals/block", bytes.NewReader(body))
+	r.SetPathValue("id", key)
+	w := httptest.NewRecorder()
+	s.mutateTaskAssetApprovals(w, r, "block")
+	if w.Code != http.StatusOK {
+		t.Fatalf("block: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if code, _, _, ok := agent.AbortReason(rootCtx); !ok || code != "asset_authorization_changed" {
+		t.Fatalf("same-host worker not cancelled: %s", code)
+	}
+	if subCtx.Err() != nil {
+		t.Fatal("subdomain worker was cancelled by root block")
+	}
+	if err := assets.ValidateTaskHostsApproved(task.ID, []string{subHost}); err != nil {
+		t.Fatalf("root block restricted subdomain host: %v", err)
+	}
+}

@@ -47,14 +47,6 @@ AI 自主渗透测试系统（Go 后端 + Next.js 前端）
 
 可选真实模型回归：将 `judge.base_url`、`judge.api_key`、`judge.model` 放入仓库外私有 JSON，通过 `SERIES_REVIEW_LIVE_CONFIG=/path/to/private.json go test ./server -run '^TestLiveContextReview$' -v` 运行。该测试只提交合成审查输入，不执行其中的命令；数据库测试应另行配置隔离 PostgreSQL。
 
-## 资产同步（ScopeSentry）
-
-支持从 [ScopeSentry](https://github.com/Autumn-27/ScopeSentry) 直接同步资产数据，免去重复收集：
-
-- 在「**资产同步**」页填 ScopeSentry 的地址与 API Key，接入数据源；
-- 按**项目**或**任务**维度选择要同步的目标与资产类型（域名 / 子域 / IP / 端口 / 站点 / 端点…）；
-- 一键导入并按公司资产范围归并，直接进入 SERIES 的资产图供 agent 探索使用。
-
 ---
 
 ## 安装
@@ -288,7 +280,7 @@ SERIES 是一套 **LLM 多 agent 驱动的自主渗透系统**：Go 单体后端
 ```mermaid
 flowchart TB
   subgraph FE["前端 Next.js（go:embed 内嵌单二进制）"]
-    UI["仪表盘 · 任务 · 资产 · 覆盖图 · 流量 · 工作空间 · 系统配置"]
+    UI["仪表盘 · 任务 · 资产 · 覆盖图 · 流量 · 系统配置"]
   end
   subgraph SRV["server（Go net/http）"]
     API["REST /api/*　JWT 鉴权　SSE"]

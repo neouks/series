@@ -136,6 +136,8 @@ $$;
 
 -- Network targets have no port/path policy. Reuse the effective host records
 -- and template grants; callers can evaluate a whole batch in one round trip.
+-- Per-host authorization: tombstones and linked assets count only on the exact
+-- queried host; a parent domain's decision never reaches a subdomain host.
 CREATE OR REPLACE FUNCTION task_host_approval_state(tid BIGINT, host TEXT)
 RETURNS TEXT LANGUAGE plpgsql STABLE AS $$
 DECLARE denied BOOLEAN; revoked BOOLEAN; exact_pending BOOLEAN; exact_approved BOOLEAN;
@@ -143,12 +145,12 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM tasks WHERE id=tid AND deleted_at IS NULL) THEN RETURN NULL; END IF;
  IF EXISTS(SELECT 1 FROM task_asset_blocks b WHERE b.task_id=tid
    AND b.asset_type IN ('root_domain','subdomain','ip') AND b.host_key<>''
-   AND task_asset_host_within(host,b.host_key)) THEN RETURN 'blocked'; END IF;
+   AND b.host_key=host) THEN RETURN 'blocked'; END IF;
  WITH candidates AS MATERIALIZED (
   SELECT DISTINCT a.id,task_asset_host(a) AS candidate_host,task_asset_effective_approval_state(tid,a.id) AS state
   FROM task_asset_links l JOIN assets a ON a.id=l.asset_id
   WHERE (l.task_id=tid OR l.task_id IN (SELECT source_task_id FROM task_relations WHERE task_id=tid))
-   AND a.type IN ('root_domain','subdomain','ip') AND task_asset_host_within(host,task_asset_host(a))
+   AND a.type IN ('root_domain','subdomain','ip') AND task_asset_host(a)=host
  )
  SELECT bool_or(state='blocked'),bool_or(state='revoked'),
  bool_or(candidate_host=host AND state='pending'),bool_or(candidate_host=host AND state='approved')

@@ -541,10 +541,7 @@ function mockTaskAssetBlockView(
     const [blockedTask] = JSON.parse(key) as [string, number];
     if (blockedTask !== taskID || !["root_domain", "subdomain", "ip"].includes(block.asset_type)) continue;
     if (assetKey === block.asset_key) return { block, direct: true };
-    if (
-      ["root_domain", "subdomain", "ip"].includes(block.asset_type) &&
-      mockTaskAssetHostWithin(host, block.host_key, block.asset_type)
-    ) {
+    if (["root_domain", "subdomain", "ip"].includes(block.asset_type) && host === block.host_key) {
       return { block, direct: false };
     }
   }
@@ -598,7 +595,7 @@ function mockTaskAssetAuthorization(taskID: string, asset: Asset): Partial<Asset
           numericTaskID !== undefined &&
           parent.task_ids.includes(numericTaskID) &&
           ["root_domain", "subdomain", "ip"].includes(parent.type) &&
-          mockTaskAssetHostWithin(host, mockTaskAssetHostName(parent), parent.type) &&
+          mockTaskAssetHostName(parent) === host &&
           mockTaskAssetSources.get(mockTaskAssetSourceKey(taskID, parent.id))?.approval_state === "revoked",
       )
     )
@@ -613,12 +610,14 @@ function mockTaskAssetAuthorization(taskID: string, asset: Asset): Partial<Asset
   }
   const host = mockTaskAssetHostName(asset);
   const numericTaskID = mockTaskAssetID(taskID);
+  // Authorization is per host: only assets on the derived asset's exact host
+  // inherit their decision to it. A parent domain never reaches a subdomain.
   const parents = mockAssets.filter(
     (parent) =>
       numericTaskID !== undefined &&
       parent.task_ids.includes(numericTaskID) &&
       ["root_domain", "subdomain", "ip"].includes(parent.type) &&
-      mockTaskAssetHostWithin(host, mockTaskAssetHostName(parent), parent.type),
+      mockTaskAssetHostName(parent) === host,
   );
   const parentStates = parents.map((parent) => mockTaskAssetAuthorization(taskID, parent));
   const blocked = parentStates.find((state) => state.blocked);
@@ -627,13 +626,9 @@ function mockTaskAssetAuthorization(taskID: string, asset: Asset): Partial<Asset
   const policy = mockTasks.find((t) => t.id === taskID)?.asset_approval_template ?? "explicit_targets";
   if (policy === "all_assets" || mockTemplateMatches(taskID, asset, policy)) return { approval_state: "approved" };
   if (parents.length === 0) return { approval_state: "pending", approval_reason: "缺少可确认的父域名/IP，暂不可测试" };
-  const exact = parents
-    .map((parent, index) => ({ parent, state: parentStates[index] }))
-    .filter(({ parent }) => mockTaskAssetHostName(parent) === host);
-  if (exact.length)
-    return { approval_state: exact.some(({ state }) => state.approval_state !== "approved") ? "pending" : "approved" };
-  if (parentStates.some((state) => state.approval_state !== "approved")) return { approval_state: "pending" };
-  return { approval_state: "approved" };
+  return {
+    approval_state: parentStates.some((state) => state.approval_state !== "approved") ? "pending" : "approved",
+  };
 }
 
 function mockTemplateMatches(taskID: string, asset: Asset, policy: string): boolean {
@@ -673,7 +668,7 @@ function ensureMockManualDerivedParent(taskID: string, asset: Asset): void {
   const matchingParents = mockAssets.filter(
     (parent) =>
       ["root_domain", "subdomain", "ip"].includes(parent.type) &&
-      mockTaskAssetHostWithin(host, mockTaskAssetHostName(parent), parent.type),
+      mockTaskAssetHostName(parent) === host,
   );
   if (
     matchingParents.some(
@@ -699,7 +694,7 @@ function ensureMockManualDerivedParent(taskID: string, asset: Asset): void {
     if (
       blockedTask === taskID &&
       ["root_domain", "subdomain", "ip"].includes(block.asset_type) &&
-      mockTaskAssetHostWithin(host, block.host_key, block.asset_type)
+      block.host_key === host
     ) {
       return;
     }
@@ -2375,10 +2370,6 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
-  // ── 工作空间文件管理器（demo：静态示例树；写/建/删走下方写兜底 {ok:true}）──
-  if (path === "/workspace/list") return D.workspaceList(q.get("path") ?? "");
-  if (path === "/workspace/read") return D.workspaceRead(q.get("path") ?? "");
-
   // ── stats ──
   if (path === "/stats") {
     return D.stats(task, { tasks: mockTasks, findings: mockFindings, activeTask: mockActiveTask });
@@ -3574,13 +3565,6 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     if (index >= 0) mockMcpServers.splice(index, 1);
     return { deleted: id };
   }
-
-  // ── scopesentry（demo：未配置）──
-  if (path === "/sync/scopesentry/status")
-    return { exists: false, configured: false, enabled: false, reachable: false, tools: [] };
-  if (path === "/sync/scopesentry/projects") return { projects: [], tag: {} };
-  if (path === "/sync/scopesentry/tasks") return { tasks: [] };
-  if (path === "/sync/scopesentry/sync") return { synced: {}, companies: null, warnings: null, errors: null };
 
   // ── skills ──
   if (path === "/skills" && m === "GET") return { skills: D.skills };
