@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -93,6 +94,13 @@ func TestBlobCompressionRoundTrip(t *testing.T) {
 	if total != int64(len(body)) || !bytes.Equal(data, body[100:150]) {
 		t.Fatalf("BlobRange 分页错误: total=%d len=%d", total, len(data))
 	}
+	data, total, err = tr.BlobRange(hash, int64(len(body)-35), 50)
+	if err != nil || total != int64(len(body)) || !bytes.Equal(data, body[len(body)-35:]) {
+		t.Fatalf("BlobRange 尾页错误: total=%d len=%d err=%v", total, len(data), err)
+	}
+	if len(tr.blobCache) != 1 || tr.blobCache[0].hash != hash {
+		t.Fatal("repeated pages did not reuse the bounded decoded cache")
+	}
 }
 
 // Rows written before compression (no prefix inline, raw ".bin" blob) must keep
@@ -164,6 +172,12 @@ func TestStaticSkipFilter(t *testing.T) {
 	if n := recorded(); n != 0 {
 		t.Fatalf("静态资源被录制：%d 行", n)
 	}
+	// Content-Type takes precedence even on API routes: HTML responses are
+	// intentionally excluded by the default rule list.
+	s.Response(newFlow("static.example.com", "GET", "/api/status", nil, []byte("<html/>"), withRespType("text/html")))
+	if n := recorded(); n != 0 {
+		t.Fatalf("HTML API response should be filtered: %d rows", n)
+	}
 	s.Response(newFlow("static.example.com", "GET", "/api/data", nil, []byte(`{"a":1}`)))
 	if n := recorded(); n != 1 {
 		t.Fatalf("API 响应未录制：%d 行", n)
@@ -208,13 +222,53 @@ func TestDeleteOlderThan(t *testing.T) {
 	}
 }
 
+func TestDeleteOlderThanBatches(t *testing.T) {
+	tr, _ := openTraffic(t)
+	tx, err := tr.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1201; i++ {
+		if _, err := tx.Exec(`INSERT INTO exchanges(id,ts,host) VALUES(?,?,?)`, fmt.Sprintf("expired-%d", i), int64(1000), "old.example"); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO exchanges(id,ts,host) VALUES('current',?,?)`, time.Now().Unix(), "new.example"); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	n, err := tr.DeleteOlderThan(time.Now().Add(-time.Hour).Unix())
+	if err != nil || n != 1201 {
+		t.Fatalf("batched retention removed %d rows: %v", n, err)
+	}
+	var remaining int
+	if err := tr.DB().QueryRow(`SELECT count(*) FROM exchanges WHERE id='current'`).Scan(&remaining); err != nil || remaining != 1 {
+		t.Fatalf("current traffic was lost: count=%d err=%v", remaining, err)
+	}
+}
+
+func TestRetentionRejectsUnsafeRange(t *testing.T) {
+	tr, _ := openTraffic(t)
+	tr.SetRetention(30)
+	for _, invalid := range []int64{-1, 106752, 3651} {
+		tr.SetRetention(invalid)
+		if got := tr.RetentionDays(); got != 30 {
+			t.Fatalf("unsafe retention %d replaced configured value with %d", invalid, got)
+		}
+	}
+}
+
 // Archives stay plaintext (their blob checksum is the sha256 of the content),
 // while restoring into a compressed hot store keeps everything readable and
 // searchable.
 func TestArchiveRoundTripWithCompression(t *testing.T) {
 	tr, _ := openTraffic(t)
 	const host = "arch.example.com"
-	small := []byte(strings.Repeat("archive-small-roundtrip-marker-", 150)) // ~4.3KB → 压缩内联
+	small := []byte(strings.Repeat("archive-small-roundtrip-marker-", 150))    // ~4.3KB → 压缩内联
 	big := []byte(strings.Repeat(`{"archive":"big-roundtrip-marker"}`, 18000)) // ~576KB → 压缩 blob
 	tr.record(newFlow(host, "GET", "/small", nil, small))
 	tr.record(newFlow(host, "GET", "/big", nil, big, withRespType("application/json")))

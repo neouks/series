@@ -120,6 +120,23 @@ func TestTaskArchiveFormatCompatibility(t *testing.T) {
 	}
 }
 
+func TestRemainingPausedTimeoutUsesPauseInstant(t *testing.T) {
+	pausedAt := time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)
+	deadline := pausedAt.Add(15 * time.Minute)
+	archivedAt := pausedAt.Add(2 * time.Hour)
+	if got := remainingPausedTimeout(deadline, &pausedAt, 20*60, archivedAt); got != 15*60 {
+		t.Fatalf("paused task lost budget during archive: got %d seconds", got)
+	}
+	// Legacy paused rows did not always have paused_at. Preserve at least the
+	// configured timeout instead of treating archival delay as runtime.
+	if got := remainingPausedTimeout(deadline, nil, 20*60, archivedAt); got != 20*60 {
+		t.Fatalf("legacy pause should retain conservative budget: got %d", got)
+	}
+	if got := remainingPausedTimeout(pausedAt.Add(-time.Second), &pausedAt, 20*60, archivedAt); got != 0 {
+		t.Fatalf("expired deadline gained time: %d", got)
+	}
+}
+
 func TestTaskArchiveDatabaseRoundTrip(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
@@ -168,6 +185,11 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 		_, _ = d.Exec(`DELETE FROM companies WHERE id=$1`, companyID)
 	}()
 	if err := d.SetPaused(task.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	pauseInstant := time.Now().UTC().Add(-2 * time.Hour)
+	if _, err := d.Exec(`UPDATE tasks SET paused_at=$2, deadline_at=$3, timeout_seconds=1800 WHERE id=$1`,
+		task.ID, pauseInstant, pauseInstant.Add(10*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	assetID, err := d.Assets().UpsertRootDomain(UpsertRootDomainReq{Domain: fmt.Sprintf("archive-%d.example", task.ID), TaskID: task.ID})
@@ -236,6 +258,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if err != nil {
 		t.Fatal(err)
 	}
+	if archive.RemainingTimeoutSeconds != 600 {
+		t.Fatalf("archived pause budget=%d, want 600", archive.RemainingTimeoutSeconds)
+	}
 	claimed, err := d.ClaimTaskArchiveJob(t.Context())
 	if err != nil || claimed == nil || claimed.ID != archive.ID || claimed.State != Archiving {
 		t.Fatalf("claim = %+v, %v", claimed, err)
@@ -296,7 +321,7 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 		t.Fatalf("restore claim = %+v, %v", claimed, err)
 	}
 	warnings, err := d.RestoreTaskArchiveWithLLMRecords(
-		archive.ID, snapshot, int64((10 * time.Minute).Seconds()), bytes.NewReader(llmRecords.Bytes()),
+		archive.ID, snapshot, archive.RemainingTimeoutSeconds, bytes.NewReader(llmRecords.Bytes()),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +344,16 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	}
 	if err != nil || live == nil {
 		t.Fatalf("restored task = %+v, %v", live, err)
+	}
+	var restoredPause, restoredDeadline time.Time
+	if err := d.QueryRow(`SELECT paused_at,deadline_at FROM tasks WHERE id=$1`, task.ID).Scan(&restoredPause, &restoredDeadline); err != nil {
+		t.Fatal(err)
+	}
+	if delta := time.Since(restoredPause); delta < 0 || delta > time.Minute {
+		t.Fatalf("restored paused_at is stale: %v", restoredPause)
+	}
+	if budget := restoredDeadline.Sub(restoredPause); budget < 599*time.Second || budget > 601*time.Second {
+		t.Fatalf("restored pause budget=%v, want 10m", budget)
 	}
 	selected, selectedErr := d.Exploration(task.ExplorationID).GetNode(selectedID)
 	if selectedErr != nil || selected == nil || !selected.DispatchRequested() || !selected.AllowsPendingAssets() {

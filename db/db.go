@@ -146,6 +146,14 @@ func Open(dsn string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)
 	}
+	// An existing settings table identifies an upgraded installation. Its absent
+	// retention setting must stay unlimited; only a genuinely new database gets
+	// the 30-day default. Detect this before applying the schema.
+	var freshInstall bool
+	if err := sqlDB.QueryRow(`SELECT to_regclass('settings') IS NULL`).Scan(&freshInstall); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("detect existing settings: %w", err)
+	}
 	d := &DB{sqlDB}
 	// pgx runs multi-statement Exec via the simple protocol when there are no args.
 	// Keep the dedicated lock connection checked out until both DDL and seeding
@@ -153,6 +161,13 @@ func Open(dsn string) (*DB, error) {
 	err = withSchemaMigrationLock(context.Background(), sqlDB, func(conn *sql.Conn) error {
 		if err := applySchemaWithRetry(context.Background(), conn, time.Sleep); err != nil {
 			return fmt.Errorf("apply schema: %w", err)
+		}
+		retentionDefault := "0"
+		if freshInstall {
+			retentionDefault = "30"
+		}
+		if _, err := conn.ExecContext(context.Background(), `INSERT INTO settings(key,value) VALUES ('traffic_retention_days',$1) ON CONFLICT (key) DO NOTHING`, retentionDefault); err != nil {
+			return fmt.Errorf("initialize traffic retention: %w", err)
 		}
 		if err := ensurePerformanceIndexes(context.Background(), conn); err != nil {
 			return err
@@ -273,17 +288,25 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 		ON CONFLICT (name) DO NOTHING`); err != nil {
 		return fmt.Errorf("seed builtin mcps: %w", err)
 	}
-	// The ScopeSentry asset-sync module (page + /api/sync/scopesentry/* + skill) was
-	// removed. Drop its seeded/configured MCP row (mcp_tools_cache cascades via FK),
-	// any agent MCP-visibility rows left orphaned, and the skill's visibility
-	// bindings (TEXT keys, no FK). Already-synced assets are ordinary asset rows
-	// and stay.
-	if _, err := d.Exec(`
-		DELETE FROM mcp_servers WHERE name='ScopeSentry';
-		DELETE FROM agent_visibility WHERE resource_kind='mcp'
-		  AND NOT EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=agent_visibility.resource_id);
-		DELETE FROM agent_skill_visibility WHERE skill_name='scopesentry'`); err != nil {
-		return fmt.Errorf("cleanup scopesentry: %w", err)
+	// Remove the obsolete, untouched placeholder once. A user-configured server
+	// remains available as an ordinary MCP, even though the sync page is gone.
+	if _, done, err := d.GetSetting("scopesentry_placeholder_cleanup_v1"); err != nil {
+		return fmt.Errorf("read scopesentry cleanup marker: %w", err)
+	} else if !done {
+		if _, err := d.Exec(`DELETE FROM mcp_servers m WHERE m.name='ScopeSentry'
+		  AND m.transport='http' AND m.url IS NULL AND m.command IS NULL
+		  AND m.args='[]'::jsonb AND m.env='{"X-API-Key":""}'::jsonb
+		  AND NOT m.enabled AND NOT m.insecure
+		  AND NOT EXISTS (SELECT 1 FROM agent_visibility v WHERE v.resource_kind='mcp' AND v.resource_id=m.id)
+		  AND NOT EXISTS (SELECT 1 FROM mcp_tools_cache c WHERE c.server_id=m.id)`); err != nil {
+			return fmt.Errorf("cleanup scopesentry placeholder: %w", err)
+		}
+		if _, err := d.Exec(`DELETE FROM agent_skill_visibility WHERE skill_name='scopesentry'`); err != nil {
+			return fmt.Errorf("cleanup scopesentry skill visibility: %w", err)
+		}
+		if err := d.SetSetting("scopesentry_placeholder_cleanup_v1", "done"); err != nil {
+			return fmt.Errorf("mark scopesentry cleanup: %w", err)
+		}
 	}
 	if err := d.seedBuiltinSkillVisibility(); err != nil {
 		return fmt.Errorf("seed skill visibility: %w", err)

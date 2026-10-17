@@ -3464,9 +3464,9 @@ func (s *Server) settingsPayload() map[string]any {
 	return map[string]any{
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
-		"traffic_skip_static":     s.m.pg.GetBool(settingTrafficSkipStatic, true),
-		"traffic_skip_types":      strings.Join(s.m.TrafficSkipRules(), ","),
-		"traffic_retention_days":  s.m.TrafficRetentionDays(),
+		"traffic_skip_static":      s.m.pg.GetBool(settingTrafficSkipStatic, true),
+		"traffic_skip_types":       strings.Join(s.m.TrafficSkipRules(), ","),
+		"traffic_retention_days":   s.m.TrafficRetentionDays(),
 		"llm_record":               s.m.LLMRecordEnabled(),
 		"web_search_enabled":       on,
 		"web_search_backend":       backend,
@@ -3529,10 +3529,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		TrafficCapture      *bool `json:"traffic_capture"`
 		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
 		// 流量磁盘优化三项（静态资源过滤 + 保留期），null=不改。
-		TrafficSkipStatic   *bool   `json:"traffic_skip_static"`
-		TrafficSkipTypes    *string `json:"traffic_skip_types"`    // 逗号分隔规则清单；null=不改，""=恢复内置默认
-		TrafficRetentionDays *int64 `json:"traffic_retention_days"` // 保留天数，0=永久
-		LLMRecord           *bool   `json:"llm_record"` // LLM 录制开关（默认关）；即时生效，无需重建 agent
+		TrafficSkipStatic    *bool   `json:"traffic_skip_static"`
+		TrafficSkipTypes     *string `json:"traffic_skip_types"`     // 逗号分隔规则清单；null=不改，""=恢复内置默认
+		TrafficRetentionDays *int64  `json:"traffic_retention_days"` // 保留天数，0=永久
+		LLMRecord            *bool   `json:"llm_record"`             // LLM 录制开关（默认关）；即时生效，无需重建 agent
 		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
 		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
 		WebSearchEnabled *bool   `json:"web_search_enabled"`
@@ -3559,6 +3559,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.TrafficRetentionDays != nil && (*req.TrafficRetentionDays < 0 || *req.TrafficRetentionDays > 3650) {
+		writeErr(w, 400, "流量保留天数必须为 0 或 1–3650")
 		return
 	}
 	if req.ConstraintsInjectPlanner != nil {

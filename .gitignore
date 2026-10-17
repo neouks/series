@@ -1,0 +1,4 @@
+# Generated release binaries and embedded web export
+/dist/
+/server/webui/dist/
+.DS_Store

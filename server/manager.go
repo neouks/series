@@ -257,12 +257,13 @@ type DeleteTaskResult struct {
 // Manager owns the PostgreSQL data source (asset graph + every task's exploration
 // graph + config) and the in-memory set of task handles.
 type Manager struct {
-	dir         string
-	pg          *pgdb.DB
-	assets      *pgdb.AssetStore
-	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
-	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
-	interceptor *intercept.Interceptor // user-configured tool-call interception rules
+	dir           string
+	pg            *pgdb.DB
+	assets        *pgdb.AssetStore
+	traffic       *traffic.Traffic       // process-wide recording proxy (may be nil)
+	enrich        *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
+	interceptor   *intercept.Interceptor // user-configured tool-call interception rules
+	trafficDiskMu sync.Mutex             // serialize persistence and runtime application of disk settings
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -300,11 +301,11 @@ const (
 	// settingTrafficRetentionDays bounds how long recorded exchanges stay on
 	// disk; 0 disables the sweeper.
 	settingTrafficRetentionDays = "traffic_retention_days"
-	settingWebSearchOn         = "web_search_enabled"
-	settingWebSearchBackend    = "web_search_backend"
-	settingBraveKey            = "brave_search_api_key"
-	settingTavilyKey           = "tavily_search_api_key"
-	settingWebSearchProxy      = "web_search_proxy"
+	settingWebSearchOn          = "web_search_enabled"
+	settingWebSearchBackend     = "web_search_backend"
+	settingBraveKey             = "brave_search_api_key"
+	settingTavilyKey            = "tavily_search_api_key"
+	settingWebSearchProxy       = "web_search_proxy"
 	// settingGlobalProxy is the global egress proxy for all target traffic
 	// (http/https/socks5). Empty = direct. Distinct from web_search_proxy (which
 	// only routes the search backend) and the per-profile LLM proxy.
@@ -478,12 +479,6 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		if tr != nil {
 			tr.SetAssetPolicyStore(m.assets)
 			m.traffic = tr
-			go func() {
-				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
-				if err := tr.Start(); err != nil {
-					log.Printf("[traffic] proxy stopped: %v", err)
-				}
-			}()
 		}
 	}
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
@@ -491,7 +486,17 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
 	if m.traffic != nil {
 		m.traffic.SetRecordingEnabled(m.trafficOn)
-		m.applyTrafficDiskSettings(pg)
+		if err := m.applyTrafficDiskSettings(pg); err != nil {
+			_ = m.traffic.Close()
+			_ = pg.Close()
+			return nil, fmt.Errorf("load traffic disk settings: %w", err)
+		}
+		go func(tr *traffic.Traffic) {
+			log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
+			if err := tr.Start(); err != nil {
+				log.Printf("[traffic] proxy stopped: %v", err)
+			}
+		}(m.traffic)
 	}
 	// LLM 录制开关（默认关）。录制器每次调用时读取此标志。
 	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
@@ -559,46 +564,76 @@ func (m *Manager) SetTrafficEnabled(on bool) error {
 
 // applyTrafficDiskSettings pushes the disk-saving knobs (static-asset filter,
 // retention window) from persisted settings into the recorder.
-func (m *Manager) applyTrafficDiskSettings(pg *pgdb.DB) {
-	m.traffic.SetSkipStatic(pg.GetBool(settingTrafficSkipStatic, true))
-	if v, ok, _ := pg.GetSetting(settingTrafficSkipTypes); ok && strings.TrimSpace(v) != "" {
+func (m *Manager) applyTrafficDiskSettings(pg *pgdb.DB) error {
+	if m.traffic == nil {
+		return nil
+	}
+	staticValue, staticOK, err := pg.GetSetting(settingTrafficSkipStatic)
+	if err != nil {
+		return err
+	}
+	typesValue, _, err := pg.GetSetting(settingTrafficSkipTypes)
+	if err != nil {
+		return err
+	}
+	retentionValue, ok, err := pg.GetSetting(settingTrafficRetentionDays)
+	if err != nil {
+		return err
+	}
+	days := int64(0) // Missing settings on upgraded installations must never delete history.
+	if ok {
+		days, err = strconv.ParseInt(strings.TrimSpace(retentionValue), 10, 64)
+		if err != nil || days < 0 || days > 3650 {
+			return fmt.Errorf("invalid traffic retention setting %q", retentionValue)
+		}
+	}
+	m.traffic.SetSkipStatic(!staticOK || staticValue == "true" || staticValue == "1")
+	if strings.TrimSpace(typesValue) != "" {
+		v := typesValue
 		m.traffic.SetSkipRules(strings.Split(v, ","))
 	} else {
 		m.traffic.SetSkipRules(nil)
 	}
-	days := int64(30)
-	if v, ok, _ := pg.GetSetting(settingTrafficRetentionDays); ok {
-		if parsed, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && parsed >= 0 {
-			days = parsed
-		}
-	}
 	m.traffic.SetRetention(days)
+	return nil
 }
 
 // SetTrafficDiskSettings persists and applies any of the traffic disk knobs.
 // Each argument is optional (nil = leave unchanged); an empty skip-types string
 // restores the built-in default list.
 func (m *Manager) SetTrafficDiskSettings(skipStatic *bool, skipTypes *string, retentionDays *int64) error {
+	m.trafficDiskMu.Lock()
+	defer m.trafficDiskMu.Unlock()
+	if retentionDays != nil && (*retentionDays < 0 || *retentionDays > 3650) {
+		return fmt.Errorf("流量保留天数必须为 0 或 1–3650")
+	}
+	values := make(map[string]string)
 	if skipStatic != nil {
-		if err := m.pg.SetBool(settingTrafficSkipStatic, *skipStatic); err != nil {
-			return err
-		}
+		values[settingTrafficSkipStatic] = strconv.FormatBool(*skipStatic)
 	}
 	if skipTypes != nil {
-		if err := m.pg.SetSetting(settingTrafficSkipTypes, strings.TrimSpace(*skipTypes)); err != nil {
-			return err
-		}
+		values[settingTrafficSkipTypes] = strings.TrimSpace(*skipTypes)
 	}
 	if retentionDays != nil {
-		if *retentionDays < 0 {
-			*retentionDays = 0
-		}
-		if err := m.pg.SetSetting(settingTrafficRetentionDays, strconv.FormatInt(*retentionDays, 10)); err != nil {
-			return err
-		}
+		values[settingTrafficRetentionDays] = strconv.FormatInt(*retentionDays, 10)
+	}
+	if err := m.pg.SetSettingsAtomic(values); err != nil {
+		return err
 	}
 	if m.traffic != nil {
-		m.applyTrafficDiskSettings(m.pg)
+		if skipStatic != nil {
+			m.traffic.SetSkipStatic(*skipStatic)
+		}
+		if skipTypes != nil {
+			if rules := strings.TrimSpace(*skipTypes); rules != "" {
+				m.traffic.SetSkipRules(strings.Split(rules, ","))
+			} else {
+				m.traffic.SetSkipRules(nil)
+			}
+		}
+		if retentionDays != nil {
+			m.traffic.SetRetention(*retentionDays)
+		}
 	}
 	return nil
 }
@@ -614,7 +649,15 @@ func (m *Manager) TrafficSkipRules() []string {
 // TrafficRetentionDays reports the retention window in days (0 = keep forever).
 func (m *Manager) TrafficRetentionDays() int64 {
 	if m.traffic == nil {
-		return 30
+		v, ok, err := m.pg.GetSetting(settingTrafficRetentionDays)
+		if err != nil || !ok {
+			return 0
+		}
+		days, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || days < 0 || days > 3650 {
+			return 0
+		}
+		return days
 	}
 	return m.traffic.RetentionDays()
 }

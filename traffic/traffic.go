@@ -31,6 +31,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
@@ -178,9 +180,49 @@ type Traffic struct {
 	// (HTML/JS/CSS/images/fonts/media), which dominate capture volume while
 	// rarely being what a pentest replays or searches. Hot-swappable from
 	// settings via SetSkipStatic / SetSkipRules.
-	skipStaticOn  atomic.Bool
-	skipRules     atomic.Value // []string
-	retentionDays atomic.Int64
+	skipStaticOn       atomic.Bool
+	skipRules          atomic.Value // []string
+	retentionDays      atomic.Int64
+	retentionDone      chan struct{}
+	retentionGC        atomic.Bool
+	retentionGCPending atomic.Bool
+	blobCacheMu        sync.Mutex
+	blobCache          []cachedBlob
+}
+
+type cachedBlob struct {
+	hash string
+	data []byte
+}
+
+const maxCachedBlob = 8 << 20
+
+func (t *Traffic) cachedBlob(hash string) []byte {
+	t.blobCacheMu.Lock()
+	defer t.blobCacheMu.Unlock()
+	for _, entry := range t.blobCache {
+		if entry.hash == hash {
+			return entry.data // immutable after insertion
+		}
+	}
+	return nil
+}
+
+func (t *Traffic) cacheBlob(hash string, data []byte) {
+	if len(data) == 0 || len(data) > maxCachedBlob {
+		return
+	}
+	t.blobCacheMu.Lock()
+	defer t.blobCacheMu.Unlock()
+	for _, entry := range t.blobCache {
+		if entry.hash == hash {
+			return
+		}
+	}
+	t.blobCache = append(t.blobCache, cachedBlob{hash: hash, data: data})
+	if len(t.blobCache) > 2 {
+		t.blobCache = t.blobCache[1:]
+	}
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
@@ -206,7 +248,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	if err != nil {
 		return nil, err
 	}
-	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{})}
+	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{}), retentionDone: make(chan struct{})}
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
@@ -214,7 +256,6 @@ func Open(dir, addr string) (*Traffic, error) {
 	t.recording.Store(true)
 	t.skipStaticOn.Store(true)
 	t.skipRules.Store([]string(DefaultSkipStaticRules))
-	go t.retentionLoop()
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
 		Addr:        addr,
@@ -248,6 +289,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	p.SetAuthProxy(t.authorizeTaskRequest)
 	p.AddAddon(&sink{t: t})
 	t.proxy = p
+	go func() { defer close(t.retentionDone); t.retentionLoop() }()
 	return t, nil
 }
 
@@ -415,8 +457,8 @@ func (t *Traffic) shouldSkipStatic(f *mproxy.Flow) bool {
 // SetRetention bounds how long recorded exchanges stay on disk. Zero disables
 // the sweeper (keep forever).
 func (t *Traffic) SetRetention(days int64) {
-	if days < 0 {
-		days = 0
+	if days < 0 || days > 3650 {
+		return
 	}
 	t.retentionDays.Store(days)
 }
@@ -436,7 +478,11 @@ func (t *Traffic) retentionLoop() {
 			if days <= 0 {
 				continue
 			}
-			cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+			if days > 3650 { // defense against a corrupt runtime setting
+				log.Printf("[traffic] 无效保留期 %d 天，跳过清理", days)
+				continue
+			}
+			cutoff := time.Now().UTC().AddDate(0, 0, -int(days)).Unix()
 			if n, err := t.DeleteOlderThan(cutoff); err != nil {
 				log.Printf("[traffic] 保留期清理失败：%v", err)
 			} else if n > 0 {
@@ -450,31 +496,66 @@ func (t *Traffic) retentionLoop() {
 // returns how many went away. Reclamation and blob GC run in the background
 // afterwards, exactly like DeleteHost.
 func (t *Traffic) DeleteOlderThan(cutoff int64) (int64, error) {
-	t.wmu.Lock()
-	defer t.wmu.Unlock()
-	tx, err := t.db.Begin()
-	if err != nil {
-		return 0, err
+	const batchSize = 500
+	var total int64
+	defer func() {
+		if total > 0 {
+			t.scheduleRetentionCleanup()
+		}
+	}()
+	for !t.stopping() {
+		t.wmu.Lock()
+		tx, err := t.db.Begin()
+		if err != nil {
+			t.wmu.Unlock()
+			return total, err
+		}
+		// Every subquery sees the same oldest bounded window inside this
+		// transaction. The recorder gets the write lock back between batches.
+		n, err := t.deleteWhere(tx, "id IN (SELECT id FROM exchanges WHERE ts<? ORDER BY ts,id LIMIT ?)", cutoff, batchSize)
+		if err == nil {
+			err = tx.Commit()
+		} else {
+			_ = tx.Rollback()
+		}
+		t.wmu.Unlock()
+		if err != nil {
+			return total, err
+		}
+		total += n
+		if n < batchSize {
+			break
+		}
 	}
-	defer tx.Rollback() //nolint:errcheck
-	n, err := t.deleteWhere(tx, "ts<?", cutoff)
-	if err != nil {
-		return 0, err
+	return total, nil
+}
+
+func (t *Traffic) scheduleRetentionCleanup() {
+	if !t.retentionGC.CompareAndSwap(false, true) {
+		t.retentionGCPending.Store(true)
+		return
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	if n > 0 {
-		go func() {
+	t.reaping.Go(func() {
+		for {
+			t.retentionGCPending.Store(false)
 			t.reclaim()
-			t.wmu.Lock()
-			defer t.wmu.Unlock()
-			if err := t.gcBlobs(); err != nil {
-				log.Printf("[traffic] 过期流量 blob 清理失败：%v", err)
+			if !t.stopping() {
+				if err := t.gcBlobsBatched(); err != nil {
+					log.Printf("[traffic] 过期流量 blob 清理失败：%v", err)
+				}
 			}
-		}()
-	}
-	return n, nil
+			if !t.stopping() && t.retentionGCPending.Load() {
+				continue
+			}
+			t.retentionGC.Store(false)
+			// A deletion racing the final store still gets its own pass. If
+			// another pass already started, that pass owns the pending work.
+			if !t.stopping() && t.retentionGCPending.Swap(false) && t.retentionGC.CompareAndSwap(false, true) {
+				continue
+			}
+			return
+		}
+	})
 }
 
 func (t *Traffic) authorizeTaskRequest(_ http.ResponseWriter, req *http.Request) (bool, error) {
@@ -581,6 +662,9 @@ func (t *Traffic) Start() error { return t.proxy.Start() }
 func (t *Traffic) Close() error {
 	if t.closed != nil {
 		t.closeOnce.Do(func() { close(t.closed) })
+	}
+	if t.retentionDone != nil {
+		<-t.retentionDone
 	}
 	t.reaping.Wait()
 	return t.db.Close()
@@ -945,6 +1029,13 @@ func (t *Traffic) readBlobBytes(hash string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	st, err := os.Stat(p)
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > maxBlobBody {
+		return nil, fmt.Errorf("blob exceeds %d bytes", maxBlobBody)
+	}
 	data, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
@@ -966,29 +1057,90 @@ func (t *Traffic) Blob(hash string) (io.ReadCloser, int64, error) {
 // blob's total size. Used by the agent tool to page through a large body without
 // pulling all of it into the model's context.
 func (t *Traffic) BlobRange(hash string, offset, length int64) (data []byte, total int64, err error) {
-	rc, size, err := t.Blob(hash)
+	p, err := t.blobPath(hash)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rc.Close()
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
 	if offset < 0 {
 		offset = 0
 	}
-	if offset >= size {
-		return nil, size, nil
+	if offset > maxBlobBody {
+		offset = maxBlobBody + 1
 	}
-	if length <= 0 || offset+length > size {
-		length = size - offset
+	if length <= 0 || length > maxBlobBody {
+		length = maxBlobBody
 	}
-	if _, err := io.CopyN(io.Discard, rc, offset); err != nil && !errors.Is(err, io.EOF) {
-		return nil, size, err
+	if strings.HasSuffix(p, ".zst") {
+		if cached := t.cachedBlob(hash); cached != nil {
+			size := int64(len(cached))
+			if offset >= size {
+				return nil, size, nil
+			}
+			end := min(offset+length, size)
+			return append([]byte(nil), cached[offset:end]...), size, nil
+		}
 	}
-	buf := make([]byte, length)
-	n, err := io.ReadFull(rc, buf)
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, size, err
+	if !strings.HasSuffix(p, ".zst") {
+		st, err := f.Stat()
+		if err != nil {
+			return nil, 0, err
+		}
+		if st.Size() > maxBlobBody {
+			return nil, 0, fmt.Errorf("blob exceeds %d bytes", maxBlobBody)
+		}
+		if offset >= st.Size() {
+			return nil, st.Size(), nil
+		}
+		length = min(length, st.Size()-offset)
+		buf := make([]byte, length)
+		n, err := f.ReadAt(buf, offset)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, st.Size(), err
+		}
+		return buf[:n], st.Size(), nil
 	}
-	return buf[:n], size, nil
+	decoder, err := zstd.NewReader(f, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(maxBlobBody))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer decoder.Close()
+	buf := make([]byte, 32*1024)
+	cacheEligible := true
+	var cacheData []byte
+	for {
+		n, readErr := decoder.Read(buf)
+		if total+int64(n) > maxBlobBody {
+			return nil, 0, fmt.Errorf("blob exceeds %d bytes", maxBlobBody)
+		}
+		start := max(offset, total)
+		end := min(offset+length, total+int64(n))
+		if start < end {
+			data = append(data, buf[start-total:end-total]...)
+		}
+		if cacheEligible {
+			if total+int64(n) <= maxCachedBlob {
+				cacheData = append(cacheData, buf[:n]...)
+			} else {
+				cacheEligible = false
+				cacheData = nil
+			}
+		}
+		total += int64(n)
+		if errors.Is(readErr, io.EOF) {
+			if cacheEligible {
+				t.cacheBlob(hash, cacheData)
+			}
+			return data, total, nil
+		}
+		if readErr != nil {
+			return nil, 0, readErr
+		}
+	}
 }
 
 // ExchangeMeta is one row of the index (returned by Search).
@@ -2092,6 +2244,60 @@ func (t *Traffic) gcBlobs() error {
 	sort.Slice(buckets, func(i, j int) bool { return len(buckets[i]) > len(buckets[j]) })
 	for _, b := range buckets {
 		os.Remove(b)
+	}
+	return nil
+}
+
+// gcBlobsBatched is the retention variant of gcBlobs. It checks each candidate
+// under the recorder lock immediately before unlinking it, but releases that
+// lock between files so a large retention sweep cannot freeze proxy replies.
+func (t *Traffic) gcBlobsBatched() error {
+	legacy := make(map[string]struct{})
+	if err := t.legacyBlobRefs(legacy); err != nil {
+		return err
+	}
+	root := filepath.Join(t.dir, "_blobs", "sha256")
+	var buckets []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+		if t.stopping() {
+			return filepath.SkipAll
+		}
+		if walkErr != nil || d == nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != root {
+				buckets = append(buckets, p)
+			}
+			return nil
+		}
+		h := strings.TrimSuffix(strings.TrimSuffix(d.Name(), ".zst"), ".bin")
+		if _, keep := legacy[h]; keep {
+			return nil
+		}
+		t.wmu.Lock()
+		var present int
+		queryErr := t.db.QueryRow(`SELECT 1 FROM blob_refs WHERE hash=? LIMIT 1`, h).Scan(&present)
+		if errors.Is(queryErr, sql.ErrNoRows) {
+			queryErr = os.Remove(p)
+			if os.IsNotExist(queryErr) {
+				queryErr = nil
+			}
+		}
+		t.wmu.Unlock()
+		return queryErr
+	})
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if t.stopping() {
+		return nil
+	}
+	sort.Slice(buckets, func(i, j int) bool { return len(buckets[i]) > len(buckets[j]) })
+	for _, bucket := range buckets {
+		t.wmu.Lock()
+		_ = os.Remove(bucket) // nonempty directories are left intact
+		t.wmu.Unlock()
 	}
 	return nil
 }

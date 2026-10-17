@@ -2,6 +2,8 @@ package traffic
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"log"
 	"sync"
 
@@ -57,6 +59,9 @@ func zstdDecoder() *zstd.Decoder {
 // for itself, so tiny bodies stay raw.
 const minCompressBody = 1024
 
+// Bounds legacy and imported blobs whose original capture size is unknown.
+const maxBlobBody = 64 << 20
+
 // compressInline returns the body for an exchange_bodies column: prefixed and
 // zstd-compressed when smaller, unchanged otherwise.
 func compressInline(body []byte) []byte {
@@ -105,11 +110,22 @@ func encodeBlob(body []byte) (data []byte, compressed bool) {
 // decodeBlob reverses encodeBlob for file bytes read by extension.
 func decodeBlob(data []byte, compressed bool) ([]byte, error) {
 	if !compressed {
+		if len(data) > maxBlobBody {
+			return nil, fmt.Errorf("blob exceeds %d bytes", maxBlobBody)
+		}
 		return data, nil
 	}
-	plain, err := zstdDecoder().DecodeAll(data, nil)
+	decoder, err := zstd.NewReader(bytes.NewReader(data), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(maxBlobBody))
 	if err != nil {
 		return nil, err
+	}
+	defer decoder.Close()
+	plain, err := io.ReadAll(io.LimitReader(decoder, maxBlobBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(plain) > maxBlobBody {
+		return nil, fmt.Errorf("blob exceeds %d bytes", maxBlobBody)
 	}
 	return plain, nil
 }

@@ -244,12 +244,13 @@ func (d *DB) QueueTaskArchive(taskID int64) (*TaskArchive, error) {
 	var name, description, goal, status, categoryName string
 	var categoryID *int64
 	var paused, queued bool
-	var deadline *time.Time
+	var deadline, pausedAt *time.Time
+	var timeoutSeconds int64
 	err = tx.QueryRow(`SELECT COALESCE(t.name,''), t.description, t.goal, t.status,
- t.category_id, COALESCE(c.name,''), t.paused, t.queued, t.deadline_at
+ t.category_id, COALESCE(c.name,''), t.paused, t.queued, t.deadline_at, t.paused_at, t.timeout_seconds
 FROM tasks t LEFT JOIN task_categories c ON c.id=t.category_id
 WHERE t.id=$1 AND t.deleted_at IS NULL FOR UPDATE OF t`, taskID).Scan(
-		&name, &description, &goal, &status, &categoryID, &categoryName, &paused, &queued, &deadline,
+		&name, &description, &goal, &status, &categoryID, &categoryName, &paused, &queued, &deadline, &pausedAt, &timeoutSeconds,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTaskArchiveNotFound
@@ -297,10 +298,7 @@ LIMIT 1`, taskID).Scan(&dependent)
 	}
 	remaining := int64(0)
 	if paused && deadline != nil {
-		remaining = int64(time.Until(*deadline).Seconds())
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining = remainingPausedTimeout(*deadline, pausedAt, timeoutSeconds, time.Now())
 	}
 	_, err = tx.Exec(`INSERT INTO task_archives(
  task_id,state,phase,progress,error,warnings,format_version,task_name,
@@ -327,6 +325,28 @@ VALUES ($1,$2,'queued',0,'','[]',$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
 		return nil, fmt.Errorf("%w: current state %s", ErrTaskArchiveState, item.State)
 	}
 	return item, tx.Commit()
+}
+
+func remainingPausedTimeout(deadline time.Time, pausedAt *time.Time, timeoutSeconds int64, now time.Time) int64 {
+	basis := now
+	if pausedAt != nil {
+		basis = *pausedAt
+	}
+	budget := deadline.Sub(basis)
+	// Older paused rows can lack paused_at. Their original pause time is
+	// unknowable, so avoid expiring them during archival when a configured
+	// timeout gives us a safe upper bound.
+	if pausedAt == nil && timeoutSeconds > 0 && budget < time.Duration(timeoutSeconds)*time.Second {
+		budget = time.Duration(timeoutSeconds) * time.Second
+	}
+	if budget <= 0 {
+		return 0
+	}
+	remaining := int64(budget / time.Second)
+	if budget%time.Second != 0 {
+		remaining++
+	}
+	return remaining
 }
 
 func (d *DB) QueueTaskArchiveRestore(id int64) (*TaskArchive, error) {

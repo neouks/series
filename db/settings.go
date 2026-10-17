@@ -25,6 +25,26 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, key
 	return err
 }
 
+// SetSettingsAtomic applies one settings request as a unit. A failed write
+// leaves every previous value unchanged.
+func (d *DB) SetSettingsAtomic(values map[string]string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	for key, value := range values {
+		if _, err := tx.Exec(`INSERT INTO settings(key,value) VALUES ($1,$2)
+			ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, key, value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // InsertSettingIfAbsent 只在 key 尚未存在时写入，已存在则原样保留并返回 inserted=false。
 // 给 auth.password_hash 这类"只允许首次设置"的键用：判定落在数据库的主键约束上，
 // 调用方先 GetSetting 再写的那种检查就只是快速失败路径——读出错或并发撞车时，

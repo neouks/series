@@ -73,7 +73,7 @@ export default function SystemSettingsPage() {
     setAgentTrafficBinding(!!s.agent_traffic_binding);
     setSkipStatic(s.traffic_skip_static !== false);
     setSkipTypesInput(s.traffic_skip_types ?? "");
-    setRetentionDays(String(s.traffic_retention_days ?? 30));
+    setRetentionDays(String(s.traffic_retention_days ?? 0));
     setWebSearch(!!s.web_search_enabled);
     setBackend(s.web_search_backend || "ddgs");
     setBraveKeySet(!!s.brave_key_set);
@@ -169,7 +169,11 @@ export default function SystemSettingsPage() {
   };
 
   const saveRetention = () => {
-    const days = Math.max(0, Math.floor(Number(retentionDays) || 0));
+    const days = Number(retentionDays);
+    if (!Number.isInteger(days) || days < 0 || days > 3650 || retentionDays.trim() === "") {
+      toast.error("流量保留天数必须为 0 或 1–3650");
+      return;
+    }
     setRetentionDays(String(days));
     saveTrafficDisk({ traffic_retention_days: days }, days > 0 ? `流量保留 ${days} 天，过期自动清理` : "流量永久保留");
   };
@@ -397,7 +401,8 @@ export default function SystemSettingsPage() {
                   跳过静态资源录制
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  HTML / JS / CSS / 图片 / 字体 / 音视频等前端资源不落库（不可再搜索/回看）。API 与接口响应不受影响。
+                  HTML / JS / CSS / 图片 / 字体 / 音视频等资源不落库（不可再搜索/回看）。返回 HTML
+                  的接口响应也可能被跳过。
                 </p>
               </div>
               <Switch
@@ -436,6 +441,7 @@ export default function SystemSettingsPage() {
                     id="traffic-retention"
                     type="number"
                     min={0}
+                    max={3650}
                     value={retentionDays}
                     disabled={!loaded || savingDisk}
                     className="w-32"
@@ -446,7 +452,8 @@ export default function SystemSettingsPage() {
                   </Button>
                 </div>
                 <FieldDescription>
-                  每小时自动清理超过保留期的流量（沿用删除回收，磁盘随之释放）。0 = 永久保留；默认 30 天。
+                  每小时自动清理超过保留期的流量（沿用删除回收，磁盘随之释放）。0 = 永久保留；新安装默认 30
+                  天，升级后未设置时永久保留。
                 </FieldDescription>
               </Field>
             </FieldGroup>

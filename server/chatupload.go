@@ -132,13 +132,30 @@ func saveUpload(hdr *multipart.FileHeader, dest string) error {
 		return err
 	}
 	defer src.Close()
-	out, err := os.Create(dest)
+	return writeUpload(src, dest)
+}
+
+func writeUpload(src io.Reader, dest string) error {
+	// Stage beside the destination so a failed copy never leaves a visible,
+	// truncated attachment. Exclusive creation also avoids clobbering uploads
+	// that raced uniqueUploadPath's existence check.
+	out, err := os.CreateTemp(filepath.Dir(dest), ".series-upload-*")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, src)
-	return err
+	defer os.Remove(out.Name())
+	if _, err := io.Copy(out, src); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	// Link is atomic and fails if another upload already claimed this name.
+	if err := os.Link(out.Name(), dest); err != nil {
+		return err
+	}
+	return nil
 }
 
 // composeAgentMessage appends an attachment manifest to the user's message so the agent
