@@ -65,9 +65,12 @@ func (t *ToolSet) contextTarget(ctx context.Context, task string, cap string) (*
 		if t.ts == nil {
 			return nil, fmt.Errorf("缺少任务探索上下文")
 		}
-		if t.workerReadAllowed(ctx) {
-			copy := *t
+		copy := *t
+		copy.workerExecution = t.workerReadAllowed(ctx)
+		if copy.workerExecution {
 			copy.ts = t.ts.WithWorkerRead()
+		}
+		if copy.workerExecution != t.workerExecution || copy.ts != t.ts {
 			return &copy, nil
 		}
 		return t, nil

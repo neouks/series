@@ -37,6 +37,9 @@ func (t *ToolSet) readApprovalStates(taskID int64, ids []int64) (map[int64]strin
 		if err != nil {
 			return nil, err
 		}
+		if t.workerExecution {
+			states = workerVisibility(states)
+		}
 		for _, id := range missing {
 			known[id] = states[id]
 		}

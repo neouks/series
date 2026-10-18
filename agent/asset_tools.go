@@ -103,7 +103,6 @@ func (t *ToolSet) assetGet() actool.CoreTool {
 		if len(a.Fields) == 0 {
 			a.Fields = []string{"identity", "fingerprint"}
 		}
-		a.MaxChars = readContentBudget(ctx, a.MaxChars, len(a.IDs))
 		if a.Index < 0 {
 			return actool.Errorf("index 不得为负"), nil
 		}
@@ -112,6 +111,17 @@ func (t *ToolSet) assetGet() actool.CoreTool {
 				return actool.Errorf("ids 必须为正整数"), nil
 			}
 		}
+		// Duplicate selectors do not consume another share of the total budget.
+		seen := map[int64]bool{}
+		ids := make([]int64, 0, len(a.IDs))
+		for _, id := range a.IDs {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		a.IDs = ids
+		a.MaxChars = readContentBudget(ctx, a.MaxChars, len(ids))
 		for _, group := range a.Fields {
 			if !slices.Contains([]string{"identity", "fingerprint", "dns", "params", "auth", "extra"}, group) {
 				return actool.Errorf("未知字段组"), nil
@@ -124,7 +134,9 @@ func (t *ToolSet) assetGet() actool.CoreTool {
 		if t.workerReadAllowed(ctx) {
 			store = store.WithWorkerRead()
 		}
-		rows, e := store.ContextAssets(ctx, t.taskID, a.IDs, a.Fields, a.Field, a.Index, a.Offset, max(1, a.MaxChars/len(a.IDs)))
+		// Do not multiply tiny total budgets by forcing every item to one char.
+		queryIDs := ids[:min(len(ids), a.MaxChars)]
+		rows, e := store.ContextAssets(ctx, t.taskID, queryIDs, a.Fields, a.Field, a.Index, a.Offset, a.MaxChars/len(queryIDs))
 		if e != nil {
 			return actool.Errorf("资产查询失败: " + e.Error()), nil
 		}
@@ -136,7 +148,7 @@ func (t *ToolSet) assetGet() actool.CoreTool {
 			}
 			found[id] = true
 			if detail, ok := row["details"].(map[string]any); ok {
-				next := map[string]any{"ids": []int64{id}, "fields": a.Fields, "field": a.Field, "index": a.Index, "offset": a.Offset}
+				next := map[string]any{"ids": []int64{id}, "fields": a.Fields, "field": a.Field, "index": a.Index, "offset": a.Offset, "max_chars": a.MaxChars}
 				more := false
 				for _, position := range []string{"offset", "index"} {
 					if v := detail["next_"+position]; v != nil {
@@ -149,9 +161,13 @@ func (t *ToolSet) assetGet() actool.CoreTool {
 				}
 			}
 		}
-		for _, id := range a.IDs {
+		for i, id := range a.IDs {
 			if !found[id] {
-				rows = append(rows, map[string]any{"asset_id": id, "error": "资产不可用"})
+				reason := "资产不可用"
+				if i >= len(queryIDs) {
+					reason = "总正文预算不足；请减少 ids 数量或提高 max_chars"
+				}
+				rows = append(rows, map[string]any{"asset_id": id, "error": reason})
 				found[id] = true
 			}
 		}

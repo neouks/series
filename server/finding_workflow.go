@@ -116,17 +116,21 @@ func objectProperty(parent map[string]any, key string) map[string]any {
 }
 
 func (s *Server) agentFindingTrafficAccess(ctx context.Context, id int64, write bool) error {
+	ri := agent.RunInfoFrom(ctx)
+	if ri.TaskID <= 0 && (ri.AgentKey == "worker" || ri.AgentKey == "planner" || ri.AgentKey == "mainagent") {
+		return errors.New("任务角色缺少有效任务上下文")
+	}
 	if id <= 0 {
 		return errors.New("finding_id 必须为独立漏洞记录 ID；不是探索节点 ID")
 	}
-	f, err := s.m.pg.GetFinding(id)
+	f, err := s.m.pg.FindingAccessMetadata(ctx, id)
 	if err != nil {
 		return err
 	}
 	if f == nil {
 		return fmt.Errorf("%w：finding_id=%d。证据工具使用独立漏洞记录 ID，请从 context_search / context_get 的 finding_id 字段读取；不要传 id / finding_node_id", db.ErrFindingNotFound, id)
 	}
-	if ri := agent.RunInfoFrom(ctx); ri.TaskID > 0 {
+	if ri.TaskID > 0 {
 		task := s.m.ResolveTask(strconv.FormatInt(ri.TaskID, 10))
 		if task == nil {
 			return errors.New("任务不存在")
@@ -136,18 +140,30 @@ func (s *Server) agentFindingTrafficAccess(ctx context.Context, id int64, write 
 			return errors.New("当前任务不可读取该漏洞")
 		}
 		if write && inherited {
-			return errors.New("继承漏洞的流量证据只读，请到来源任务修改")
+			return errors.New("继承漏洞及其流量证据只读，请到来源任务修改")
 		}
 		as := s.m.Assets()
 		if as == nil {
 			return errors.New("任务资产授权不可用")
 		}
+		as = as.WithReadContext(ctx)
 		if (ri.AgentKey == "worker" && ri.IntentID > 0) || (ri.AgentKey == "mainagent" && ri.IntentID == 0) {
+			as = as.WithExecutionRead()
 			if err := as.ValidateWorkerAssets(ri.TaskID, f.AssetIDs); err != nil {
 				return err
 			}
 		} else if err := as.ValidateTaskAssetsApproved(ri.TaskID, f.AssetIDs); err != nil {
 			return err
+		}
+		// Direct asset IDs alone omit parent facts and inherited source scope.
+		if f.NodeID != nil {
+			access, err := as.TaskNodeAccess(ri.TaskID, []int64{*f.NodeID})
+			if err != nil {
+				return err
+			}
+			if !access[*f.NodeID].CanRead {
+				return errors.New("漏洞关联节点当前不可访问")
+			}
 		}
 	}
 	return nil
@@ -155,7 +171,7 @@ func (s *Server) agentFindingTrafficAccess(ctx context.Context, id int64, write 
 
 func (s *Server) toolBindFindingTraffic() actool.CoreTool {
 	return wrTool("bind_finding_traffic", "为已登记漏洞补绑经核实的真实 HTTP 流量。finding_id 使用独立漏洞记录 ID；不要传探索节点 ID。同批引用全部成功或全部失败，重复引用不覆盖已有说明。补绑会使已有报告标记待更新；不要为补包重新探测或重复创建漏洞。",
-		objSchema(map[string]any{"finding_id": map[string]any{"type": "integer", "minimum": 1, "description": "独立漏洞记录 ID，从 context_search / context_get 的 finding_id 字段读取"}, "traffic_refs": agent.HintTrafficSchema()}, "finding_id", "traffic_refs"),
+		objSchema(map[string]any{"finding_id": positiveIDParam("独立漏洞记录 ID，从 context_search / context_get 的 finding_id 字段读取"), "traffic_refs": agent.HintTrafficSchema()}, "finding_id", "traffic_refs"),
 		func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 			if !s.m.pg.GetBool(settingAgentTrafficBinding, false) {
 				return actool.Errorf("Agent 自动绑定流量已关闭；请在系统设置开启，或使用页面人工绑定。"), nil

@@ -36,7 +36,7 @@ func mergeToolMetadata(code, saved map[string]any) {
 	}
 	if value, ok := saved["default"]; ok {
 		raw, err := json.Marshal(value)
-		if err == nil && actool.ValidateInput(code, raw) == nil {
+		if err == nil && validateBusinessInput(code, raw) == nil {
 			code["default"] = value
 		}
 	}

@@ -70,6 +70,9 @@ func decodeTrafficInput(raw json.RawMessage, out any) error {
 func (t *Traffic) allowToolHost(ctx context.Context, host string) error {
 	ri := llmrec.RunInfoFrom(ctx)
 	if ri.TaskID <= 0 {
+		if ri.AgentKey == "worker" || ri.AgentKey == "planner" || ri.AgentKey == "mainagent" {
+			return fmt.Errorf("任务角色缺少有效任务上下文")
+		}
 		return nil
 	}
 	if t.assets == nil {
@@ -147,8 +150,24 @@ func (t *Traffic) searchTool() actool.CoreTool {
 		args := []any{host, c.Upper}
 		if port != "" {
 			authority := net.JoinHostPort(host, port)
-			where += ` AND (url LIKE ? OR url LIKE ? OR url LIKE ?)`
+			where += ` AND (url LIKE ? OR url LIKE ? OR url LIKE ?`
 			args = append(args, "%://"+authority+"/%", "%://"+authority+"?%", "%://"+authority)
+			// A URL may omit its scheme's default port. Explicit :443 must
+			// include https://host, but never http://host (port 80).
+			if port == "80" || port == "443" {
+				scheme := "http"
+				if port == "443" {
+					scheme = "https"
+				}
+				bare := host
+				if strings.Contains(bare, ":") {
+					bare = "[" + bare + "]"
+				}
+				prefix := scheme + "://" + bare
+				where += ` OR url LIKE ? OR url LIKE ? OR url = ?`
+				args = append(args, prefix+"/%", prefix+"?%", prefix)
+			}
+			where += `)`
 		}
 		if a.Contains != "" {
 			where += ` AND (instr(lower(url),lower(?))>0 OR instr(lower(url_template),lower(?))>0)`

@@ -655,6 +655,25 @@ func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 	return f, nil
 }
 
+// FindingAccessMetadata fetches only authorization inputs, not potentially
+// large reports/evidence or unrelated traffic counts.
+func (d *DB) FindingAccessMetadata(ctx context.Context, id int64) (*DBFinding, error) {
+	f := &DBFinding{}
+	var assets []byte
+	err := d.QueryRowContext(ctx, `SELECT id,task_id,node_id,asset_ids FROM findings WHERE id=$1`, id).
+		Scan(&f.ID, &f.TaskID, &f.NodeID, &assets)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(assets, &f.AssetIDs); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
 // DeleteFinding removes a finding entirely: the standalone findings row and its
 // originating exploration node (kind='finding'), so it disappears from the findings
 // list, the per-task 发现 Tab, and the exploration graph alike. Deleting the node
