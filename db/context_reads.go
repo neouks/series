@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -35,6 +36,15 @@ type ContextHit struct {
 
 // Keep the lineage/asset policy shared with existing tool reads. The roots are
 // supplied by each query, so a narrow lookup doesn't traverse the entire graph.
+const contextScopeSQL = `WITH RECURSIVE current_task AS (
+ SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL
+ ), contexts AS (
+ SELECT $1::bigint exp,COALESCE((SELECT id FROM current_task),0) owner
+ WHERE EXISTS(SELECT 1 FROM current_task) OR NOT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1)
+ UNION SELECT t.exploration_id,t.id FROM task_relations r JOIN current_task c ON c.id=r.task_id
+ JOIN tasks t ON t.id=r.source_task_id AND t.deleted_at IS NULL
+ )`
+
 func contextVisibility(roots string, worker bool) string {
 	at := strings.Index(toolNodeVisibilitySQL, "), lineage(root,id,exp)")
 	lineage := toolNodeVisibilitySQL[at:]
@@ -43,14 +53,7 @@ func contextVisibility(roots string, worker bool) string {
 		// provenance, including when it occurs in an ordinary node's ancestry.
 		lineage = strings.Replace(lineage, "AND n.id IS NULL)", "AND (n.id IS NULL OR (n.kind='digest' AND NOT EXISTS(SELECT 1 FROM exploration_edges de WHERE de.exploration_id=n.exploration_id AND de.src_id=n.id AND de.rel='covers'))))", 1)
 	}
-	return workerReadSQL(`WITH RECURSIVE current_task AS (
- SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL
- ), contexts AS (
- SELECT $1::bigint exp,COALESCE((SELECT id FROM current_task),0) owner
- WHERE EXISTS(SELECT 1 FROM current_task) OR NOT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1)
- UNION SELECT t.exploration_id,t.id FROM task_relations r JOIN current_task c ON c.id=r.task_id
- JOIN tasks t ON t.id=r.source_task_id AND t.deleted_at IS NULL
- ), roots AS MATERIALIZED (`+roots+lineage, worker)
+	return workerReadSQL(contextScopeSQL+`, roots AS MATERIALIZED (`+roots+lineage, worker)
 }
 
 // Evidence and platform IDs must survive projection without float64 rounding.
@@ -80,42 +83,69 @@ func (s *ExplorationStore) ContextUpper(ctx context.Context, activity bool) (int
 	return id, err
 }
 
-func (s *ExplorationStore) SearchContext(ctx context.Context, q ContextSearch) ([]ContextHit, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	activity := len(q.Types) == 1 && q.Types[0] == "activity"
+// Both search modes share the same visibility CTE and field projections. Mixed
+// queries add keyset conditions before LIMIT; never filter a limited page later.
+func (s *ExplorationStore) contextSearchSQL(activity, mixed bool) string {
+	upper, before, order, extra := "$11", "", "", ""
+	if mixed {
+		upper = "(SELECT node_upper FROM bounds)"
+		before = " AND ($14::timestamptz IS NULL OR (n.created_at,n.id,'node'::text)<($14,$15::bigint,$16::text))"
+		order, extra = "n.created_at DESC,n.id DESC", ",n.created_at,'node'::text AS source"
+		if activity {
+			upper = "(SELECT activity_upper FROM bounds)"
+			before = " AND ($14::timestamptz IS NULL OR (a.created_at,a.id,'activity'::text)<($14,$15::bigint,$16::text))"
+			order, extra = "a.created_at DESC,a.id DESC", ",a.created_at,'activity'::text AS source"
+		}
+	} else if activity {
+		order = "a.id DESC"
+	} else {
+		order = "n.id DESC"
+	}
+	typeFilter := "n.kind=ANY($2::text[])"
+	if activity {
+		typeFilter = "n.kind='intent'"
+	}
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner
  FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
- WHERE n.kind=ANY($2::text[]) AND ($4='' OR n.payload->>'severity'=$4)
+ WHERE ` + typeFilter + ` AND ($4='' OR n.payload->>'severity'=$4)
  AND ($9='' OR n.state=$9)
  AND (n.exploration_id=$1 OR n.kind<>'intent' OR n.state IN ('done','blocked','exhausted','stopped'))`
-	types := q.Types
 	if activity {
-		types = []string{"intent"}
 		roots += ` AND ($10::bigint=0 OR n.id=$10)`
 	} else {
-		roots += ` AND n.id<=$11 AND ($6::bigint=0 OR n.id<$6)
+		roots += ` AND n.id<=` + upper + ` AND ($6::bigint=0 OR n.id<$6)` + before + `
  AND ($10::bigint=0 OR n.id=$10 OR EXISTS(SELECT 1 FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.src_id=$10 AND e.dst_id=n.id AND e.rel='yields'))
  AND ($3='' OR EXISTS(SELECT 1 FROM (` + contextNodeFields + `) f(path,body) WHERE strpos(lower(f.body),lower($3))>0))`
 	}
 	sql := contextVisibility(roots, s.workerRead)
 	if activity {
-		sql += ` SELECT 'activity:'||a.id,a.id,'activity',n.id,n.owner,n.exploration_id<>$1,n.state,
- left(COALESCE(a.summary,''),240),COALESCE(hit.path,''),COALESCE(hit.snippet,''),0::bigint
+		sql += ` SELECT 'activity:'||a.id,a.id,'activity',n.id AS node_id,n.owner,n.exploration_id<>$1,n.state,
+ left(COALESCE(a.summary,''),240),COALESCE(hit.path,''),COALESCE(hit.snippet,''),0::bigint` + extra + `
  FROM visible n JOIN activity a ON a.node_id=n.id AND a.exploration_id=n.exploration_id
  LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet FROM (VALUES ('/detail',COALESCE(a.detail,'')),('/summary',COALESCE(a.summary,''))) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
- WHERE a.kind NOT IN ('thinking','usage') AND a.id<=$11 AND ($6::bigint=0 OR a.id<$6)
+ WHERE a.kind NOT IN ('thinking','usage') AND a.id<=` + upper + ` AND ($6::bigint=0 OR a.id<$6)` + before + `
  AND ($3='' OR hit.path IS NOT NULL)
- AND $8::boolean ORDER BY a.id DESC LIMIT $7`
+ AND $8::boolean AND $2::text[] IS NOT NULL ORDER BY ` + order + ` LIMIT $7`
 	} else {
-		sql += ` SELECT 'node:'||n.id,n.id,n.kind,n.id,v.owner,n.exploration_id<>$1,n.state,left(COALESCE(n.payload->>'summary',n.payload->>'text',n.payload->>'body',''),240),
- COALESCE(hit.path,''),COALESCE(hit.snippet,''),CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END
+		sql += ` SELECT 'node:'||n.id,n.id,n.kind,n.id AS node_id,v.owner,n.exploration_id<>$1,n.state,left(COALESCE(n.payload->>'summary',n.payload->>'text',n.payload->>'body',''),240),
+ COALESCE(hit.path,''),COALESCE(hit.snippet,''),CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END` + extra + `
  FROM visible v JOIN exploration_nodes n ON n.id=v.id
  LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet
  FROM (` + contextNodeFields + `) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
- WHERE $8::boolean ORDER BY n.id DESC LIMIT $7`
+ WHERE $8::boolean ORDER BY ` + order + ` LIMIT $7`
 	}
-	rows, err := s.db.QueryContext(ctx, sql, s.expID, types, q.Query, q.Severity, q.AssetID, q.Before, q.Limit+1, true, q.State, q.IntentID, q.Upper)
+	return sql
+}
+
+func (s *ExplorationStore) SearchContext(ctx context.Context, q ContextSearch) ([]ContextHit, error) {
+	if len(q.Types) > 1 && slices.Contains(q.Types, "activity") {
+		// The legacy numeric cursor cannot represent both ID namespaces.
+		return nil, fmt.Errorf("混合检索须使用 SearchMixedContext 的独立分页游标")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	activity := len(q.Types) == 1 && q.Types[0] == "activity"
+	rows, err := s.db.QueryContext(ctx, s.contextSearchSQL(activity, false), s.expID, q.Types, q.Query, q.Severity, q.AssetID, q.Before, q.Limit+1, true, q.State, q.IntentID, q.Upper)
 	if err != nil {
 		return nil, err
 	}
@@ -264,15 +294,19 @@ func (s *AssetStore) SearchUntestedToolAssets(taskID int64, dsl, typ string, lim
 	return out, nil
 }
 
-func (s *ExplorationStore) ContextParents(ctx context.Context, intentID, before int64, limit int) ([]ContextHit, error) {
+func (s *ExplorationStore) ContextParents(ctx context.Context, intentID, before int64, limit int, summaryBudget ...int) ([]ContextHit, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	summaryChars := 240
+	if len(summaryBudget) > 0 {
+		summaryChars = max(1, min(summaryChars, summaryBudget[0]))
+	}
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
  WHERE n.kind IN ('fact','finding') AND EXISTS(SELECT 1 FROM exploration_edges e JOIN exploration_nodes i ON i.id=e.dst_id AND i.exploration_id=e.exploration_id
  WHERE i.id=$2 AND i.kind='intent' AND i.exploration_id IN(SELECT exp FROM contexts) AND e.src_id=n.id AND e.rel='derived_from')`
-	query := contextVisibility(roots, s.workerRead) + ` SELECT n.id,n.kind,v.owner,n.exploration_id<>$1,left(COALESCE(n.payload->>'summary',''),240)
+	query := contextVisibility(roots, s.workerRead) + ` SELECT n.id,n.kind,v.owner,n.exploration_id<>$1,left(COALESCE(n.payload->>'summary',''),$7)
  FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE ($3::bigint=0 OR n.id<$3) AND $4::boolean ORDER BY n.id DESC LIMIT $6`
-	rows, e := s.db.QueryContext(ctx, query, s.expID, intentID, before, true, int64(0), limit+1)
+	rows, e := s.db.QueryContext(ctx, query, s.expID, intentID, before, true, int64(0), limit+1, summaryChars)
 	if e != nil {
 		return nil, e
 	}

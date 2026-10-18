@@ -10,8 +10,17 @@
     "schema": {
       "properties": {
         "task_id": {
-          "description": "仅跨任务授权角色可指定",
-          "type": "string"
+          "description": "任务ID（正整数或数字字符串）；省略或传当前任务ID使用本任务权限，其他任务须跨任务授权",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]*$"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ]
         }
       },
       "type": "object"
@@ -25,7 +34,7 @@
       "auto",
       "pentest"
     ],
-    "description": "按类型检索当前任务及直接关联任务的摘要和正文，返回命中片段及带类型引用；正文用 context_get。activity 只含 Worker 执行记录。",
+    "description": "按类型检索当前任务及直接关联任务的摘要和正文，返回命中片段及带类型引用；正文用 context_get。activity 只含 Worker 执行记录，可与节点类型混合，混合结果按登记时间倒序。",
     "key": "context_search",
     "schema": {
       "properties": {
@@ -60,8 +69,17 @@
           "type": "string"
         },
         "task_id": {
-          "description": "仅跨任务授权角色可指定；默认当前任务",
-          "type": "string"
+          "description": "任务ID（正整数或数字字符串）；省略或传当前任务ID使用本任务权限，其他任务须跨任务授权",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]*$"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ]
         },
         "types": {
           "items": {
@@ -90,7 +108,7 @@
       "auto",
       "pentest"
     ],
-    "description": "批量读取至多5个引用。detail 正文；意图 output 最新结果/进度，parents 上游事实/漏洞；摘要 members 成员。每项独立返回错误和续读位置。",
+    "description": "批量读取至多5个引用。detail 正文；意图 output 最新结果/进度，parents 上游事实/漏洞；摘要 members 成员。每项独立返回错误和续读位置；顶层 max_chars 是总预算，每项 max_chars 是额外上限。",
     "key": "context_get",
     "schema": {
       "properties": {
@@ -125,6 +143,12 @@
                   "parents"
                 ],
                 "type": "string"
+              },
+              "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 24000,
+                "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"
               }
             },
             "required": [
@@ -143,8 +167,17 @@
           "type": "integer"
         },
         "task_id": {
-          "description": "仅跨任务授权角色可指定",
-          "type": "string"
+          "description": "任务ID（正整数或数字字符串）；省略或传当前任务ID使用本任务权限，其他任务须跨任务授权",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]*$"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ]
         }
       },
       "required": [
