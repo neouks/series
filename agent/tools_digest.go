@@ -60,6 +60,9 @@ func (t *ToolSet) authorizedCoveredMembers(store *db.ExplorationStore, ownerTask
 	if err != nil {
 		return nil
 	}
+	if len(covered) == 0 {
+		return covered
+	}
 	allowed := map[int64]bool{}
 	var ids []int64
 	for _, id := range covered {
@@ -83,7 +86,7 @@ func (t *ToolSet) authorizedCoveredMembers(store *db.ExplorationStore, ownerTask
 // coldDigestsRecent keeps the newest authorized digests and returns older IDs.
 // Memberships and authorization are batched; no per-digest database reads.
 func (t *ToolSet) coldDigestsRecent(store *db.ExplorationStore, ownerTaskID int64, limit int) ([]map[string]any, []int64, error) {
-	ads, err := store.ActiveDigests()
+	ads, err := store.ToolActiveDigests()
 	if err != nil || len(ads) == 0 {
 		return nil, nil, err
 	}
@@ -147,9 +150,9 @@ func (t *ToolSet) hiddenMembersFor(store *db.ExplorationStore, ownerTaskID int64
 	if len(covered) == 0 {
 		return func(int64) bool { return false }
 	}
-	var hot map[int64]bool
-	if cg, _, err := loadColdGraph(store); err == nil {
-		hot = cg.hotSet()
+	hot, err := store.ToolHotNodeIDs(context.Background())
+	if err != nil {
+		return func(int64) bool { return false }
 	}
 	return func(id int64) bool { _, c := covered[id]; return c && !hot[id] }
 }

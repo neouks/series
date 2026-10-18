@@ -1,0 +1,170 @@
+{
+  "date": "2026-10-18",
+  "scope": "本次内置工具精简改动的权限、上下文、检索准确性及性能复核；修复直接保留在当前工作区。",
+  "issues": [
+    {
+      "id": "R1",
+      "priority": "P1",
+      "problem": "软删除任务在读取路径中被当作无任务探索，可能继续返回正文",
+      "file": "db/context_reads.go:38",
+      "fix": "仅真实无任务探索允许无任务读取；已删除任务在共享可见性查询中拒绝",
+      "regression": "TestContextReadsRejectDeletedTask",
+      "status": "fixed"
+    },
+    {
+      "id": "R2",
+      "priority": "P1",
+      "problem": "无成员摘要及其下游节点的可见性与审批复核不一致",
+      "file": "db/context_reads.go:38",
+      "fix": "严格读取沿完整祖先链拒绝不可核验摘要；保留已有 Worker 策略",
+      "regression": "TestContextReadRejectsUnverifiableDigest",
+      "status": "fixed"
+    },
+    {
+      "id": "R3",
+      "priority": "P2",
+      "problem": "资产读取仅依赖 ToolSet Worker 标志，没有核对真实运行角色和任务",
+      "file": "agent/context_tools.go:44",
+      "fix": "待审批豁免要求可信 Worker 角色、匹配任务及有效意图",
+      "regression": "TestAssetReadRequiresTrustedWorkerContext",
+      "status": "fixed"
+    },
+    {
+      "id": "R4",
+      "priority": "P1",
+      "problem": "Worker 输出先校验节点再独立查询正文，存在并发撤权窗口",
+      "file": "db/context_reads.go:210",
+      "fix": "输出与最新授权在一条 SQL 的同一快照中完成，原来每项两次 SQL 缩为一次",
+      "regression": "TestContextOutputUsesLiveAuthorization",
+      "status": "fixed"
+    },
+    {
+      "id": "R5",
+      "priority": "P2",
+      "problem": "JSON 投影与历史处理经 float64 改写大整数，可能改变业务证据或授权 ID",
+      "file": "agent/asset_context.go",
+      "fix": "数据库投影、动态复核、输出捕获使用 json.Number；续页保留整数精度",
+      "regression": "TestContextProjectionPreservesLargeJSONIntegers / TestStructuredCapturePreservesExactAuthorizationID",
+      "status": "fixed"
+    },
+    {
+      "id": "R6",
+      "priority": "P2",
+      "problem": "证据 JSON 内的 asset_id/node_id 被误认成平台元数据，合法正文被剔除",
+      "file": "agent/asset_context.go",
+      "fix": "复核外层平台身份；JSON Pointer 指向的证据值不递归解释为平台身份",
+      "regression": "TestContextHistoryDoesNotInterpretEvidenceAsPlatformIDs",
+      "status": "fixed"
+    },
+    {
+      "id": "R7",
+      "priority": "P2",
+      "problem": "首次部署的显式工具绑定未保存能力；从未授权的已禁用绑定启用后仍不可用",
+      "file": "db/tool_context_catalog.go:199",
+      "fix": "按默认权限初始化能力记录，显式新增绑定写入本任务能力；临时启停保留迁移子集，不扩大跨任务权限",
+      "regression": "TestExplicitContextBindingOnFreshCatalog / TestContextCatalogMigrationPreservesGrants",
+      "status": "fixed"
+    },
+    {
+      "id": "R8",
+      "priority": "P2",
+      "problem": "旧版流量的 Blob 占位符被作为完整正文，文件缺失被吞成空结果",
+      "file": "traffic/tool_reads.go:328",
+      "fix": "识别历史尾部 Blob 指针并连续读取；仅打开选定 HTTP 文件、限制头大小并按字节分段；文件丢失明确报错",
+      "regression": "TestTrafficToolReadsLegacyBlobAndMissingFile",
+      "status": "fixed"
+    },
+    {
+      "id": "R9",
+      "priority": "P2",
+      "problem": "Worker 忽略父事实继承资产；超过 20 条上游事实没有可执行续页",
+      "file": "agent/worker_context.go:9",
+      "fix": "复用启动授权获得的资产血缘，最多预载十个摘要；context_get 增加受 detail 权限控制的 parents 视图，返回 before 续页；不扩大自动测试范围",
+      "regression": "TestWorkerPreloadsInheritedAssetWithoutWholeGraph / TestWorkerParentContextHasUsableContinuation",
+      "status": "fixed"
+    },
+    {
+      "id": "R10",
+      "priority": "P2",
+      "problem": "批量读取的局部失败被当作成功，去重可能删除之前有效的证据；延迟包装读取未去重",
+      "file": "agent/tool_history.go:121",
+      "fix": "保留局部失败之前的有效批次并继续实时授权复核；延迟工具按内部真实名称去重；正常结果使用低成本快速检查",
+      "regression": "TestPartialContextFailureDoesNotEraseEarlierEvidence",
+      "status": "fixed"
+    }
+  ],
+  "tests": {
+    "isolated_database": "临时 PostgreSQL 17 容器，127.0.0.1:54874；不挂载宿主目录；Server 使用单独的新建库。结束后删除容器。",
+    "full_regression": {
+      "db": "pass 28.543s",
+      "agent": "pass 25.900s",
+      "guard": "pass 0.140s",
+      "traffic": "pass 4.756s",
+      "server": "pass 21.996s"
+    },
+    "compile": "go test ./... -run ^$ : pass",
+    "norma": "llm / agentcore / noa / noaadapter : pass (cached)",
+    "frontend": "npx tsc --noEmit : pass; tsx context-tools.test.ts / tool-calls.test.ts : pass",
+    "whitespace": "git diff --check : pass",
+    "new_regression_tests": 12
+  },
+  "measurements": {
+    "fixture": "同一临时数据库，1000 条事实，每条含 8192 字中文正文；无真实模型调用；时间为本机样例，不能等同生产负载表现。",
+    "body_search_and_read": {
+      "tool_calls": 2,
+      "sql_queries_before": 2,
+      "sql_queries_after": 2,
+      "before_ms": 297.205791,
+      "after_ms": 297.606042,
+      "response_bytes_before": 21930,
+      "response_bytes_after": 21930
+    },
+    "planner_overview": {
+      "sql_queries_before": 12,
+      "sql_queries_after": 12,
+      "before_avg_ms": 8.763566,
+      "after_avg_ms": 8.699666,
+      "initial_context_bytes": 1448
+    },
+    "worker_parent_context": {
+      "sql_queries_before": 1,
+      "sql_queries_after": 1,
+      "before_avg_ms": 2.375866,
+      "after_avg_ms": 1.787425,
+      "initial_context_bytes": 365
+    },
+    "current_initial_tool_schema_bytes": {
+      "goals": 2133,
+      "planner": 15645,
+      "mainagent": 32642,
+      "worker": 22564,
+      "auto": 26684,
+      "pentest": 18116,
+      "reporter": 12991
+    },
+    "schema_change_note": "parents 续读说明在带 context_get 的角色中增加 34 字节。字节不是模型 Token，未推算 Token 节省比例。",
+    "other_optimizations": [
+      "事实等非漏洞资源不再执行报告子查询",
+      "旧版 HTTP 文件仅读取请求的头或正文窗口",
+      "最新 Worker 输出从元数据+正文两条 SQL 合并为一条带授权 SQL"
+    ]
+  },
+  "compatibility": {
+    "context_get_addition": "view=parents，仅 node:INTENT_ID，按 before 翻页，复用 detail 读取权限；Mock 同步更新。",
+    "preserved": [
+      "原始会话、审计、归档不改写",
+      "主 Agent pending 策略与 Worker 执行策略",
+      "Planner 严格审批",
+      "既有跨任务授权子集",
+      "手工模式与 Worker 异步回传",
+      "已有 Bash 调用归属修复"
+    ],
+    "not_performed": [
+      "未连接业务数据库",
+      "未重启业务服务",
+      "未推送或发布",
+      "本轮无布局变更，未重复浏览器视觉验证",
+      "未进行真实 LLM 或生产并发压测"
+    ]
+  }
+}

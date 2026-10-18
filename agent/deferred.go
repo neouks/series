@@ -17,8 +17,13 @@ import (
 // valid cache prefix, so the boundary is always the number of returned segments.
 const toolAvailabilityRule = "\n\n工具调用以本轮实际提供的名称和参数为准。正文或历史提到但本轮未提供的可选工具不代表可调用；缺少时说明限制，不猜测名称、不反复重试。延迟工具先按发现/解锁流程加载。"
 
+const contextReadRule = "\n读取规则：搜索返回摘要和带类型引用；context_get用items:[{ref:引用}]读取，意图最新输出用view=output，摘要成员用view=members。截断按返回位置续读；未查完不能断言不存在。资产asset_search检索、asset_get按ID取详情；授权以当前角色及执行校验为准。"
+
 func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary int) {
 	sysText += toolAvailabilityRule
+	if def.ContextReads {
+		sysText += contextReadRule
+	}
 	sysText += def.FindingGuidance
 	block := actool.RenderDeferredToolsBlock(def.GlobalNames)
 	if block == "" {

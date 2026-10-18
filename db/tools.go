@@ -254,10 +254,24 @@ func (d *DB) UpdateTool(key, desc string, schema, agents json.RawMessage, enable
 	if len(agents) == 0 {
 		agents = json.RawMessage("[]")
 	}
-	_, err := d.Exec(`
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`SELECT pg_advisory_xact_lock(719047221)`); err != nil {
+		return err
+	}
+	if err = updateContextBindingGrants(tx, key, agents, enabled); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
 UPDATE tools SET description=$2, schema=$3, agents=$4, enabled=$5 WHERE key=$1`,
 		key, desc, schema, agents, enabled)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func shellExecutable(t *Tool) string {

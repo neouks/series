@@ -43,4 +43,17 @@ func TestStripCoverageParams(t *testing.T) {
 	if !hasRelatedParam(insert) {
 		t.Error("StripCoverageParams 不应修改原始 tool 的 schema")
 	}
+	search := ts.assetSearch()
+	filtered := ts.StripCoverageParams(ts.DropCoverageTools([]actool.CoreTool{search}))
+	if len(filtered) != 1 || filtered[0].Name() != "asset_search" {
+		t.Fatal("普通资产检索应继续可用")
+	}
+	props, _ := nestedMap(filtered[0].InputSchema(), "properties")
+	if props["untested"] != nil || props["dsl"] == nil {
+		t.Fatal("应只移除未测试筛选")
+	}
+	original, _ := nestedMap(search.InputSchema(), "properties")
+	if original["untested"] == nil {
+		t.Fatal("不应修改共享的资产检索 Schema")
+	}
 }

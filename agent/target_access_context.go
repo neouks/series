@@ -50,7 +50,10 @@ func (p assetContextProvider) refreshTargetAccess(ctx context.Context, req llm.C
 					IDs []int64 `json:"ids"`
 					targetAccessQuery
 					ParentIDs []int64 `json:"parent_ids"`
-					Intents   []struct {
+					Items     []struct {
+						Ref string `json:"ref"`
+					} `json:"items"`
+					Intents []struct {
 						AssetIDs  []int64 `json:"asset_ids"`
 						ParentIDs []int64 `json:"parent_ids"`
 					} `json:"intents"`
@@ -79,7 +82,13 @@ func (p assetContextProvider) refreshTargetAccess(ctx context.Context, req llm.C
 					}
 				case "node_detail":
 					add(true, q.ID)
-				case "list_assets":
+				case "context_get":
+					for _, item := range q.Items {
+						if kind, id, e := parseContextRef(item.Ref); e == nil && kind == "node" {
+							add(true, id)
+						}
+					}
+				case "list_assets", "asset_get":
 					add(false, q.ID)
 					for _, id := range q.IDs {
 						add(false, id)
@@ -97,7 +106,7 @@ func (p assetContextProvider) refreshTargetAccess(ctx context.Context, req llm.C
 					continue
 				}
 				var value any
-				if json.Unmarshal([]byte(c.Text), &value) != nil {
+				if decodeStructuredJSON([]byte(c.Text), &value) != nil {
 					continue
 				}
 				assets := map[int64]bool{}

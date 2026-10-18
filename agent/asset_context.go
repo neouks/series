@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"iter"
 	"net"
+	"strings"
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/neouks/series/db"
@@ -97,11 +99,35 @@ func (p assetContextProvider) Stream(ctx context.Context, req llm.CompletionRequ
 	}
 }
 
+func decodeStructuredJSON(raw []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	return decoder.Decode(value)
+}
+
+func structuredInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case json.Number:
+		n, err := v.Int64()
+		return n, err == nil
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case float64:
+		// Compatibility with callers holding already-decoded, small IDs.
+		if v >= 0 && v <= 1<<53 && v == float64(int64(v)) {
+			return int64(v), true
+		}
+	}
+	return 0, false
+}
+
 func structuredAssetIDs(row map[string]any) []int64 {
 	var ids []int64
 	appendID := func(value any) {
-		if id, ok := value.(float64); ok && id > 0 && id == float64(int64(id)) {
-			ids = append(ids, int64(id))
+		if id, ok := structuredInt64(value); ok && id > 0 {
+			ids = append(ids, id)
 		}
 	}
 	appendID(row["asset_id"])
@@ -126,21 +152,24 @@ func structuredNodeIDs(row map[string]any) []int64 {
 		return nil
 	}
 	var ids []int64
+	if id, ok := structuredInt64(row["node_id"]); ok && id > 0 {
+		return []int64{id}
+	}
 	if values, ok := row["node_ids"].([]any); ok {
 		for _, value := range values {
-			if id, ok := value.(float64); ok && id > 0 && id == float64(int64(id)) {
-				ids = append(ids, int64(id))
+			if id, ok := structuredInt64(value); ok && id > 0 {
+				ids = append(ids, id)
 			}
 		}
 	}
-	if id, ok := row["intent_id"].(float64); ok && id > 0 && id == float64(int64(id)) {
-		ids = append(ids, int64(id))
+	if id, ok := structuredInt64(row["intent_id"]); ok && id > 0 {
+		ids = append(ids, id)
 	}
 	_, summary := row["summary"]
 	_, state := row["state"]
 	_, kind := row["kind"]
-	if id, ok := row["id"].(float64); ok && id > 0 && (summary || (state && kind)) {
-		ids = append(ids, int64(id))
+	if id, ok := structuredInt64(row["id"]); ok && id > 0 && (summary || (state && kind)) {
+		ids = append(ids, id)
 	}
 	return ids
 }
@@ -156,6 +185,11 @@ func filterStructuredRows(value any, states map[int64]string, collect map[int64]
 			}
 		}
 		for key, child := range row {
+			// Projected values are user/application evidence, not our metadata.
+			// The enclosing node/asset has already been revalidated as a whole.
+			if field, ok := row["field"].(string); key == "value" && ok && strings.HasPrefix(field, "/") {
+				continue
+			}
 			filtered, keep := filterStructuredRows(child, states, collect, rowIDs)
 			if collect == nil {
 				if keep {
@@ -234,8 +268,10 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 	type result struct {
 		message, block, content int
 		value                   any
+		host                    string
 	}
 	var results []result
+	hosts := map[string]bool{}
 	ids := make(map[int64]bool)
 	nodeIDs := make(map[int64]bool)
 	toolNames := make(map[string]string)
@@ -249,22 +285,44 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 			}
 			// Only SERIES structured tools: arbitrary shell/HTTP JSON may use the
 			// same field names for unrelated application data.
-			if !assetStructuredTool(toolNames[block.ToolUseID]) {
+			trafficRead := toolNames[block.ToolUseID] == "traffic_search" || toolNames[block.ToolUseID] == "traffic_get"
+			if !trafficRead && !assetStructuredTool(toolNames[block.ToolUseID]) {
 				continue
 			}
 			for ci, content := range block.Content {
 				var value any
-				if content.Type != llm.BlockText || json.Unmarshal([]byte(content.Text), &value) != nil {
+				if content.Type != llm.BlockText || decodeStructuredJSON([]byte(content.Text), &value) != nil {
 					continue
+				}
+				host := ""
+				if trafficRead {
+					if row, ok := value.(map[string]any); ok {
+						host, _ = row["target_host"].(string)
+					}
+					if host == "" {
+						continue
+					}
+					hosts[host] = true
 				}
 				filterStructuredAssets(value, nil, ids)
 				filterStructuredRows(value, nil, nodeIDs, structuredNodeIDs)
-				results = append(results, result{mi, bi, ci, value})
+				results = append(results, result{mi, bi, ci, value, host})
 			}
 		}
 	}
 	if len(results) == 0 {
 		return req, nil
+	}
+	hostList := []string{}
+	for host := range hosts {
+		hostList = append(hostList, host)
+	}
+	hostStates := map[string]string{}
+	if len(hostList) > 0 {
+		hostStates, err = p.assets.WithReadContext(ctx).TaskHostApprovalStates(p.taskID, hostList)
+		if err != nil {
+			return req, err
+		}
 	}
 	list := make([]int64, 0, len(ids))
 	for id := range ids {
@@ -314,6 +372,9 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 		value, keep := filterStructuredAssets(r.value, states, nil)
 		if keep {
 			value, keep = filterStructuredRows(value, nodeStates, nil, structuredNodeIDs)
+		}
+		if r.host != "" && hostStates[r.host] != db.ApprovalApproved && !((worker || main) && hostStates[r.host] == db.ApprovalPending) {
+			keep = false
 		}
 		if !keep {
 			value = map[string]any{"message": "该结果已从可执行上下文移除，等待用户授权"}

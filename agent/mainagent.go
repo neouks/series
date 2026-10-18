@@ -90,12 +90,12 @@ func (m *MainAgent) SetSteerWork(fn func(intentID int64, msg string) error) { m.
 // 产物输出规约 tail is code-owned (artifactSpec), appended after rendering.
 const mainAgentDefaultTmpl = `你是一个授权渗透测试系统的"主 agent"，是人类操作员的接口。你不亲自探索、也不自主连续生成意图（那是规划者的工作）。你的职责：
 
-1. 观察：用 graph_overview / list_findings / list_facts / list_assets / get_worker_output 回答人关于当前进展的问题。
+1. 观察：用 graph_overview / context_search / asset_search / context_get（view=output） 回答人关于当前进展的问题。
 2. 操舵（把人的意图落到系统）：
    - 人想"改方向/强调某类漏洞/重点某区域" → 用 add_hint 写提示（规划者下次会读到）。
    - 人想"立刻测某个具体目标" → 用 add_intent 直接注入一条高优先级意图（priority 8-10）。系统会自动把已完成的任务拉回运行态、让 worker 领这条意图执行，跑完即回到已完成状态。
      **当任务目标已全部达成时**（graph_overview 里 goals 均为 met）：下发前先判断这条意图背后是否隐含一个"新的、要达成的结果"。若隐含，用一句话把你猜测的目标复述给人，并**反问是否要登记为正式目标**——人要 → 用 set_goals 登记（任务随后进入常规规划、规划者会自主往下推进）；人不要 / 只是想临时探一下 → 只 add_intent 下发这一条，worker 执行完任务即回到已完成状态（不会自主继续）。若这条意图明显只是一次性查证、不隐含新目标，直接 add_intent 即可，不必每次都问。
-   - 人想"对某条正在运行的意图(work)实时纠偏（别再走 X、聚焦 Y）" → 用 steer_work（不打断、不丢已有进展，worker 下一步动作前生效）；先用 get_worker_output 看它在干嘛。方向整个错了则改用 add_intent 另下新意图。
+   - 人想"对某条正在运行的意图(work)实时纠偏（别再走 X、聚焦 Y）" → 用 steer_work（不打断、不丢已有进展，worker 下一步动作前生效）；先用 context_get（view=output） 看它在干嘛。方向整个错了则改用 add_intent 另下新意图。
    - 人想"新增一个要达成的最终目标" → 用 set_goals 增补目标。系统会把该目标写入任务图并**自动把已完成/暂停的任务拉回运行态继续跑**（规划者随后会据此重新判断是否达成），无需人工再点恢复。
    - 人想"增/改测试约束（允许/禁止某类操作，如『仅测当前端口』『禁止爆破』『只做被动侦察』）" → 用 set_constraints 登记（type=allow 允许 / type=deny 禁止）。约束会在下一轮规划时注入 planner/worker 的提示词以框定探索边界；也可在总览「约束管理」里增删改。
 3. 用人话简洁回复，说明你做了什么。
@@ -106,7 +106,7 @@ const mainAgentDefaultTmpl = `你是一个授权渗透测试系统的"主 agent"
 
 func mainAgentSystem(goal, dataDir, workDir string) string {
 	body := renderSystem("mainagent", mainAgentDefaultTmpl, MainVars{Goal: goal, DataDir: dataDir, Now: nowStr()})
-	body += "\n主 Agent 下发成功后只告知下发结果并结束本轮；Worker 完成后自动回传总结，不调用 sleep、不轮询 get_worker_output、不通过 Bash 等工具等待。get_worker_output 仅用于用户主动查询。主 Agent 的 add_intent 新增即下发，dispatch_intents 用于执行已有待选意图。仅提供规划建议时不要创建意图。实际执行仍受封禁、撤回、任务范围、独立动作审批及并发准入约束，以工具返回的 dispatch 状态为准。手工模式下目标达成或意图执行完毕均不会自动结束任务，由用户结束；托管模式沿用原自动完成规则。"
+	body += "\n主 Agent 下发成功后只告知下发结果并结束本轮；Worker 完成后自动回传总结，不调用 sleep、不轮询 context_get（view=output）、不通过 Bash 等工具等待。context_get（view=output） 仅用于用户主动查询。主 Agent 的 add_intent 新增即下发，dispatch_intents 用于执行已有待选意图。仅提供规划建议时不要创建意图。实际执行仍受封禁、撤回、任务范围、独立动作审批及并发准入约束，以工具返回的 dispatch 状态为准。手工模式下目标达成或意图执行完毕均不会自动结束任务，由用户结束；托管模式沿用原自动完成规则。"
 	return body + "\n" + mainAssetExecutionRule + artifactSpec(workDir)
 }
 
@@ -135,7 +135,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	mainDir := ensureRunDir(m.workDir, taskID, 0)
 	runProfile := shellProfileFor(m.shellProfile, mainDir)
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
-	// 资产覆盖度功能关闭时剔除 add_task_scope/list_untested_assets（不入 prompt）。
+	// 资产覆盖度功能关闭时剔除 add_task_scope/asset_search（不入 prompt）。
 	ctx = WithMainDispatchSession(ctx, mainSeg)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "mainagent", Trigger: "human_message"})
 	tsx.enableMainExecution(ctx)

@@ -16,11 +16,20 @@ func cloneToolMessages(req llm.CompletionRequest) llm.CompletionRequest {
 	return req
 }
 
-// Only side-effect-free, structured reads are eligible. Mutation tools (even
-// expand_digest / expand_index) and failed calls are deliberately excluded.
+// Only side-effect-free reads are eligible; writes and failed calls are excluded.
 func normalizedReadQuery(name string, raw json.RawMessage) string {
 	defaults := map[string]any{}
 	switch name {
+	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
+		// New contracts have explicit continuation positions. Never deduplicate writes.
+		var v any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if dec.Decode(&v) != nil {
+			return ""
+		}
+		b, _ := json.Marshal(v)
+		return name + ":" + string(b)
 	case "list_finding_deletion_feedback":
 		defaults = map[string]any{"before": json.Number("0"), "limit": json.Number("20")}
 	case "check_target_access":
@@ -80,9 +89,10 @@ func deduplicateToolHistory(req llm.CompletionRequest) llm.CompletionRequest {
 	for mi, m := range req.Messages {
 		for bi, b := range m.Content {
 			if b.Type == llm.BlockToolUse {
-				calls[b.ID] = normalizedReadQuery(b.Name, b.Input)
+				call := assetContextCall(b)
+				calls[b.ID] = normalizedReadQuery(call.Name, call.Input)
 			}
-			if b.Type != llm.BlockToolResult || b.IsError {
+			if b.Type != llm.BlockToolResult || b.IsError || partialReadFailure(calls[b.ToolUseID], b) {
 				continue
 			}
 			key := calls[b.ToolUseID]
@@ -103,4 +113,39 @@ func deduplicateToolHistory(req llm.CompletionRequest) llm.CompletionRequest {
 		req.Messages[pos.m].Content[pos.b].Content = []llm.ContentBlock{{Type: llm.BlockText, Text: `{"message":"同一查询页已有后续结果，此历史正文已在模型视图中省略"}`}}
 	}
 	return req
+}
+
+// Batched reads intentionally report per-item errors without failing valid
+// siblings. Such a response cannot replace an older successful batch in the
+// model view. Live authorization still revalidates the retained history.
+func partialReadFailure(key string, block llm.ContentBlock) bool {
+	if !strings.HasPrefix(key, "context_get:") && !strings.HasPrefix(key, "asset_get:") {
+		return false
+	}
+	for _, c := range block.Content {
+		if c.Type != llm.BlockText || !strings.Contains(c.Text, `"error"`) {
+			continue
+		}
+		var result struct {
+			Items  []map[string]json.RawMessage `json:"items"`
+			Assets []map[string]json.RawMessage `json:"assets"`
+		}
+		if json.Unmarshal([]byte(c.Text), &result) != nil {
+			continue
+		}
+		for _, row := range append(result.Items, result.Assets...) {
+			if raw := row["error"]; len(raw) > 0 && string(raw) != "null" && string(raw) != `""` {
+				return true
+			}
+			for _, key := range []string{"payload", "details"} {
+				var value struct {
+					Error string `json:"error"`
+				}
+				if json.Unmarshal(row[key], &value) == nil && value.Error != "" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

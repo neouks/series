@@ -12,7 +12,7 @@ import (
 func TestTaskWrapperSchemaMatchesLocalTool(t *testing.T) {
 	s := &Server{}
 	ts := agent.NewToolSet(nil, "")
-	pairs := [][2]actool.CoreTool{{s.toolGetTaskGraph(), ts.GraphOverviewTool()}, {s.toolListTaskFindings(), ts.ListFindingsTool()}, {s.toolAddHint(), ts.AddHintTool()}, {s.toolGetWorkerTrace(), ts.GetWorkerTraceTool()}, {s.toolListWorkerTraces(), ts.ListWorkerTracesTool()}, {s.toolSearchWorkerTraces(), ts.SearchWorkerTracesTool()}, {s.toolGetTaskNodeDetail(), ts.NodeDetailTool()}}
+	pairs := [][2]actool.CoreTool{{s.toolListTaskFindings(), ts.ListFindingsTool()}, {s.toolAddHint(), ts.AddHintTool()}, {s.toolGetWorkerTrace(), ts.GetWorkerTraceTool()}, {s.toolListWorkerTraces(), ts.ListWorkerTracesTool()}, {s.toolSearchWorkerTraces(), ts.SearchWorkerTracesTool()}, {s.toolGetTaskNodeDetail(), ts.NodeDetailTool()}}
 	for _, pair := range pairs {
 		normalize := func(v any) map[string]any {
 			raw, _ := json.Marshal(v)

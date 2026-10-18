@@ -176,7 +176,7 @@ func (p TaskAssetPolicy) check(tool string, input []byte) (string, bool) {
 	// Approval metadata reads enforce their own task/role boundary. add_intent
 	// checks IDs, lineage and URL hosts per item before creating any node, so a
 	// denied item does not block the other items in the same batch.
-	if tool == "insert_assets" || tool == "register_user_target" || tool == "list_task_assets" || tool == "check_target_access" || tool == "add_intent" {
+	if tool == "context_search" || tool == "context_get" || tool == "asset_search" || tool == "asset_get" || tool == "traffic_search" || tool == "traffic_get" || tool == "insert_assets" || tool == "register_user_target" || tool == "list_task_assets" || tool == "check_target_access" || tool == "add_intent" {
 		return "", false
 	}
 	var value any

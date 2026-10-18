@@ -15,7 +15,7 @@ func decodeTaskAssetViewQuery(raw json.RawMessage) (db.TaskAssetViewQuery, error
 }
 
 func (t *ToolSet) listTaskAssets() actool.CoreTool {
-	return readTool("list_task_assets", "只读审批管理视图，仅主 Agent/Planner 可用。默认查已批准域名/IP；pending/blocked/revoked 仅供解释，不可下发测试。按需搜索分页，不要每轮拉取全量；summary_only 只取计数。查询不改变授权，详情使用 list_assets。",
+	return readTool("list_task_assets", "只读审批管理视图，仅主 Agent/Planner 可用。默认查已批准域名/IP；pending 对 Planner 不可下发；主 Agent 按执行规则操作，blocked/revoked 始终限制。按需搜索分页，不要每轮拉取全量；summary_only 只取计数。查询不改变授权，详情使用 asset_get。",
 		obj(map[string]any{
 			"status": map[string]any{"type": "string", "enum": []string{"approved", "pending", "blocked", "revoked", "all"}, "default": "approved"},
 			"q":      str("主机名称包含搜索，非 DSL"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 20},

@@ -16,6 +16,7 @@ import (
 // UnlockSkill unlocks a named skill's MCPs — hosts call it to rebuild the unlock set
 // from history on a resumed session (design doc C2).
 type DeferredInfo struct {
+	ContextReads    bool              // final role surface has unified context readers
 	FindingGuidance string            // derived from the final permitted tools, including DB overrides
 	Deferred        []string          // all MCP tool names (schema withheld)
 	GlobalNames     []string          // MCP names to list in the system-prompt block
@@ -71,7 +72,17 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 			cleanup = cl
 		}
 		if len(extra) > 0 {
-			out = append(append([]actool.CoreTool{}, base...), extra...)
+			out = append([]actool.CoreTool{}, base...)
+			seen := map[string]bool{}
+			for _, tool := range out {
+				seen[tool.Name()] = true
+			}
+			for _, tool := range extra {
+				if !seen[tool.Name()] {
+					out = append(out, tool)
+					seen[tool.Name()] = true
+				}
+			}
 		}
 	}
 	// DB tools table has the final say on the built-in tools: drop the ones this
@@ -87,6 +98,9 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	}
 	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
 	for i, tool := range out {
+		if tool.Name() == "context_search" || tool.Name() == "context_get" || tool.Name() == "asset_search" {
+			def.ContextReads = true
+		}
 		out[i] = guardPanic(tool)
 	}
 	return out, def, cleanup, nil

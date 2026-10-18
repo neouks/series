@@ -3,6 +3,8 @@
 // self-consistent (one company "Acme", a few tasks, findings, exploration graph,
 // sessions/activity, traffic, agents, etc.) so every page looks populated.
 
+import contextToolCatalog from "./context-tools.json";
+
 import type {
   Activity,
   Agent,
@@ -3376,6 +3378,9 @@ export const missingSkills: MissingSkill[] = [
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 export const tools: Tool[] = [
+  ...contextToolCatalog.map((entry): Tool => ({
+    ...entry, system: true, enabled: true, kind: "builtin", calls: 12,
+  })),
   {
     key: "bash",
     system: true,
@@ -3415,16 +3420,7 @@ export const tools: Tool[] = [
     kind: "builtin",
     calls: 417,
   },
-  {
-    key: "list_goals",
-    system: true,
-    description: "列出当前任务的目标与达成状态",
-    schema: { type: "object", properties: {} },
-    agents: ["planner"],
-    enabled: true,
-    kind: "builtin",
-    calls: 238,
-  },
+
   {
     key: "nmap",
     system: false,

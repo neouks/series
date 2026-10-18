@@ -21,6 +21,9 @@ import (
 // the immutable code catalogue, never conversation results or authorization.
 var toolCallBuiltinNames = sync.OnceValue(func() []string {
 	names := []string{actool.SearchExtraToolsName, actool.ExecuteExtraToolName, "web_search"}
+	for key := range db.RetiredToolReplacements {
+		names = append(names, key)
+	}
 	for _, seed := range agent.BuiltinToolSeeds() {
 		names = append(names, seed.Key)
 	}

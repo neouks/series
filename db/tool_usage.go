@@ -68,5 +68,9 @@ GROUP BY tool_key`)
 			out[key] += calls
 		}
 	}
-	return out, nil
+	merged := map[string]int{}
+	for key, calls := range out {
+		merged[CanonicalToolUsageKey(key)] += calls
+	}
+	return merged, nil
 }

@@ -1,0 +1,147 @@
+series-context-final.log
+ok  	github.com/neouks/series/db	76.348s
+ok  	github.com/neouks/series/agent	16.574s
+ok  	github.com/neouks/series/guard	0.165s
+--- FAIL: TestCoreTaskLifecyclePG (1.33s)
+FAIL
+FAIL	github.com/neouks/series/server	37.009s
+ok  	github.com/neouks/series/traffic	6.465s
+FAIL
+
+series-context-server-final.log
+ok  	github.com/neouks/series/server	30.092s
+
+series-context-build-final.log
+ok  	github.com/neouks/series/agent	0.043s [no tests to run]
+ok  	github.com/neouks/series/cmd/series	0.072s [no tests to run]
+ok  	github.com/neouks/series/config	(cached) [no tests to run]
+ok  	github.com/neouks/series/db	0.018s [no tests to run]
+?   	github.com/neouks/series/enrich	[no test files]
+ok  	github.com/neouks/series/evidence	(cached) [no tests to run]
+ok  	github.com/neouks/series/guard	(cached) [no tests to run]
+ok  	github.com/neouks/series/intercept	(cached) [no tests to run]
+ok  	github.com/neouks/series/llmpool	(cached) [no tests to run]
+ok  	github.com/neouks/series/llmrec	(cached) [no tests to run]
+ok  	github.com/neouks/series/mcphttp	(cached) [no tests to run]
+?   	github.com/neouks/series/report	[no test files]
+ok  	github.com/neouks/series/selfupdate	(cached) [no tests to run]
+ok  	github.com/neouks/series/server	0.053s [no tests to run]
+ok  	github.com/neouks/series/sidequestion	(cached) [no tests to run]
+ok  	github.com/neouks/series/traffic	0.020s [no tests to run]
+
+series-context-norma-final.log
+ok  	github.com/Autumn-27/norma/llm	2.550s
+ok  	github.com/Autumn-27/norma/agentcore	0.034s
+ok  	github.com/Autumn-27/norma/noa	(cached)
+ok  	github.com/Autumn-27/norma/noaadapter	31.944s
+
+series-context-contract-final.log
+=== RUN   TestContextScenarioMetrics
+    context_performance_test.go:84: nodes=10 role=planner initial_context_bytes=901 sql_queries=12.0 elapsed_avg=11.15785ms allocated_avg=79009B
+    context_performance_test.go:84: nodes=10 role=worker initial_context_bytes=371 sql_queries=1.0 elapsed_avg=1.978108ms allocated_avg=15739B
+    context_performance_test.go:109: nodes=10 scenario=body_search_and_read tool_calls=2 sql_queries=2 response_bytes=21861 elapsed=13.44725ms allocated=298456B
+    context_performance_test.go:84: nodes=1000 role=planner initial_context_bytes=1469 sql_queries=12.0 elapsed_avg=10.086575ms allocated_avg=97553B
+    context_performance_test.go:84: nodes=1000 role=worker initial_context_bytes=371 sql_queries=1.0 elapsed_avg=2.23835ms allocated_avg=13262B
+    context_performance_test.go:109: nodes=1000 scenario=body_search_and_read tool_calls=2 sql_queries=2 response_bytes=21967 elapsed=311.603833ms allocated=263664B
+--- PASS: TestContextScenarioMetrics (1.63s)
+=== RUN   TestContextPromptMetrics
+    context_prompt_measurement_test.go:19: role=auto code_prompt_bytes=1053 sha256=8eec58f253f03172b8e48db159ec8a1cb5b001ee0e6f929f56782b239f3fa5d8
+    context_prompt_measurement_test.go:19: role=goals code_prompt_bytes=2208 sha256=72a7a0159443b41dde29dfba8a3de6a2c8a15b273935495a7b88561fa708aa68
+    context_prompt_measurement_test.go:19: role=mainagent code_prompt_bytes=2430 sha256=09742a82b10a359d9fe681abf4bb45fc671b6a3dd640efcf14a15b0315e30217
+    context_prompt_measurement_test.go:19: role=pentest code_prompt_bytes=6907 sha256=6748a1c27d106679a2162985946d5813b3dfbf6a998736076723a555ce099aa7
+    context_prompt_measurement_test.go:19: role=planner code_prompt_bytes=9704 sha256=9f585566acdc4adca70ff017581ae57b16e602e68f2e9ec961da91c4600e3689
+    context_prompt_measurement_test.go:19: role=reporter code_prompt_bytes=3567 sha256=f16a597a5bdaf4bc5a1b3368a06f7c5ff054be134b291af00ba2edbeb9cb6d28
+    context_prompt_measurement_test.go:19: role=worker code_prompt_bytes=3341 sha256=9cfe2314eccfa52e3e1fb5fb10f952e7a06a17e6f7fad3506e5b070d5569330d
+--- PASS: TestContextPromptMetrics (0.00s)
+=== RUN   TestContextReadsAuthorizationAndCursor
+--- PASS: TestContextReadsAuthorizationAndCursor (0.24s)
+=== RUN   TestContextCapabilityBoundaries
+--- PASS: TestContextCapabilityBoundaries (0.00s)
+=== RUN   TestContextReadHistoryDedup
+--- PASS: TestContextReadHistoryDedup (0.00s)
+=== RUN   TestOverviewHotProjectionMatchesCompactionGraph
+--- PASS: TestOverviewHotProjectionMatchesCompactionGraph (0.13s)
+=== RUN   TestContextOutputAndDigestViews
+--- PASS: TestContextOutputAndDigestViews (0.15s)
+=== RUN   TestContextAssetProjectionAndTrafficRefresh
+--- PASS: TestContextAssetProjectionAndTrafficRefresh (0.41s)
+PASS
+ok  	github.com/neouks/series/agent	2.592s
+=== RUN   TestContextReadsFullTextAndWindows
+--- PASS: TestContextReadsFullTextAndWindows (0.40s)
+=== RUN   TestContextActivityAndReportSearch
+--- PASS: TestContextActivityAndReportSearch (0.15s)
+=== RUN   TestContextCatalogMigrationPreservesGrants
+--- PASS: TestContextCatalogMigrationPreservesGrants (0.12s)
+=== RUN   TestContextPromptMigrationPreservesCustomText
+--- PASS: TestContextPromptMigrationPreservesCustomText (0.12s)
+=== RUN   TestContextUsageMappingDoesNotRewriteLedger
+--- PASS: TestContextUsageMappingDoesNotRewriteLedger (0.10s)
+PASS
+ok  	github.com/neouks/series/db	0.910s
+=== RUN   TestTrafficToolPartsAndStableCursor
+--- PASS: TestTrafficToolPartsAndStableCursor (0.10s)
+=== RUN   TestTrafficBinaryContinuation
+--- PASS: TestTrafficBinaryContinuation (0.08s)
+PASS
+ok  	github.com/neouks/series/traffic	0.194s
+=== RUN   TestContextPolicySchemaAndRuntimeBoundaries
+--- PASS: TestContextPolicySchemaAndRuntimeBoundaries (0.00s)
+=== RUN   TestContextCatalogHasNoRetiredEntrypoints
+--- PASS: TestContextCatalogHasNoRetiredEntrypoints (0.00s)
+PASS
+ok  	github.com/neouks/series/server	0.057s
+
+
+series-context-last-check.log
+ok  	github.com/neouks/series/agent	0.024s
+ok  	github.com/neouks/series/server	0.045s
+
+
+series-context-traffic-roles.log
+=== RUN   TestTrafficToolPartsAndStableCursor
+--- PASS: TestTrafficToolPartsAndStableCursor (0.09s)
+=== RUN   TestTrafficBinaryContinuation
+--- PASS: TestTrafficBinaryContinuation (0.04s)
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/planner
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/reporter
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/auto
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/custom-reader
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/mainagent
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/worker
+=== RUN   TestTrafficReadRolesRetainApprovalPolicy/#00
+--- PASS: TestTrafficReadRolesRetainApprovalPolicy (0.24s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/planner (0.03s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/reporter (0.02s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/auto (0.02s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/custom-reader (0.01s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/mainagent (0.01s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/worker (0.01s)
+    --- PASS: TestTrafficReadRolesRetainApprovalPolicy/#00 (0.01s)
+PASS
+ok  	github.com/neouks/series/traffic	0.388s
+
+
+series-context-mock-final.log
+✔ full history search uses detail, supports literal input and session-bound cursors (861.458583ms)
+✔ 审批来源可打开原始调用，窗口连续且限制在所属任务和会话 (876.441ms)
+✔ context catalog replaces retired callable names without changing history fixtures (1.46175ms)
+✔ shell editor metadata roundtrips and testing does not increment usage (737.885709ms)
+✔ 只响应调用和执行边界，不为普通流式文本重复查询 (0.606792ms)
+✔ 调用位置配对、跨页、状态筛选和稳定游标 (1.338167ms)
+✔ 轮次与空 ID 不按名称误配对，长中文安全分段 (40.883417ms)
+✔ 查询地址保留任务会话，异常响应明确报错，封装工具不伪造调用 (2.926833ms)
+✔ Mock 路由覆盖两类会话，不把旧任务记录给空任务或新会话分段 (617.250334ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2349.438708
+
+
+TypeScript
+npx tsc --noEmit: exit 0 (no output).

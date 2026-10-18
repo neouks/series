@@ -1,0 +1,464 @@
+{
+  "title": "内置工具精简与精准上下文检索：实施和验证记录",
+  "date": "2026-10-18",
+  "baseline_commit": "0aca38a",
+  "implementation": "working_tree",
+  "deployment": {
+    "business_database_accessed": false,
+    "service_restarted": false,
+    "pushed": false,
+    "activation": "重新构建并重启后端；启动时执行一次性工具目录、绑定和默认提示词迁移。"
+  },
+  "tool_changes": {
+    "retired_callable_names": {
+      "list_facts": [
+        "context_search(types=[fact])"
+      ],
+      "list_findings": [
+        "context_search(types=[finding])"
+      ],
+      "list_worker_traces": [
+        "context_search(types=[intent])"
+      ],
+      "list_goals": [
+        "context_search(types=[goal])"
+      ],
+      "get_worker_trace": [
+        "context_search(types=[activity], intent_id)",
+        "context_get(items=[{ref:activity:ID}])"
+      ],
+      "search_all_worker_traces": [
+        "context_search(types=[activity], q)"
+      ],
+      "node_detail": [
+        "context_get(items=[{ref:node:ID}])"
+      ],
+      "get_worker_output": [
+        "context_get(items=[{ref:node:INTENT_ID,view:output}])"
+      ],
+      "expand_digest": [
+        "context_get(items=[{ref:node:DIGEST_ID,view:members}])"
+      ],
+      "list_assets": [
+        "asset_search(dsl)",
+        "asset_get(ids,fields)"
+      ],
+      "list_untested_assets": [
+        "asset_search(untested=true)"
+      ],
+      "traffic_blob": [
+        "traffic_get(id,part,offset)"
+      ],
+      "get_task_graph": [
+        "graph_overview(task_id)"
+      ],
+      "list_task_findings": [
+        "context_search(task_id,types=[finding])"
+      ],
+      "get_task_worker_trace": [
+        "context_search(task_id,types=[activity],intent_id)",
+        "context_get(task_id,items=[{ref:activity:ID}])"
+      ],
+      "list_task_worker_traces": [
+        "context_search(task_id,types=[intent])"
+      ],
+      "search_task_worker_traces": [
+        "context_search(task_id,types=[activity],q)"
+      ],
+      "get_task_node_detail": [
+        "context_get(task_id,items=[{ref:node:ID}])"
+      ],
+      "goal_met": []
+    },
+    "new_catalog_metadata_keys": [
+      "graph_overview",
+      "context_search",
+      "context_get",
+      "asset_search",
+      "asset_get",
+      "traffic_search",
+      "traffic_get"
+    ],
+    "retained_independent_tools": [
+      "graph_overview",
+      "list_task_assets",
+      "check_target_access",
+      "list_finding_deletion_feedback",
+      "insert_assets",
+      "register_user_target",
+      "record_fact",
+      "report_finding",
+      "add_intent",
+      "dispatch_intents",
+      "add_hint",
+      "set_goals",
+      "set_constraints",
+      "prove_goal",
+      "kill_work",
+      "steer_work",
+      "list_companies",
+      "add_company_scope",
+      "add_task_scope",
+      "get_finding_traffic",
+      "bind_finding_traffic",
+      "update_finding_report",
+      "spawn_task",
+      "list_tasks",
+      "pause_task",
+      "add_task_hint",
+      "list_llm_profiles",
+      "get_finding_retest_context",
+      "record_finding_retest_result"
+    ],
+    "deferred_platform_tools": [
+      "create_skill",
+      "update_skill_file",
+      "create_custom_tool",
+      "update_custom_tool",
+      "create_mcp",
+      "update_mcp",
+      "delete_assets_by_host"
+    ],
+    "sdk_out_of_scope": [
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "LS",
+      "Glob",
+      "Grep",
+      "Bash",
+      "interactive shell",
+      "Compress"
+    ],
+    "renamed_parameter": {
+      "tool": "update_finding_report",
+      "old": "finding_id (exploration node)",
+      "new": "finding_node_id"
+    },
+    "historical_compatibility": "旧工具名称仅用于历史展示、授权复核、统计映射及私有兼容测试；运行注册表不提供旧名称别名。"
+  },
+  "contracts": {
+    "context_search": {
+      "default_types": [
+        "fact",
+        "finding",
+        "intent"
+      ],
+      "default_limit": 10,
+      "max_limit": 50,
+      "query": "大小写不敏感字面匹配；活动需显式选择，不含推理或主/Planner会话",
+      "cursor": "绑定条件与首次窗口上界；审批实时复核；不计算总数",
+      "query_timeout_seconds": 5
+    },
+    "context_get": {
+      "max_refs": 5,
+      "default_max_chars": 8000,
+      "max_chars": 24000,
+      "refs": [
+        "node:ID",
+        "activity:ID"
+      ],
+      "views": [
+        "detail",
+        "output",
+        "members"
+      ],
+      "read_protocol": "field 为 JSON Pointer；大字段返回 deferred 引用；next 可直接续读；结果受实际输出预算约束",
+      "output": "is_final 与中途进度明确区分"
+    },
+    "asset_get": {
+      "default_fields": [
+        "identity",
+        "fingerprint"
+      ],
+      "credential_field": "auth 需显式选择",
+      "max_ids": 5,
+      "projection": "授权、字段筛选和分页在同一 SQL 快照完成"
+    },
+    "traffic_search": {
+      "host_required": true,
+      "default_limit": 3,
+      "max_limit": 10,
+      "filters": [
+        "method",
+        "status",
+        "since",
+        "until",
+        "contains",
+        "body_contains"
+      ],
+      "body_index_max_bytes_per_side": 4194304,
+      "binary_indexed": false
+    },
+    "traffic_get": {
+      "parts": [
+        "request_headers",
+        "request_body",
+        "response_headers",
+        "response_body"
+      ],
+      "unit": "bytes",
+      "max_bytes": 8192,
+      "binary_encoding": "hex",
+      "continuation": "next 中包含 id、part、offset；服务端定位 Blob，UTF-8 边界有效"
+    },
+    "roles": "Planner 严格审批；可信主 Agent/Worker 保留 pending 执行读取策略；其他绑定角色严格已审批；封禁/撤回继续拒绝。",
+    "worker_preload": "当前意图和约束保留；最多20条上游事实/漏洞摘要和10条关联资产摘要；不自动读取全任务图和完整资产JSON。"
+  },
+  "migration": {
+    "catalog_flag": "tool_context_catalog_v1",
+    "capability_setting": "tool_context_capabilities_v1",
+    "prompt_flag": "tool_context_prompts_v1",
+    "prompt_report_setting": "tool_context_prompt_migration_report",
+    "schema_refresh_flag": "tool_schema_refresh_v8_context_reads",
+    "binding_policy": "按旧资源及本任务/跨任务分别保存启用绑定；模型参数不能扩大权限；新增角色绑定显式授予该工具本任务能力。",
+    "custom_name_collision": "检测与新增系统 Key 冲突的自定义工具并停止迁移，保留原配置。",
+    "prompt_policy": "只升级与旧代码默认 SHA-256 完全一致的当前提示词；自定义文本原样保留，旧名称和参数引用清单写入报告并记录启动日志。",
+    "ledger_policy": "不改写原调用账本/审计；新工具按映射汇总历史次数。get_worker_trace历史统一归context_get；list_assets历史归asset_search，不双重计数。",
+    "schema_migrations": "无新增业务表/列；一次性更新现有 settings、tools、agent_prompts。"
+  },
+  "measurements": {
+    "units": "UTF-8 bytes, SQL count, milliseconds, Go TotalAlloc bytes；未调用模型，未测量模型 Token。",
+    "surface_fixture": "固定代码默认目录+SDK+编排/平台/证据工具和Reporter绑定，流量采集及证据绑定开启，无自定义工具/MCP/Skill/交互Shell/WebSearch；是schema序列化字节，不含运行时描述装饰、完整system提示或模型协议封装。用户配置/迁移后的细粒度绑定会改变实际输入。",
+    "surfaces_before": {
+      "goals": {
+        "catalog_tools": 2,
+        "all_schema_bytes": 2133,
+        "initial_schema_and_deferred_names_bytes": 2133,
+        "deferred_tools": 0
+      },
+      "planner": {
+        "catalog_tools": 24,
+        "all_schema_bytes": 21157,
+        "initial_schema_and_deferred_names_bytes": 21157,
+        "deferred_tools": 0
+      },
+      "mainagent": {
+        "catalog_tools": 32,
+        "all_schema_bytes": 37961,
+        "initial_schema_and_deferred_names_bytes": 37961,
+        "deferred_tools": 0
+      },
+      "worker": {
+        "catalog_tools": 20,
+        "all_schema_bytes": 26253,
+        "initial_schema_and_deferred_names_bytes": 26253,
+        "deferred_tools": 0
+      },
+      "auto": {
+        "catalog_tools": 34,
+        "all_schema_bytes": 35732,
+        "initial_schema_and_deferred_names_bytes": 35732,
+        "deferred_tools": 0
+      },
+      "pentest": {
+        "catalog_tools": 15,
+        "all_schema_bytes": 18838,
+        "initial_schema_and_deferred_names_bytes": 18838,
+        "deferred_tools": 0
+      },
+      "reporter": {
+        "catalog_tools": 21,
+        "all_schema_bytes": 16477,
+        "initial_schema_and_deferred_names_bytes": 16477,
+        "deferred_tools": 0
+      }
+    },
+    "surfaces_after": {
+      "goals": {
+        "catalog_tools": 2,
+        "all_schema_bytes": 2133,
+        "initial_schema_and_deferred_names_bytes": 2133,
+        "deferred_tools": 0
+      },
+      "planner": {
+        "catalog_tools": 18,
+        "all_schema_bytes": 15611,
+        "initial_schema_and_deferred_names_bytes": 15611,
+        "deferred_tools": 0
+      },
+      "mainagent": {
+        "catalog_tools": 27,
+        "all_schema_bytes": 32608,
+        "initial_schema_and_deferred_names_bytes": 32608,
+        "deferred_tools": 0
+      },
+      "worker": {
+        "catalog_tools": 18,
+        "all_schema_bytes": 22530,
+        "initial_schema_and_deferred_names_bytes": 22530,
+        "deferred_tools": 0
+      },
+      "auto": {
+        "catalog_tools": 32,
+        "all_schema_bytes": 31901,
+        "initial_schema_and_deferred_names_bytes": 26650,
+        "deferred_tools": 7
+      },
+      "pentest": {
+        "catalog_tools": 17,
+        "all_schema_bytes": 18082,
+        "initial_schema_and_deferred_names_bytes": 18082,
+        "deferred_tools": 0
+      },
+      "reporter": {
+        "catalog_tools": 17,
+        "all_schema_bytes": 12957,
+        "initial_schema_and_deferred_names_bytes": 12957,
+        "deferred_tools": 0
+      }
+    },
+    "code_prompt_bytes_before": {
+      "auto": 1064,
+      "goals": 2208,
+      "mainagent": 2419,
+      "pentest": 6943,
+      "planner": 9793,
+      "reporter": 3595,
+      "worker": 3341
+    },
+    "code_prompt_bytes_after": {
+      "auto": 1053,
+      "goals": 2208,
+      "mainagent": 2430,
+      "pentest": 6907,
+      "planner": 9716,
+      "reporter": 3646,
+      "worker": 3341
+    },
+    "context_fixture": "两套专属空 PostgreSQL 测试库；10/1000条事实，每条detail为8192个中文字符；一个意图、两条父事实，无资产/摘要；每项5次平均。只测动态图/父摘要片段，不是整个模型输入。",
+    "contexts_before": [
+      {
+        "facts": 10,
+        "role": "planner",
+        "dynamic_context_bytes": 851,
+        "sql_queries": 16.0,
+        "elapsed_avg_ms": 24.312624,
+        "go_total_alloc_avg_bytes": 673016
+      },
+      {
+        "facts": 10,
+        "role": "worker",
+        "dynamic_context_bytes": 851,
+        "sql_queries": 16.0,
+        "elapsed_avg_ms": 15.630883,
+        "go_total_alloc_avg_bytes": 649192
+      },
+      {
+        "facts": 1000,
+        "role": "planner",
+        "dynamic_context_bytes": 1458,
+        "sql_queries": 16.0,
+        "elapsed_avg_ms": 238.677099,
+        "go_total_alloc_avg_bytes": 56458152
+      },
+      {
+        "facts": 1000,
+        "role": "worker",
+        "dynamic_context_bytes": 1458,
+        "sql_queries": 16.0,
+        "elapsed_avg_ms": 229.488808,
+        "go_total_alloc_avg_bytes": 56457182
+      }
+    ],
+    "contexts_after": [
+      {
+        "facts": 10,
+        "role": "planner",
+        "dynamic_context_bytes": 851,
+        "sql_queries": 12.0,
+        "elapsed_avg_ms": 17.119108,
+        "go_total_alloc_avg_bytes": 78243
+      },
+      {
+        "facts": 10,
+        "role": "worker",
+        "dynamic_context_bytes": 347,
+        "sql_queries": 1.0,
+        "elapsed_avg_ms": 2.753958,
+        "go_total_alloc_avg_bytes": 15872
+      },
+      {
+        "facts": 1000,
+        "role": "planner",
+        "dynamic_context_bytes": 1440,
+        "sql_queries": 12.0,
+        "elapsed_avg_ms": 20.190191,
+        "go_total_alloc_avg_bytes": 97568
+      },
+      {
+        "facts": 1000,
+        "role": "worker",
+        "dynamic_context_bytes": 353,
+        "sql_queries": 1.0,
+        "elapsed_avg_ms": 2.987991,
+        "go_total_alloc_avg_bytes": 12361
+      }
+    ],
+    "body_search_then_read_after": [
+      {
+        "facts": 10,
+        "tool_calls": 2,
+        "sql_queries": 2,
+        "response_bytes": 21732,
+        "elapsed_ms": 14.685375,
+        "go_total_alloc_bytes": 295024
+      },
+      {
+        "facts": 1000,
+        "tool_calls": 2,
+        "sql_queries": 2,
+        "response_bytes": 21930,
+        "elapsed_ms": 292.759416,
+        "go_total_alloc_bytes": 263392
+      }
+    ],
+    "body_search_before_limitation": "旧list_facts只按summary匹配，正文限定关键词无法完成相同检索；不把无匹配的快速返回视作同等成功，也不虚构旧成功调用数。",
+    "main_task_body_extra_preload_before": 0,
+    "main_task_body_extra_preload_after": 0,
+    "limits": [
+      "本机DockerPG固定样例，非线上压测。",
+      "全文字面搜索仍有任务内扫描成本，1000条长正文样例约293ms；5秒超时。",
+      "TotalAlloc为Go累计分配量，不是峰值RSS或PostgreSQL内存。",
+      "不承诺所有角色工具数量都下降；pentest由列表/详情拆分增加入口但schema字节减少。"
+    ]
+  },
+  "verification": {
+    "go_package_regressions": {
+      "db": "PASS 76.348s",
+      "agent": "PASS 16.574s",
+      "guard": "PASS 0.165s",
+      "traffic": "PASS 6.465s",
+      "server": "PASS 30.092s (dedicated clean DB)"
+    },
+    "context_contracts": "PASS agent/db/server/traffic；最终补充流量角色及覆盖度Schema测试通过。",
+    "norma": {
+      "llm": "PASS 2.550s",
+      "agentcore": "PASS 0.034s",
+      "noa": "PASS cached",
+      "noaadapter": "PASS 31.944s"
+    },
+    "build": "PASS go test ./... -run ^$",
+    "frontend_types": "PASS npx tsc --noEmit",
+    "frontend_tests": "PASS 9/9 mock/tool-call tests",
+    "browser": "Mock验证：新工具目录和context_get编辑器；旧node_detail历史继续展开；资产来源精确定位activity 1410并显示来源调用和高亮。没有连接生产后端或调用真实模型。",
+    "test_environment_notes": [
+      "首次Server与其他包共用测试库，恢复测试遗留任务导致TestCoreTaskLifecyclePG临时目录清理失败；改用专用空库后整包通过。",
+      "本地监听测试需沙箱提升权限，norma使用localhost模拟服务。"
+    ],
+    "screenshots": [
+      "source-location.png",
+      "context-get-editor.png"
+    ],
+    "logs": [
+      "measurements.txt",
+      "test-summary.txt"
+    ],
+    "review_fixes": [
+      "覆盖度关闭时仅隐藏asset_search.untested，普通资产搜索继续可用。",
+      "报告撰写及其他绑定角色可读取已审批流量，pending豁免仍限可信主Agent/Worker。",
+      "移除动态概览和错误指引中对已退役工具的引用。"
+    ]
+  }
+}

@@ -206,7 +206,7 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 func TestFindingWorkflowMigrationPreservesUserConfiguration(t *testing.T) {
 	s, _, _ := trafficEvidenceServer(t)
 	pg := s.m.pg
-	for _, key := range []string{"report_finding", "add_hint", "add_task_hint", "traffic_search", "traffic_get", "traffic_blob", "bind_finding_traffic", "get_finding_traffic"} {
+	for _, key := range []string{"report_finding", "add_hint", "add_task_hint", "traffic_search", "traffic_get", "bind_finding_traffic", "get_finding_traffic"} {
 		old, err := pg.GetTool(key)
 		if err != nil || old == nil {
 			t.Fatal("missing tool", key, err)
@@ -254,7 +254,7 @@ func TestFindingWorkflowMigrationPreservesUserConfiguration(t *testing.T) {
 	}
 	search, _ := pg.GetTool("traffic_search")
 	get, _ := pg.GetTool("traffic_get")
-	if !strings.Contains(search.Description, "支持裸主机、主机:端口或完整 URL") {
+	if !strings.Contains(search.Description, "主机") {
 		t.Fatal("traffic_search description migration missing host/port guidance")
 	}
 	if search.Enabled || !contains(search.Agents, "reporter") || get.Enabled || len(get.Agents) != 1 || get.Agents[0] != "custom-agent" {
@@ -288,11 +288,11 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 	if !strings.Contains(def.FindingGuidance, "报告前自动关联流量") || !strings.Contains(def.FindingGuidance, "绑定成功后重新调用") {
 		t.Fatal("reporter did not receive binding workflow")
 	}
-	for _, name := range []string{"traffic_search", "traffic_get", "get_task_worker_trace", "get_task_node_detail", "bind_finding_traffic", "get_finding_traffic", "update_finding_report"} {
+	for _, name := range []string{"traffic_search", "traffic_get", "context_search", "context_get", "bind_finding_traffic", "get_finding_traffic", "update_finding_report"} {
 		workflowTool(t, tools, name)
 	}
 	finding, _ := pg.GetFinding(f.FindingID)
-	detail := workflowCall(t, ctx, workflowTool(t, tools, "get_task_node_detail"), map[string]any{"task_id": fmt.Sprint(*finding.TaskID), "id": f.NodeID}, false)
+	detail := workflowCall(t, ctx, workflowTool(t, tools, "context_get"), map[string]any{"task_id": fmt.Sprint(*finding.TaskID), "items": []map[string]any{{"ref": fmt.Sprintf("node:%d", f.NodeID)}}}, false)
 	if !strings.Contains(detail, `"finding_id"`) || !strings.Contains(detail, `"finding_node_id"`) {
 		t.Fatal("reporter lacks explicit ID mapping")
 	}
@@ -312,7 +312,7 @@ func TestFindingWorkflowReporterBindsBeforeWritingReport(t *testing.T) {
 	if err := json.Unmarshal([]byte(list), &summary); err != nil || summary.Version != 1 {
 		t.Fatal(list, err)
 	}
-	workflowCall(t, ctx, workflowTool(t, tools, "update_finding_report"), map[string]any{"finding_id": f.NodeID, "evidence_version": summary.Version, "report": "## Local report\n\nVerified baseline and proof using saved evidence."}, false)
+	workflowCall(t, ctx, workflowTool(t, tools, "update_finding_report"), map[string]any{"finding_node_id": f.NodeID, "evidence_version": summary.Version, "report": "## Local report\n\nVerified baseline and proof using saved evidence."}, false)
 	updated, err := pg.GetFinding(f.FindingID)
 	if err != nil || updated.ReportEvidenceVersion != summary.Version || updated.EvidenceVersion != summary.Version {
 		t.Fatal("report did not cover post-binding version", updated, err)

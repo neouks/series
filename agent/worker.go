@@ -304,7 +304,7 @@ func workerTrafficBlock(recording bool) string {
 	if !recording {
 		return ""
 	}
-	return "\n\n**流量工具**：\n- traffic_search / traffic_get / traffic_blob：回看响应、找已访问过的资源，**先查流量、不要重复 curl 同一 URL**。traffic_search **必须指定 host**、默认只回 3 条极轻量索引(id/method/url/status/resp_len，无响应内容)，需要更多显式调大 limit；可用 body_contains 在请求/响应正文里做全文搜索(至少 3 字符，支持子串和中文，如找密码/密钥/报错/内网地址)；要看某条原文用 traffic_get(id)，其中超大正文显示为 @blob sha256:<hash>，用 traffic_blob(hash) 分段取全文。"
+	return "\n\n流量回看：先用 traffic_search(host,...) 检索，再用 traffic_get(id) 核实；长报文按返回的 part/next_offset 续读。不要仅为补包重复请求。"
 }
 
 // artifactSpec is 段 [C]: the code-owned, non-editable tail appended to every
@@ -440,11 +440,13 @@ func (w *Worker) ExecuteWithMessage(ctx context.Context, name string, taskID int
 }
 
 func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.AssetStore, ts *db.ExplorationStore, intent *db.Node, hooks harness.HookRunner, emit func(db.Activity), enr EnrichTrigger, notifyFinding func(int64, string), requestID, message string) (harness.TerminalReason, WriteCounts, error) {
+	var intentAssets []int64
 	if as != nil && taskID > 0 && intent != nil {
 		ids, idsErr := IntentAssetIDs(ts, intent)
 		if idsErr != nil {
 			return harness.ReasonAbortedTools, WriteCounts{}, fmt.Errorf("%w: 读取意图资产血缘失败：%v", ErrWorkerAssetAuthorization, idsErr)
 		}
+		intentAssets = ids
 		if err := as.ValidateIntentAssets(taskID, intent, ids); err != nil {
 			wrapped := fmt.Errorf("Worker 启动前资产授权校验失败：%w", err)
 			if emit != nil {
@@ -493,12 +495,12 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// 长 run 里意图永远在场，续跑时也不依赖 transcript 历史是否留住那条首消息。代价是 system
 	// 混入 per-intent 易变数据、失去跨意图缓存复用；这是刻意的取舍（意图丢失比省 token 严重得多）。
 	// 与 planner「态势块放 user turn」分叉是有意的：planner 本身是产意图的那个、没有单一 mandate，
-	// worker 有。仅【全局态势 overview】留在启动 user 消息里——它可降级、容忍 stale，压掉无碍。
+	// worker 有。启动 user 消息仅预载上游事实/漏洞摘要，其余上下文通过检索按需获取。
 	// 本次意图的专属工作目录 <workDir>/tasks/<taskID>/i<intentID>，引擎侧先建好。
 	// The run-wide intent is not the current tool action. Do not forward it or
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
-	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
+	overview := tsx.workerLaunchContext(ctx, intent.ID)
 	runProxyAddr := TaskProxyAddr(w.proxyAddr, w.proxyCACert, taskID, guard.AssetSkipScope(ctx))
 	promptCACert := ""
 	if w.trafficRecording {
@@ -511,10 +513,34 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// 意图块 → 意图锚定资产块 → 启动指令，依次追加到 system 尾部（与 constraintBlock 同一套追加法）。
 	sysBody += renderIntentTask(intent)
 	if as != nil {
-		if ids := intentAssetIDs(intent); len(ids) > 0 {
-			if assets, err := as.GetByIDs(ids); err == nil && len(assets) > 0 {
-				if b, err := json.Marshal(assets); err == nil {
-					sysBody += "\n\n本意图 asset_ids 对应的目标资产：\n" + string(b)
+		if len(intentAssets) > 0 {
+			// Reuse the already-validated lineage. Parent-only targets must not
+			// disappear when the all-task overview is removed. Read at most ten
+			// inherited identities; explicit targets are also needed by auto-scope.
+			visible := map[int64]bool{}
+			ids := append([]int64(nil), intentAssets[:min(10, len(intentAssets))]...)
+			for _, id := range ids {
+				visible[id] = true
+			}
+			explicit := map[int64]bool{}
+			for _, id := range intentAssetIDs(intent) {
+				explicit[id] = true
+				if coverageEnabled && !visible[id] {
+					ids = append(ids, id)
+				}
+			}
+			assets, err := as.WithReadContext(ctx).WithWorkerRead().WithToolReadFields(false, nil).ToolAssetsByIDs(taskID, ids)
+			if err != nil {
+				sysBody += "\n关联资产摘要读取失败；需要时通过 asset_get 重试。"
+			} else if len(assets) > 0 {
+				summaries := []map[string]any{}
+				for _, asset := range assets {
+					if visible[asset.ID] {
+						summaries = append(summaries, assetSummary(asset, true))
+					}
+				}
+				if b, err := json.Marshal(map[string]any{"assets": summaries, "has_more": len(intentAssets) > 10}); err == nil {
+					sysBody += "\n\n本意图及上游事实关联的目标资产摘要：\n" + string(b)
 				}
 				// 意图明确针对的这些资产 → 自动纳入任务测试范围（与 insertAssets 同一套
 				// 保守粒度）。upsertTaskScope 的 ON CONFLICT DO NOTHING + uq_task_scope
@@ -522,7 +548,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 				// 资产覆盖度功能关闭时不再累积测试范围(分母)。
 				if coverageEnabled {
 					for _, a := range assets {
-						_ = as.AddAutoScope(taskID, a.Type, a.Domain, a.URL, a.IP)
+						if explicit[a.ID] {
+							_ = as.AddAutoScope(taskID, a.Type, a.Domain, a.URL, a.IP)
+						}
 					}
 				}
 			}

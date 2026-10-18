@@ -255,6 +255,10 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 		for _, t := range rows {
 			byKey[t.Key] = t
 		}
+		policy, err := loadContextAccess(pg, agentKey)
+		if err != nil {
+			return nil, fmt.Errorf("加载读取能力失败: %w", err)
+		}
 		runInfo := agent.RunInfoFrom(ctx)
 		resolve := func(t actool.CoreTool, row *db.Tool) actool.CoreTool {
 			var schema map[string]any
@@ -262,12 +266,19 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 				_ = json.Unmarshal(row.Schema, &schema)
 			}
 			if row.System {
-				return meterTool(agent.ResolveBuiltinTool(t, row.Description, schema), pg, row.Key, agentKey, runInfo)
+				return applyContextPolicy(meterTool(agent.ResolveBuiltinTool(t, row.Description, schema), pg, row.Key, agentKey, runInfo), policy)
 			}
 			return meterTool(agent.DecorateTool(t, row.Description, schema), pg, row.Key, agentKey, runInfo)
 		}
 		out := tools[:0:0]
+		taskReg := agent.TaskDomainToolsFrom(ctx)
 		for _, t := range tools {
+			switch t.Name() {
+			case "context_search", "context_get", "graph_overview":
+				if scoped := taskReg[t.Name()]; scoped != nil {
+					t = scoped
+				}
+			}
 			row, known := byKey[t.Name()]
 			if !known { // MCP/skill/host tool: no row → untouched
 				out = append(out, t)
@@ -414,7 +425,7 @@ func buildDomainReg(as *db.AssetStore) map[string]actool.CoreTool {
 		// Only these tools explicitly support standalone/global operation. Other
 		// domain tools close over an ExplorationStore and need a per-run ToolSet.
 		switch t.Name() {
-		case "list_assets", "list_companies", "insert_assets", "report_finding", "add_company_scope":
+		case "asset_search", "asset_get", "list_companies", "insert_assets", "report_finding", "add_company_scope":
 			reg[t.Name()] = t
 		}
 	}

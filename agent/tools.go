@@ -228,7 +228,7 @@ func (t *ToolSet) CoverageDisabled() bool { return t.coverageDisabled }
 // coverageOnlyTools are the LLM tools that only make sense when asset coverage is
 // on. When the feature is off they are filtered out of the agent's tool list so
 // they neither pollute the prompt nor let the model build a disabled denominator.
-var coverageOnlyTools = map[string]bool{"add_task_scope": true, "list_untested_assets": true}
+var coverageOnlyTools = map[string]bool{"add_task_scope": true}
 
 // DropCoverageTools returns tools with the coverage-only ones removed when this
 // task has the feature disabled; otherwise it returns tools unchanged.
@@ -246,24 +246,26 @@ func (t *ToolSet) DropCoverageTools(tools []actool.CoreTool) []actool.CoreTool {
 	return out
 }
 
-// StripCoverageParams hides coverage-only parameters (currently insert_assets'
-// per-item `related`, which only decides whether an asset enters the coverage
-// denominator) from the model-facing schema when coverage is disabled — the param
-// has no effect then, so showing it just pollutes the prompt. MUST run on the FINAL
+// StripCoverageParams hides insert_assets' per-item related and asset_search's
+// untested filter from the model-facing schema when coverage is disabled. Run on the FINAL
 // tool list (after AugmentTools/ToolResolve): the DB tools table is authoritative on
 // schema, so stripping the code schema earlier would be overwritten. No-op when
-// enabled or when the list has no insert_assets. The schema is deep-copied before
+// enabled or when neither tool is present. The schema is deep-copied before
 // editing so the shared/DB schema map is never mutated.
 func (t *ToolSet) StripCoverageParams(tools []actool.CoreTool) []actool.CoreTool {
 	if !t.coverageDisabled {
 		return tools
 	}
 	for i, tool := range tools {
-		if tool.Name() != "insert_assets" {
+		if tool.Name() != "insert_assets" && tool.Name() != "asset_search" {
 			continue
 		}
 		schema := deepCopyJSONMap(tool.InputSchema())
-		if props, ok := nestedMap(schema, "properties", "assets", "items", "properties"); ok {
+		if tool.Name() == "asset_search" {
+			if props, ok := nestedMap(schema, "properties"); ok {
+				delete(props, "untested")
+			}
+		} else if props, ok := nestedMap(schema, "properties", "assets", "items", "properties"); ok {
 			delete(props, "related")
 		}
 		tools[i] = DecorateTool(tool, tool.Description(), schema)
@@ -383,6 +385,9 @@ func readTool(name, desc string, schema map[string]any, run func(context.Context
 		Concurrent:  func(json.RawMessage) bool { return true },
 		Permissions: func(context.Context, json.RawMessage, acperm.Context) acperm.Decision { return acperm.Allowed() },
 		Run: func(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+			if tc != nil && tc.MaxOutputChars > 0 {
+				ctx = context.WithValue(ctx, readBudgetKey{}, tc.MaxOutputChars)
+			}
 			res, err := run(ctx, in)
 			return captureStructuredResult(name, res, tc), err
 		},
@@ -428,7 +433,7 @@ func (t *ToolSet) writeExpTool(name, desc string, schema map[string]any, run fun
 func (t *ToolSet) needExploration(name string, run func(context.Context, json.RawMessage) (actool.Result, error)) func(context.Context, json.RawMessage) (actool.Result, error) {
 	return func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 		if t == nil || t.ts == nil {
-			return actool.Errorf(name + " 需要任务上下文（探索图）：当前 agent 不在某个任务内运行，取不到任务的探索图，该工具不可用。请在任务内使用它，或改用带 task_id 的跨任务读取工具（get_task_node_detail / list_task_findings / get_task_graph 等）。"), nil
+			return actool.Errorf(name + " 需要任务上下文（探索图）：当前 agent 不在某个任务内运行，取不到任务的探索图，该工具不可用。请在任务内使用它，或改用带 task_id 的跨任务读取工具（context_search / context_get / graph_overview，需已绑定跨任务权限）。"), nil
 		}
 		return run(ctx, in)
 	}
@@ -445,19 +450,19 @@ func jsonResult(v any) (actool.Result, error) {
 // --- read tools (planner + worker) ---
 
 func (t *ToolSet) graphOverview() actool.CoreTool {
-	return readTool("graph_overview",
-		"(探索链路图)探索态势蒸馏摘要：资产计数、无接口的站点、frontier、发现、hints(人类/主 agent 的战略提示，生成意图时须纳入)。Planner 每轮已预取；仅在需要刷新时调用。",
-		obj(map[string]any{}),
-		func(_ context.Context, raw json.RawMessage) (actool.Result, error) {
-			var args struct{}
-			if err := decodeToolInput(raw, &args); err != nil {
-				return actool.Errorf(err.Error()), nil
-			}
-			if t == nil || t.ts == nil {
-				return actool.Errorf("graph_overview 需要任务探索上下文，当前工具未绑定任务"), nil
-			}
-			return jsonResult(t.graphOverviewData())
-		})
+	return readTool("graph_overview", "任务态势摘要。Planner 每轮已预取，仅需刷新时调用。", obj(map[string]any{"task_id": str("仅跨任务授权角色可指定")}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+		var a struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := decodeToolInput(raw, &a); err != nil {
+			return actool.Errorf(err.Error()), nil
+		}
+		target, err := t.contextTarget(ctx, a.TaskID, "overview")
+		if err != nil {
+			return actool.Errorf(err.Error()), nil
+		}
+		return jsonResult(target.graphOverviewData())
+	})
 }
 
 // graphOverviewData computes the distilled situational snapshot shared by the
@@ -522,26 +527,17 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// derived_from — possibly several facts combined) and its yields (the
 	// facts/findings it produced). factFrom maps a fact → the intent that
 	// produced it. This is the relationship layer the flat lists lacked.
-	edges, edgesErr := t.ts.Edges(5000)
-	markError(edgesErr, "lineage")
-	parentsOf := map[int64][]int64{}
-	yieldsOf := map[int64][]int64{}
-	factFrom := map[int64]int64{}
-	for _, e := range edges {
-		switch e.Rel {
-		case db.RelDerivedFrom, db.RelSpawns: // upstream: derived_from (fact/finding/intent→intent) or spawns (origin fact→goal, legacy begin→intent)
-			parentsOf[e.To] = append(parentsOf[e.To], e.From)
-		case db.RelYields: // intent --yields--> fact/finding
-			yieldsOf[e.From] = append(yieldsOf[e.From], e.To)
-			factFrom[e.To] = e.From
-		}
-	}
 	// Fold only authorized, still-cold members. Revived members remain eligible
 	// for the recent windows, which are capped independently of the hot set.
 	covered := t.authorizedCoveredMembers(t.ts, t.taskID)
 	var hotAtRender map[int64]bool
-	if cg, _, err := loadColdGraph(t.ts); err == nil {
-		hotAtRender = cg.hotSet()
+	if len(covered) > 0 {
+		var err error
+		hotAtRender, err = t.ts.ToolHotNodeIDs(context.Background())
+		if err != nil {
+			covered = nil
+			markError(err, "folding")
+		}
 	}
 	hidden := func(id int64) bool { _, c := covered[id]; return c && !hotAtRender[id] }
 	const openIntentsCap = 30
@@ -585,12 +581,37 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// negative results) so the planner sees them in one call; full content
 	// via node_detail(id).
 	vulnPage, vulnErr := t.ts.ToolLocalNodePage(context.Background(), db.KindFinding, 10)
-	factPage, factErr := t.ts.ToolLocalNodePage(context.Background(), db.KindFact, 1000)
+	hiddenIDs := []int64{}
+	for id := range covered {
+		if hidden(id) {
+			hiddenIDs = append(hiddenIDs, id)
+		}
+	}
+	factPage, factErr := t.ts.ToolLocalNodePageExcluding(context.Background(), db.KindFact, 20, hiddenIDs)
 	markError(vulnErr, "findings_total", "finding_list")
 	markError(factErr, "facts", "recent_facts")
 	vulnNodes := vulnPage.Nodes[:min(10, len(vulnPage.Nodes))]
-	factNodes := factPage.Nodes[:min(1000, len(factPage.Nodes))]
-	visible := visibleNodeIDs(goals, hints, fr, all, vulnNodes, factNodes)
+	factNodes := factPage.Nodes[:min(20, len(factPage.Nodes))]
+	visible := visibleNodeIDs(goals, hints, fr, running, recentDone[:min(12, len(recentDone))], vulnNodes, factNodes)
+	visibleIDs := []int64{}
+	for id := range visible {
+		visibleIDs = append(visibleIDs, id)
+	}
+	edges, edgesErr := t.ts.EdgesWithin(visibleIDs)
+	markError(edgesErr, "lineage")
+	parentsOf := map[int64][]int64{}
+	yieldsOf := map[int64][]int64{}
+	factFrom := map[int64]int64{}
+	for _, e := range edges {
+		switch e.Rel {
+		case db.RelDerivedFrom, db.RelSpawns: // upstream: derived_from (fact/finding/intent→intent) or spawns (origin fact→goal, legacy begin→intent)
+			parentsOf[e.To] = append(parentsOf[e.To], e.From)
+		case db.RelYields: // intent --yields--> fact/finding
+			yieldsOf[e.From] = append(yieldsOf[e.From], e.To)
+			factFrom[e.To] = e.From
+		}
+	}
+
 	parentsOf = restrictNodeRelations(parentsOf, visible)
 	yieldsOf = restrictNodeRelations(yieldsOf, visible)
 	factFrom = restrictNodeOrigins(factFrom, visible)
@@ -600,7 +621,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	out["facts"] = factPage.Total
 	if vulnPage.Total > len(vulnNodes) {
 		out["finding_list_truncated"] = true
-		out["finding_list_read_hint"] = "更多摘要请用 list_findings"
+		out["finding_list_read_hint"] = "更多摘要请用 context_search(types=[finding])"
 	}
 	findingList := make([]map[string]any, 0, len(vulnNodes))
 	for _, n := range vulnNodes {
@@ -675,7 +696,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 					m["denominator"] = cov.Denominator
 					m["tested"] = cov.Tested
 					m["by_type"] = cov.ByType
-					m["note"] = "coverage资产测试覆盖度（包括接口等各种相关资产），粗略估计、仅供参考：包含当前任务与直接关联任务的 scope、事实锚点；关联 scope 只读。容器型资产/大量枚举会让它偏低，勿据此认为已测完；可用 add_task_scope 增补本任务范围、list_untested_assets 看未测资产【通常不调用list_untested_assets，按照任务推进即可】；"
+					m["note"] = "覆盖度仅供参考，含本任务及直接关联任务范围；关联范围只读。低值不等于未测试，高值不证明已测完；按需用 asset_search(untested=true) 查未测资产。"
 					if cov.Denominator == 0 {
 						m["pct"] = nil
 						m["status"] = "范围未锚定"
@@ -1557,7 +1578,7 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 		obj(map[string]any{
 			"intents":    map[string]any{"type": "array", "maxItems": 4, "description": "【优先用这个】要新增的探索方向数组，最多 4 条，按顺序处理。每个元素字段同下方顶层字段（summary/asset_ids/parent_ids/priority）。返回 ids 与本数组等长、同序。", "items": map[string]any{"type": "object"}},
 			"summary":    str("[单条] 一句话描述这个探索方向：做什么+为什么。已写清方向即可，不依赖资产 id。"),
-			"asset_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "本方向要测试/攻击的【目标资产 id】（**尽量传**，0/1/多个；是 list_assets 返回的资产 id，不是探索节点 id）：这条探索方向针对哪些资产（站点/接口/参数/主机等）。只要方向围绕某些具体资产就务必传上——它是「这条探索打哪些目标」的结构化标记，用于覆盖去重、把意图连入资产链路。仅当纯全局侦察、确实没有具体目标资产时才留空。"},
+			"asset_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "本方向要测试/攻击的【目标资产 id】（**尽量传**，0/1/多个；是 asset_search 返回的资产 id，不是探索节点 id）：这条探索方向针对哪些资产（站点/接口/参数/主机等）。只要方向围绕某些具体资产就务必传上——它是「这条探索打哪些目标」的结构化标记，用于覆盖去重、把意图连入资产链路。仅当纯全局侦察、确实没有具体目标资产时才留空。"},
 			"parent_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "上游锚点 id（可选，0/1/多个）：本方向由哪些【已确认的事实(fact)/发现(finding)】综合得出。**只能填已存在的 fact/finding 节点 id,不能填意图/目标/提示**——意图必须锚在已确认知识上,发现驱动而非凭空规划。多个事实共同产生一个新意图就传多个;顶层全新侦察方向请留空（会自动挂到任务起点 origin fact）。"},
 			"priority":   intp("优先级 0-10，默认5"),
 		}),
@@ -1742,20 +1763,6 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 				}
 			}
 			return actool.Text(fmt.Sprintf("goal %d marked met", goal)), nil
-		})
-}
-
-func (t *ToolSet) goalMet() actool.CoreTool {
-	return writeTool("goal_met", "【立即结束整个任务】——仅当你确认任务的【全部目标都已真正达成、整体收官】时才调（注意是任务【整体】完成；仅仅达成了其中某一个目标/某一个 flag/某一个漏洞【不算】——那种情况用 prove_goal 标记该目标即可）。⚠️它不是用来“结束本轮规划”的：本轮没有新意图要派、或在等 worker 产出，都【直接结束本轮即可，不要调本工具】（0 个意图是完全正常的）。正常判定优先用 prove_goal 逐个证明目标；goal_met 只是绕过逐个证明、直接从全局收官的手段。",
-		obj(map[string]any{"reason": str("达成理由（必须是目标真正达成的证据，不能是“本轮无新方向”这类结束本轮的理由）")}, "reason"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
-			var a struct{ Reason string }
-			if err := json.Unmarshal(in, &a); err != nil {
-				return actool.Errorf("参数格式错误: " + err.Error()), nil
-			}
-			t.GoalMet = true
-			t.Reason = a.Reason
-			return actool.Text("acknowledged: goal marked met"), nil
 		})
 }
 
@@ -2312,7 +2319,7 @@ func (t *ToolSet) addHint() actool.CoreTool {
 
 // killWorkTool lets the planner terminate a single running work (by intent id).
 func (t *ToolSet) killWorkTool() actool.CoreTool {
-	return t.writeExpTool("kill_work", "终止一条正在运行的意图(work)。用于叫停跑偏/无意义的探索；被终止的意图标记为 stopped，不再自动重领。先用 get_worker_output 看看它在干嘛再决定。",
+	return t.writeExpTool("kill_work", "终止一条正在运行的意图(work)。用于叫停跑偏/无意义的探索；被终止的意图标记为 stopped，不再自动重领。先用 context_get 的 output 视图了解当前进度。",
 		obj(map[string]any{"intent_id": idp("要终止的意图 id（= work 句柄）")}, "intent_id"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			if t.killWork == nil {
@@ -2347,7 +2354,7 @@ func (t *ToolSet) killWorkTool() actool.CoreTool {
 // which re-plans its next step (already-gathered context is kept). For in-intent
 // nudges ("停做 X、聚焦 Y"); if the whole direction is wrong use kill_work + a new intent.
 func (t *ToolSet) steerWorkTool() actool.CoreTool {
-	return t.writeExpTool("steer_work", "给一条正在运行的意图(work)实时注入纠偏指令，不打断它、不丢已有进展：worker 会在下一步动作前收到你的指令并据此调整。用于'别再走 X、聚焦 Y'这类【意图内】纠偏；若方向整个错了应改用 kill_work 再下新意图。建议先用 get_worker_output 看它在干嘛。",
+	return t.writeExpTool("steer_work", "给一条正在运行的意图(work)实时注入纠偏指令，不打断它、不丢已有进展：worker 会在下一步动作前收到你的指令并据此调整。用于'别再走 X、聚焦 Y'这类【意图内】纠偏；若方向整个错了应改用 kill_work 再下新意图。建议先用 context_get 的 output 视图了解当前进度。",
 		obj(map[string]any{
 			"intent_id": idp("要纠偏的意图 id（= work 句柄）"),
 			"message":   str("给 worker 的纠偏指令，明确让它停止什么、转向什么"),
@@ -2691,23 +2698,8 @@ func (t *ToolSet) listWorkerTraces() actool.CoreTool {
 func (t *ToolSet) PlannerTools() []actool.CoreTool {
 	return []actool.CoreTool{
 		t.listFindingDeletionFeedback(), t.listTaskAssets(), t.checkTargetAccess(),
-		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(),
-		// cold-digest §6.1: restore folded cold nodes (digest body → members → detail).
-		t.expandDigest(),
-		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.listGoals(), t.addIntent(), t.proveGoal(), t.goalMet(),
-		t.killWorkTool(), t.steerWorkTool(),
-		// report_finding：规划态势研判时若自身已确证漏洞，可直接登记（与 worker 同工具）。
-		t.addFinding(),
-		// list_companies：查看企业列表 + scope + 资产数（拿 company_id / 理解归属范围）。
-		t.listCompanies(),
-		// list_assets：规划时按 DSL 检索全资产库（配合 list_untested_assets 的"范围内未测"视角，
-		// 补上"按域名/指纹/端口/状态码等条件在整库里查"的能力）。
-		t.listAssets(),
-		// add_company_scope：规划时可把域名/IP/CIDR/ICP/关键词纳入某公司的资产范围（自动认领命中资产）。
-		t.addCompanyScope(),
-		// add_task_scope：主动把整根域/整公司/某子域/IP 纳入本任务测试范围(覆盖度分母)。
-		t.addTaskScope(),
-		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。
-		t.listUntestedAssets(),
+		t.graphOverview(), t.contextSearch(), t.contextGet(),
+		t.addIntent(), t.proveGoal(), t.killWorkTool(), t.steerWorkTool(), t.addFinding(),
+		t.listCompanies(), t.assetSearch(), t.assetGet(), t.addCompanyScope(), t.addTaskScope(),
 	}
 }

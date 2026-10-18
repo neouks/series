@@ -16,7 +16,7 @@ func TestFindingsPaginationRules(t *testing.T) {
 			t.Fatalf("missing rule %q", rule)
 		}
 	}
-	if strings.Contains(plannerDefaultTmpl, "全部漏洞") || !strings.Contains(plannerDefaultTmpl, "未查完不能断言不存在") {
+	if strings.Contains(plannerDefaultTmpl, "全部漏洞") || !strings.Contains(contextReadRule, "未查完不能断言不存在") {
 		t.Fatal("planner pagination contract is stale")
 	}
 }

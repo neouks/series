@@ -5,7 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/neouks/series/agent"
 	"github.com/neouks/series/db"
 )
 
@@ -52,12 +51,9 @@ func TestWorkerTraceBindingsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, seed := range agent.BuiltinToolSeeds() {
-		if seed.Key != "search_all_worker_traces" && seed.Key != "get_worker_trace" && seed.Key != "node_detail" {
-			continue
-		}
-		schema, _ := json.Marshal(seed.Schema)
-		if err := pg.UpsertToolForce(seed.Key, seed.Desc, schema, json.RawMessage(`["planner","mainagent"]`)); err != nil {
+	// Historical rows are explicit fixtures; current catalog no longer seeds them.
+	for _, key := range []string{"search_all_worker_traces", "get_worker_trace", "node_detail"} {
+		if err := pg.UpsertToolForce(key, "legacy", json.RawMessage(`{}`), json.RawMessage(`["planner","mainagent"]`)); err != nil {
 			t.Fatal(err)
 		}
 	}

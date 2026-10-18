@@ -42,11 +42,11 @@ func TestMainPendingExecutionRoleAndContext(t *testing.T) {
 	if e != nil || r.IsError || !strings.Contains(r.Flatten(), `"can_operate":true`) || !strings.Contains(r.Flatten(), `"approval_state":"pending"`) {
 		t.Fatal(r, e)
 	}
-	r, e = tools["node_detail"].Call(main, json.RawMessage(fmt.Sprintf(`{"id":%d}`, node)), nil)
+	r, e = tools["context_get"].Call(main, json.RawMessage(fmt.Sprintf(`{"items":[{"ref":"node:%d","field":"/summary"}]}`, node)), nil)
 	if e != nil || r.IsError || !strings.Contains(r.Flatten(), "main-sensitive-evidence") {
 		t.Fatal(r, e)
 	}
-	r, e = tools["list_assets"].Call(main, json.RawMessage(fmt.Sprintf(`{"id":%d}`, id)), nil)
+	r, e = tools["asset_get"].Call(main, json.RawMessage(fmt.Sprintf(`{"ids":[%d]}`, id)), nil)
 	if e != nil || r.IsError || !strings.Contains(r.Flatten(), "pending") {
 		t.Fatal(r, e)
 	}
@@ -64,9 +64,9 @@ func TestMainPendingExecutionRoleAndContext(t *testing.T) {
 	if blocked, why, _ := independent.PreToolUse(main, "Bash", input); !blocked || why != "independent restriction" {
 		t.Fatal("independent guard bypassed")
 	}
-	request := llm.CompletionRequest{Messages: []llm.Message{{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: "n", Name: "node_detail", Input: json.RawMessage(fmt.Sprintf(`{"id":%d}`, node))}}}, {Role: llm.RoleUser, Content: []llm.ContentBlock{llm.ToolResultText("n", r.Flatten(), false)}}}}
+	request := llm.CompletionRequest{Messages: []llm.Message{{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: "n", Name: "context_get", Input: json.RawMessage(fmt.Sprintf(`{"items":[{"ref":"node:%d","field":"/summary"}]}`, node))}}}, {Role: llm.RoleUser, Content: []llm.ContentBlock{llm.ToolResultText("n", r.Flatten(), false)}}}}
 	// Use actual node result, not a list response.
-	result, _ := tools["node_detail"].Call(main, json.RawMessage(fmt.Sprintf(`{"id":%d}`, node)), nil)
+	result, _ := tools["context_get"].Call(main, json.RawMessage(fmt.Sprintf(`{"items":[{"ref":"node:%d","field":"/summary"}]}`, node)), nil)
 	request.Messages[1].Content = []llm.ContentBlock{llm.ToolResultText("n", result.Flatten(), false)}
 	before, _ := json.Marshal(request)
 	filtered, e := FilterTaskAssetRequest(main, as, task.ID, request)
@@ -95,8 +95,8 @@ func TestMainPendingExecutionRoleAndContext(t *testing.T) {
 	if blocked, _, _ := hooks.PreToolUse(main, "Bash", input); !blocked {
 		t.Fatal("revoke bypassed")
 	}
-	r, _ = tools["node_detail"].Call(main, json.RawMessage(fmt.Sprintf(`{"id":%d}`, node)), nil)
-	if !r.IsError {
+	r, _ = tools["context_get"].Call(main, json.RawMessage(fmt.Sprintf(`{"items":[{"ref":"node:%d","field":"/summary"}]}`, node)), nil)
+	if !strings.Contains(r.Flatten(), `"error"`) {
 		t.Fatal("revoked node read")
 	}
 	if err := as.BlockTaskAssets(task.ID, []int64{id}, "user", ""); err != nil {

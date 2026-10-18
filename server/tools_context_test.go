@@ -25,7 +25,7 @@ func TestInjectedGraphOverviewUsesRunStore(t *testing.T) {
 	old := agent.ToolResolve
 	t.Cleanup(func() { agent.ToolResolve = old })
 	reg := buildDomainReg(pg.Assets())
-	for _, key := range []string{"graph_overview", "list_facts", "list_findings", "node_detail", "expand_digest", "record_fact"} {
+	for _, key := range []string{"graph_overview", "context_search", "context_get", "record_fact"} {
 		if reg[key] != nil {
 			t.Fatalf("standalone registry contains task-only %s", key)
 		}
@@ -53,7 +53,7 @@ func TestInjectedGraphOverviewUsesRunStore(t *testing.T) {
 		ts.SetTaskID(task.ID)
 		ts.SetAssetStore(pg.Assets(), pg.Companies())
 		ctx := agent.WithRunInfo(t.Context(), agent.RunInfo{TaskID: task.ID, ExplorationID: task.ExplorationID})
-		if tools := names(resolveToolsForTest(t, ctx, "planner", nil)); tools["graph_overview"] != nil || tools["list_assets"] != nil {
+		if tools := names(resolveToolsForTest(t, ctx, "planner", nil)); tools["graph_overview"] != nil || tools["asset_search"] != nil {
 			t.Fatal("missing task tools fell back to global")
 		}
 		contexts = append(contexts, agent.WithTaskToolSet(ctx, ts))

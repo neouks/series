@@ -215,7 +215,7 @@ func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
 			}
 		}
 	}
-	b.WriteString("\n（完整细节可 node_detail / get_worker_output / list_findings 再查。）")
+	b.WriteString("\n（完整细节可 context_get（正文或 view=output） / context_search 再查。）")
 	return b.String()
 }
 
@@ -250,7 +250,7 @@ func intentSummary(ts *db.ExplorationStore, id int64) string {
 }
 
 // workerOutput returns the finished worker's conclusion for an intent — the last
-// 'result' (else 'text') activity's full detail, truncated. Same source get_worker_output uses.
+// 'result' (else 'text') activity's full detail, truncated. Same source context_get（view=output） uses.
 func workerOutput(ts *db.ExplorationStore, id int64) string {
 	acts, _, err := ts.ActivityList(&id, 0, 1000)
 	if err != nil {
@@ -275,23 +275,23 @@ func workerOutput(ts *db.ExplorationStore, id int64) string {
 }
 
 // truncOutput caps a worker-output blob so the trigger context doesn't bloat the
-// system prompt every round; full text is one get_worker_output call away.
+// system prompt every round; full text is one context_get（view=output） call away.
 func truncOutput(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
 	}
-	return string(r[:n]) + " …（已截断，完整见 get_worker_output）"
+	return string(r[:n]) + " …（已截断，完整见 context_get（view=output））"
 }
 
 // renderGraphOverview folds the pre-computed graph_overview snapshot into the
 // wake-up prompt so the planner starts each round with a bounded situation in
 // hand, saving the round-trip it would otherwise spend fetching an overview. The
 // lightweight tagged projection is bounded; full persisted detail remains one
-// tool call away (node_detail / list_facts / …).
+// tool call away (context_get / context_search / …).
 func renderGraphOverview(data map[string]any) string {
 	const plannerOverviewMaxRunes = 24_000
-	return "\n\n【本轮态势（graph_overview 的轻量预取；需要细节再按需调 node_detail/list_facts 等）】：\n" +
+	return "\n\n【本轮态势（graph_overview 的轻量预取；需要细节再按需调 context_get/context_search 等）】：\n" +
 		renderLightTaggedOrdered("graph_overview", data, []string{
 			"task", "asset_approval_counts", "asset_approval_error", "frontier_open", "findings_total", "facts", "running_intents", "goals", "hints",
 			"open_intents", "recent_done_intents", "recent_facts", "coverage", "related_tasks",
@@ -315,8 +315,8 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 1. **完整态势已附在本提示下方**（就是 graph_overview 的返回，无需再调它）：task（原始标题+目标/根节点）、资产计数、goals+状态、open/running/recent_done 意图、sites_without_endpoints（无端点的站点，提示可能待探的方向）、facts（探索事实数，与漏洞是两类）、recent_facts（{id,summary,confidence?}）。
    - **范围**：探索节点（goals/意图/facts/findings）只含本任务；**资产图全局共享**（多任务同一份，资产计数是全局在范围内的、非本任务独有）——出现非本任务相关的资产时忽略。
    - **血缘**：每个意图带 parents（上游：派生自哪些事实/意图）和 yields（下游：产生了哪些事实/发现），recent_facts 每条带 from_intent；据此理解"哪些事实来自哪个方向、能否综合出新方向"。
-   - **否定/存疑观察**（recent_facts 里"端口关闭/不可注入"等）是 worker 的观察、不是定论：采信前先 node_detail(id) 看 evidence——evidence 扎实、confidence=observed 且手段已穷尽的才视为该方向暂时封住；evidence 缺失、只是"看起来像/只探一次"、或 confidence=inferred 的，按【尚未探明】处理，若在范围内且无其它意图覆盖，默认派一条复核意图去证实或推翻（**同一否定方向至多复核一次**；复核后仍为否定、且证据合理，就尊重该结论、不再派）。
-   - **要更深细节才按需调**：list_facts / list_findings（授权可见的分页摘要，默认 20；q 仅搜摘要，before 翻页，带 total/has_more；未查完不能断言不存在，具体续读规则见工具说明）、node_detail(id)（证据/详情按需分段读取）、list_assets（DSL 搜索或 id/ids 直取）。不要默认拉全量。
+   - **否定/存疑观察**（recent_facts 里"端口关闭/不可注入"等）是 worker 的观察、不是定论：采信前用 context_get 读取 node:ID 的 /evidence——evidence 扎实、confidence=observed 且手段已穷尽的才视为该方向暂时封住；evidence 缺失、只是"看起来像/只探一次"、或 confidence=inferred 的，按【尚未探明】处理，若在范围内且无其它意图覆盖，默认派一条复核意图去证实或推翻（**同一否定方向至多复核一次**；复核后仍为否定、且证据合理，就尊重该结论、不再派）。
+   - **要更深细节才按需调**：context_search（摘要和正文检索，默认10条，用next_cursor续页）、context_get（用node:ID/activity:ID引用读取正文）、asset_search（DSL检索）和asset_get（按ID读取）。不要默认拉全量。
 
 2. **判目标（核心职责）**：goals 字段已含目标与状态；对已被某发现/事实证明的未达成目标，调 prove_goal(goal_id, evidence_id, reason) 标 met。**当你标记的恰是最后一个未完成目标时，系统自动判定整个任务完成**——收官只由逐个 prove_goal 驱动，没有别的"一键完成"手段。
    - ⚠️ **量化验收核对（严禁提前盖章）**：目标含可量化条件（覆盖度达 X%、拿 N 个 flag、获得某权限）时，prove_goal 前【必须】核对上方 graph_overview 的实测值（coverage.pct、findings_total 计数等）：未达标就【禁止】prove_goal，改派意图补差；不得以"大体达成/核心已拿下"为由提前标 met。例：要求覆盖度 100% 而实测 coverage.pct=40% → 未达成，继续派补测意图。
@@ -330,7 +330,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
    - 已有 open/running 覆盖 → 不再生成（正在处理）。
    - 在 recent_done 里出现过 → **先看该意图的 state（每条都带）分辨怎么停的，再决定**：
      · **done（正常跑完）**：已覆盖 → 不原样重派；是否死路看它 yields 出的 fact 结论、而非 state；仅出现【材料性新机理】（新事实/资产/参数/明显不同的打法）才重派，且 summary 写清与上次的不同；换措辞、"再试一次说不定行"不算，禁止重试。
-     · **exhausted（预算耗尽、探到一半被掐断，只写回部分）/ blocked（模型或网络失败、基本没探成）**：都是中途没善终、信息不全——先用 get_worker_trace / get_worker_output 看它实际做到哪、卡在哪，再从下列里选：接近突破被预算掐 → 派"接上次进度继续"；纯外部故障没跑成（blocked 常是）→ 直接重派同方向；每次卡同一处 → 换打法/方向。依据永远是 trace 里的真实进度，不是 state 本身。
+     · **exhausted（预算耗尽、探到一半被掐断，只写回部分）/ blocked（模型或网络失败、基本没探成）**：都是中途没善终、信息不全——先用 context_search / context_get（view=output） 看它实际做到哪、卡在哪，再从下列里选：接近突破被预算掐 → 派"接上次进度继续"；纯外部故障没跑成（blocked 常是）→ 直接重派同方向；每次卡同一处 → 换打法/方向。依据永远是 trace 里的真实进度，不是 state 本身。
    - 完全无任何意图覆盖的全新方向 → 生成。
    - 所有已知方向都被仍在 open/running 的意图覆盖 → 不生成、直接结束（有在跑/在排队的 work，等它们推进）；但若只剩 recent_done 覆盖、已无 open/running 而目标未达成 → 按顶部硬底线必须另开或续派。
    - **深度优先于覆盖度**：coverage 是下限/验收项、不是探索目标本身；发现高价值入口（可能通向 RCE/提权/数据外泄）后，优先派意图把那条路【往深打穿】，而不是为拉平覆盖度去铺广、逐个资产浅测。
@@ -340,7 +340,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 5. **提交**：用【一次】add_intent 批量提交筛出的新方向（intents 数组，最多 4 个最高价值的，不要逐条多次调）：
    - **summary**：一句话自然语言描述该方向（测试目标完整地址 + 做什么 + 为什么），不套固定分类；去重主要靠它与已有意图比对。
-   - **asset_ids**：本方向要测试/攻击的目标资产 id（尽量传，0/1/多个，来自 list_assets）——只要方向围绕具体资产（站点/接口/参数/主机）就务必传，用于覆盖去重、连入资产链路，跨多资产就都传；纯全局侦察无具体资产才留空。
+   - **asset_ids**：本方向要测试/攻击的目标资产 id（尽量传，0/1/多个，来自 asset_search）——只要方向围绕具体资产（站点/接口/参数/主机）就务必传，用于覆盖去重、连入资产链路，跨多资产就都传；纯全局侦察无具体资产才留空。
    - **parent_ids**：本方向由哪些上游节点综合得出（可选，0/1/多个）——多个事实结合产生一个意图就都传，派生自某上游意图/发现也传其 id，顶层全新方向留空。
 
 不重复、不硬凑；但目标未达成、又有未覆盖且更深的打法时，该派就派。简洁、聚焦、高效。`
@@ -392,7 +392,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	runProfile := shellProfileFor(p.shellProfile, taskDir)
 	// Planner 只保留开局极轻量探测需要的 Bash；文件编辑、目录遍历与 Sleep 都不属于
 	// 规划职责，避免它们的 schema 在每次 completion 中反复占用输入。
-	// 资产覆盖度功能关闭时剔除 add_task_scope/list_untested_assets（不入 prompt）。
+	// 资产覆盖度关闭时移除 add_task_scope，保留普通资产检索。
 	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.NewBashWithProfile(runProfile))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "planner"})
 	ctx = WithTaskToolSet(ctx, tsx)
@@ -401,6 +401,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	if err != nil {
 		return false, "", err
 	}
+	tools = tsx.StripCoverageParams(tools)
 	if err := requireRoleTools("planner", tools); err != nil {
 		return false, "", err
 	}

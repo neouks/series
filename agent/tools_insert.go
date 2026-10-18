@@ -743,7 +743,7 @@ func (t *ToolSet) listCompanies() actool.CoreTool {
 	return readTool(
 		"list_companies",
 		"列出资产库中的【企业/公司】及其资产范围(scope)与已归属资产数。用于查看有哪些公司、"+
-			"拿到 company_id（insert_assets 关联 app、list_assets 按 company_id 过滤时用）。"+
+			"拿到 company_id（insert_assets 关联 app、asset_search 按 company_id 过滤时用）。"+
 			"可选 search 按公司名模糊过滤(不区分大小写)，留空返回全部。",
 		obj(map[string]any{
 			"search": str("按公司名模糊过滤(可选，不区分大小写)；留空返回全部"),
@@ -799,22 +799,7 @@ func splitLines(s string) []string {
 
 // WorkerTools returns the tool set for a work agent.
 func (t *ToolSet) WorkerTools() []actool.CoreTool {
-	return []actool.CoreTool{
-		// list_findings 保留：报漏洞前先查本任务已确认漏洞，避免重复上报同一漏洞。
-		t.listFindings(),
-		t.addFinding(), t.recordFact(),
-		// asset management (handlers guard nil store internally)。
-		// add_company_scope 不给 worker：定义企业资产范围属规划/主控/Auto 的职责，worker 只执行探索。
-		t.insertAssets(), t.listAssets(),
-		// 跨 work 回看：worker 也可复用其他 work 的观察，避免重复劳动。
-		// search_all_worker_traces：不必先知道 intent_id，按关键字全局捞命中步骤；
-		// get_worker_trace：锁定某条 work 后列步骤/就地搜/取完整内容。
-		t.searchAllWorkerTraces(), t.getWorkerTrace(),
-		// node_detail：worker 拿到 intent_id/节点 id 后可查该节点完整详情（配合上面的回看）。
-		t.nodeDetail(),
-		// 以下工具仍【不给】worker，只留给 planner/main（读上下文、跨 work 复盘是规划职责，
-		// worker 只做单条意图的执行与写回）：list_facts / list_companies / list_worker_traces。
-	}
+	return []actool.CoreTool{t.contextSearch(), t.contextGet(), t.addFinding(), t.recordFact(), t.insertAssets(), t.assetSearch(), t.assetGet()}
 }
 
 // MainAgentTools returns the human-interface tool set.
@@ -827,22 +812,9 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 }
 func (t *ToolSet) mainAgentTools() []actool.CoreTool {
 	return []actool.CoreTool{
-		t.listTaskAssets(), t.checkTargetAccess(), t.dispatchIntents(),
-		t.graphOverview(), t.listFindings(), t.listFacts(), t.nodeDetail(),
-		t.expandDigest(), // cold-digest §6.1
-		t.getWorkerOutput(), t.getWorkerTrace(), t.searchAllWorkerTraces(), t.addHint(), t.addIntent(),
-		// steer_work：人可对某条正在运行的意图(work)实时注入纠偏指令（不打断、不丢进展）。
-		t.steerWorkTool(),
-		// set_goals：人可在运行时给本任务补一个新的最终目标（规划者据此重判是否达成）。
-		t.setGoals(),
-		// set_constraints：人可在运行时给本任务补/改操作约束（allow/deny），约束 planner/worker 的探索边界。
-		t.setConstraints(),
-		// asset management (handlers guard nil store internally)
-		t.insertAssets(), t.addCompanyScope(), t.listAssets(),
-		t.addFinding(), t.recordFact(),
-		t.addTaskScope(),
-		// list_untested_assets：按需查本任务范围内未测资产(类型+分页)，自行决定补测。
-		t.listUntestedAssets(),
+		t.listTaskAssets(), t.checkTargetAccess(), t.dispatchIntents(), t.graphOverview(), t.contextSearch(), t.contextGet(),
+		t.addHint(), t.addIntent(), t.steerWorkTool(), t.setGoals(), t.setConstraints(),
+		t.insertAssets(), t.addCompanyScope(), t.assetSearch(), t.assetGet(), t.addFinding(), t.recordFact(), t.addTaskScope(),
 	}
 }
 

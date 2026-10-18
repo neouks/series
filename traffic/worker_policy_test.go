@@ -9,6 +9,7 @@ import (
 
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
+	"github.com/neouks/series/llmrec"
 )
 
 func TestWorkerProxyPendingAndManualLimits(t *testing.T) {
@@ -85,6 +86,54 @@ func TestWorkerProxyPendingAndManualLimits(t *testing.T) {
 	}
 	if request(scope) {
 		t.Fatal("completed worker token usable")
+	}
+}
+
+func TestTrafficReadRolesRetainApprovalPolicy(t *testing.T) {
+	dsn := os.Getenv("SERIES_PG_DSN")
+	if dsn == "" {
+		t.Skip("requires explicit isolated SERIES_PG_DSN")
+	}
+	d, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("traffic read roles", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	tr := &Traffic{assets: d.Assets()}
+	for _, role := range []string{"planner", "reporter", "auto", "custom-reader", "mainagent", "worker", ""} {
+		t.Run(role, func(t *testing.T) {
+			host := fmt.Sprintf("traffic-reader-%s-%d.test", role, task.ID)
+			id, err := d.Assets().UpsertRootDomain(db.UpsertRootDomainReq{Domain: host, TaskID: task.ID, AgentDiscovered: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ri := llmrec.RunInfo{TaskID: task.ID, AgentKey: role}
+			if role == "worker" {
+				ri.IntentID = 1
+			}
+			ctx := llmrec.WithRunInfo(t.Context(), ri)
+			allowedPending := role == "mainagent" || role == "worker"
+			if allowed := tr.allowToolHost(ctx, host) == nil; allowed != allowedPending {
+				t.Fatalf("pending allowed=%v want=%v", allowed, allowedPending)
+			}
+			if err := d.Assets().ApproveTaskAssets(task.ID, []int64{id}, "test", ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := tr.allowToolHost(ctx, host); err != nil {
+				t.Fatalf("bound role cannot read approved host: %v", err)
+			}
+			if err := d.Assets().RevokeTaskAssets(task.ID, []int64{id}, "test", ""); err != nil {
+				t.Fatal(err)
+			}
+			if tr.allowToolHost(ctx, host) == nil {
+				t.Fatal("revoked host readable")
+			}
+		})
 	}
 }
 

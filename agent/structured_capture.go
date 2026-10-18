@@ -12,7 +12,7 @@ import (
 
 func assetStructuredTool(name string) bool {
 	switch name {
-	case "insert_assets", "list_assets", "list_untested_assets", "graph_overview", "node_detail", "expand_digest", "expand_index", "list_findings", "list_facts", "get_worker_output", "get_worker_trace", "list_worker_traces", "search_all_worker_traces":
+	case "context_search", "context_get", "asset_search", "asset_get", "insert_assets", "list_assets", "list_untested_assets", "graph_overview", "node_detail", "expand_digest", "expand_index", "list_findings", "list_facts", "get_worker_output", "get_worker_trace", "list_worker_traces", "search_all_worker_traces":
 		return true
 	}
 	return false
@@ -50,7 +50,7 @@ func captureStructuredResult(name string, result actool.Result, tc *actool.ToolC
 			continue
 		}
 		var value any
-		if json.Unmarshal([]byte(content.Text), &value) != nil {
+		if decodeStructuredJSON([]byte(content.Text), &value) != nil {
 			continue
 		}
 		assets, nodes := map[int64]bool{}, map[int64]bool{}

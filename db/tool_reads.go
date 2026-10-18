@@ -181,9 +181,13 @@ func (s *ExplorationStore) ToolLocalNodePage(ctx context.Context, kind string, l
 	return s.toolNodePage(ctx, kind, "", "", 0, 0, limit, false)
 }
 
-func (s *ExplorationStore) toolNodePage(ctx context.Context, kind, q, severity string, assetID, before int64, limit int, sources bool) (ToolNodePage, error) {
+func (s *ExplorationStore) toolNodePage(ctx context.Context, kind, q, severity string, assetID, before int64, limit int, sources bool, exclude ...[]int64) (ToolNodePage, error) {
+	hidden := []int64{}
+	if len(exclude) > 0 {
+		hidden = exclude[0]
+	}
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, workerReadSQL(toolNodeVisibilitySQL, s.workerRead)+`, page AS (SELECT v.*,n.payload FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE $6::bigint=0 OR v.id<$6 ORDER BY v.id DESC LIMIT $7)
+	err := s.db.QueryRowContext(ctx, workerReadSQL(toolNodeVisibilitySQL, s.workerRead)+`, page AS (SELECT v.*,n.payload FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE ($6::bigint=0 OR v.id<$6) AND NOT(v.id=ANY($9::bigint[])) ORDER BY v.id DESC LIMIT $7)
  SELECT jsonb_build_object('total',(SELECT count(*) FROM visible),'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',id,'kind',kind,'state',state,'created_at',created_at,'source_task_id',owner,
  'inherited',exploration_id<>$1,'payload',jsonb_strip_nulls(jsonb_build_object(
@@ -191,7 +195,7 @@ func (s *ExplorationStore) toolNodePage(ctx context.Context, kind, q, severity s
  'name',left(payload->>'name',120),'severity',left(payload->>'severity',32),
  'intent_id',(SELECT max(e.src_id) FROM exploration_edges e JOIN exploration_nodes i ON i.id=e.src_id AND i.exploration_id=e.exploration_id
  WHERE e.dst_id=page.id AND e.exploration_id=page.exploration_id AND e.rel='yields' AND i.kind='intent'
- AND (page.exploration_id=$1 OR i.state IN ('done','blocked','exhausted','stopped'))))) ) ORDER BY id DESC) FROM page),'[]'::jsonb))`, s.expID, kind, q, severity, assetID, before, limit+1, sources).Scan(&raw)
+ AND (page.exploration_id=$1 OR i.state IN ('done','blocked','exhausted','stopped'))))) ) ORDER BY id DESC) FROM page),'[]'::jsonb))`, s.expID, kind, q, severity, assetID, before, limit+1, sources, hidden).Scan(&raw)
 	var out ToolNodePage
 	if err != nil {
 		return out, err
@@ -242,6 +246,7 @@ func (s *ExplorationStore) LatestWorkerOutput(ctx context.Context, nodeID int64,
  substring(COALESCE(NULLIF(a.detail,''),a.summary,'') FROM $3+1 FOR $4),char_length(COALESCE(NULLIF(a.detail,''),a.summary,''))
  FROM activity a JOIN exploration_nodes n ON n.id=a.node_id AND n.exploration_id=a.exploration_id
  WHERE a.node_id=$1 AND a.kind IN ('result','text') AND n.kind='intent'
+ AND a.id>COALESCE((SELECT after_activity FROM worker_feedback_run WHERE intent_id=n.id),0)
  AND (n.exploration_id=$2 OR (n.state IN ('done','blocked','exhausted','stopped') AND EXISTS (
  SELECT 1 FROM tasks current JOIN task_relations r ON r.task_id=current.id JOIN tasks source ON source.id=r.source_task_id
  WHERE current.exploration_id=$2 AND current.deleted_at IS NULL AND source.deleted_at IS NULL AND source.exploration_id=n.exploration_id)))
@@ -261,6 +266,7 @@ const toolNodeVisibilitySQL = `WITH RECURSIVE current_task AS (
  SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL
  ), contexts AS (
  SELECT $1::bigint exp,COALESCE((SELECT id FROM current_task),0) owner
+ WHERE EXISTS(SELECT 1 FROM current_task) OR NOT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1)
  UNION SELECT t.exploration_id,t.id FROM task_relations r JOIN current_task c ON c.id=r.task_id
  JOIN tasks t ON t.id=r.source_task_id AND t.deleted_at IS NULL WHERE $8
  ), roots AS MATERIALIZED (
@@ -318,4 +324,8 @@ func (s *ExplorationStore) ToolOpenIntentPage(ctx context.Context, limit int) (T
 	}
 	err = json.Unmarshal(raw, &out)
 	return out, err
+}
+
+func (s *ExplorationStore) ToolLocalNodePageExcluding(ctx context.Context, kind string, limit int, hidden []int64) (ToolNodePage, error) {
+	return s.toolNodePage(ctx, kind, "", "", 0, 0, limit, false, hidden)
 }

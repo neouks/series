@@ -1,0 +1,345 @@
+[
+  {
+    "agents": [
+      "mainagent",
+      "planner",
+      "auto"
+    ],
+    "description": "任务态势摘要。Planner 每轮已预取，仅需刷新时调用。",
+    "key": "graph_overview",
+    "schema": {
+      "properties": {
+        "task_id": {
+          "description": "仅跨任务授权角色可指定",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "agents": [
+      "mainagent",
+      "planner",
+      "worker",
+      "auto",
+      "pentest"
+    ],
+    "description": "按类型检索当前任务及直接关联任务的摘要和正文，返回命中片段及带类型引用；正文用 context_get。activity 只含 Worker 执行记录。",
+    "key": "context_search",
+    "schema": {
+      "properties": {
+        "asset_id": {
+          "description": "关联资产",
+          "type": "integer"
+        },
+        "cursor": {
+          "description": "原条件下的 next_cursor",
+          "type": "string"
+        },
+        "intent_id": {
+          "description": "所属意图",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "q": {
+          "description": "字面关键词；留空列出记录",
+          "type": "string"
+        },
+        "severity": {
+          "description": "漏洞严重度",
+          "type": "string"
+        },
+        "state": {
+          "description": "状态",
+          "type": "string"
+        },
+        "task_id": {
+          "description": "仅跨任务授权角色可指定；默认当前任务",
+          "type": "string"
+        },
+        "types": {
+          "items": {
+            "enum": [
+              "fact",
+              "finding",
+              "intent",
+              "goal",
+              "hint",
+              "digest",
+              "activity"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "agents": [
+      "mainagent",
+      "planner",
+      "worker",
+      "auto",
+      "pentest"
+    ],
+    "description": "批量读取至多5个引用。detail 正文；意图 output 最新结果/进度，parents 上游事实/漏洞；摘要 members 成员。每项独立返回错误和续读位置。",
+    "key": "context_get",
+    "schema": {
+      "properties": {
+        "items": {
+          "items": {
+            "properties": {
+              "before": {
+                "description": "成员或上游事实续页",
+                "type": "integer"
+              },
+              "field": {
+                "description": "JSON Pointer",
+                "type": "string"
+              },
+              "index": {
+                "description": "集合续页",
+                "type": "integer"
+              },
+              "offset": {
+                "description": "文本续读",
+                "type": "integer"
+              },
+              "ref": {
+                "description": "搜索返回的 node:ID / activity:ID",
+                "type": "string"
+              },
+              "view": {
+                "enum": [
+                  "detail",
+                  "output",
+                  "members",
+                  "parents"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref"
+            ],
+            "type": "object"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "type": "array"
+        },
+        "max_chars": {
+          "default": 8000,
+          "maximum": 24000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "task_id": {
+          "description": "仅跨任务授权角色可指定",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "agents": [
+      "mainagent",
+      "planner",
+      "worker",
+      "auto",
+      "pentest"
+    ],
+    "description": "检索当前角色可见资产摘要。dsl 支持 domain/ip/url/port/technology 等字段、AND/OR、=模糊、==精确。untested 查询任务覆盖范围内未测试资产；详情用 asset_get。",
+    "key": "asset_search",
+    "schema": {
+      "properties": {
+        "dsl": {
+          "description": "筛选表达式，如 port==443 AND technology=nginx",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "description": "next_offset 续页",
+          "type": "integer"
+        },
+        "type": {
+          "description": "资产类型",
+          "type": "string"
+        },
+        "untested": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "agents": [
+      "mainagent",
+      "planner",
+      "worker",
+      "auto",
+      "pentest"
+    ],
+    "description": "读取1..5个资产。默认身份与指纹；auth 凭证须显式选择。支持字段及连续分页。",
+    "key": "asset_get",
+    "schema": {
+      "properties": {
+        "field": {
+          "description": "JSON Pointer",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "enum": [
+              "identity",
+              "fingerprint",
+              "dns",
+              "params",
+              "auth",
+              "extra"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ids": {
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "type": "array"
+        },
+        "index": {
+          "description": "集合续页",
+          "type": "integer"
+        },
+        "max_chars": {
+          "default": 8000,
+          "maximum": 24000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "description": "文本续读",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "agents": [
+      "worker",
+      "reporter"
+    ],
+    "description": "按指定主机检索已捕获流量，支持URL、正文、方法、状态码和时间过滤。只返回元数据，需 traffic_get 核实证据。正文索引最多4MiB/侧且排除二进制；无结果不代表完整报文中不存在。默认3条、最多10条，next_cursor续页。",
+    "key": "traffic_search",
+    "schema": {
+      "properties": {
+        "body_contains": {
+          "description": "正文关键词，至少3字符",
+          "type": "string"
+        },
+        "contains": {
+          "description": "URL字面子串",
+          "type": "string"
+        },
+        "cursor": {
+          "description": "原条件下的 next_cursor",
+          "type": "string"
+        },
+        "host": {
+          "description": "主机、主机:端口或URL",
+          "type": "string"
+        },
+        "limit": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "method": {
+          "description": "HTTP方法",
+          "type": "string"
+        },
+        "since": {
+          "description": "起始Unix时间",
+          "type": "integer"
+        },
+        "status": {
+          "description": "HTTP状态码",
+          "type": "integer"
+        },
+        "until": {
+          "description": "结束Unix时间",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "agents": [
+      "worker",
+      "reporter"
+    ],
+    "description": "读取流量的请求/响应头与正文。默认有界预览；用 part、next_offset 续读，Blob 由服务端解析。offset/max_bytes 按字节计。",
+    "key": "traffic_get",
+    "schema": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "max_bytes": {
+          "default": 8192,
+          "maximum": 8192,
+          "minimum": 4,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "part": {
+          "enum": [
+            "request_headers",
+            "request_body",
+            "response_headers",
+            "response_body"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  }
+]

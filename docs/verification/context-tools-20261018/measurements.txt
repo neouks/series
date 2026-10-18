@@ -1,0 +1,78 @@
+series-context-surface-complete-before.log
+=== RUN   TestDefaultContextSurfaceMetrics
+    context_surface_metrics_test.go:101: role=goals catalog=2 all_schema_bytes=2133 initial_schema_and_deferred_names_bytes=2133 deferred=0
+    context_surface_metrics_test.go:101: role=planner catalog=24 all_schema_bytes=21157 initial_schema_and_deferred_names_bytes=21157 deferred=0
+    context_surface_metrics_test.go:101: role=mainagent catalog=32 all_schema_bytes=37961 initial_schema_and_deferred_names_bytes=37961 deferred=0
+    context_surface_metrics_test.go:101: role=worker catalog=20 all_schema_bytes=26253 initial_schema_and_deferred_names_bytes=26253 deferred=0
+    context_surface_metrics_test.go:101: role=auto catalog=34 all_schema_bytes=35732 initial_schema_and_deferred_names_bytes=35732 deferred=0
+    context_surface_metrics_test.go:101: role=pentest catalog=15 all_schema_bytes=18838 initial_schema_and_deferred_names_bytes=18838 deferred=0
+    context_surface_metrics_test.go:101: role=reporter catalog=21 all_schema_bytes=16477 initial_schema_and_deferred_names_bytes=16477 deferred=0
+--- PASS: TestDefaultContextSurfaceMetrics (0.00s)
+PASS
+ok  	github.com/neouks/series/server	0.048s
+
+
+series-context-surface-complete-after.log
+=== RUN   TestDefaultContextSurfaceMetrics
+    context_surface_metrics_test.go:102: role=goals catalog=2 all_schema_bytes=2133 initial_schema_and_deferred_names_bytes=2133 deferred=0
+    context_surface_metrics_test.go:102: role=planner catalog=18 all_schema_bytes=15611 initial_schema_and_deferred_names_bytes=15611 deferred=0
+    context_surface_metrics_test.go:102: role=mainagent catalog=27 all_schema_bytes=32608 initial_schema_and_deferred_names_bytes=32608 deferred=0
+    context_surface_metrics_test.go:102: role=worker catalog=18 all_schema_bytes=22530 initial_schema_and_deferred_names_bytes=22530 deferred=0
+    context_surface_metrics_test.go:102: role=auto catalog=32 all_schema_bytes=31901 initial_schema_and_deferred_names_bytes=26650 deferred=7
+    context_surface_metrics_test.go:102: role=pentest catalog=17 all_schema_bytes=18082 initial_schema_and_deferred_names_bytes=18082 deferred=0
+    context_surface_metrics_test.go:102: role=reporter catalog=17 all_schema_bytes=12957 initial_schema_and_deferred_names_bytes=12957 deferred=0
+--- PASS: TestDefaultContextSurfaceMetrics (0.00s)
+PASS
+ok  	github.com/neouks/series/server	0.052s
+
+
+series-context-prompts-before.log
+=== RUN   TestContextPromptMetrics
+    context_prompt_measurement_test.go:3: role=auto code_prompt_bytes=1064 sha256=b2a71b82243607337b19f0642317fed88c144d536412d80eaaf90807f2905a1d
+    context_prompt_measurement_test.go:3: role=goals code_prompt_bytes=2208 sha256=72a7a0159443b41dde29dfba8a3de6a2c8a15b273935495a7b88561fa708aa68
+    context_prompt_measurement_test.go:3: role=mainagent code_prompt_bytes=2419 sha256=12bb69ee0886c4fb9beb936d882021a91104860f1da69a5e3eda3d9e345cd399
+    context_prompt_measurement_test.go:3: role=pentest code_prompt_bytes=6943 sha256=2444f4e8157ef93a7c6b900b062caf79bd2a90d49fda2566c10b8b3fb24fd43f
+    context_prompt_measurement_test.go:3: role=planner code_prompt_bytes=9793 sha256=d64b844d07b8dd6edd8c70e66a76369a7b977278dce571618c54a6ea2c815972
+    context_prompt_measurement_test.go:3: role=reporter code_prompt_bytes=3595 sha256=8803227805c947bef6bdb761ed5d60539645940f8af2a91348902ad476f944a1
+    context_prompt_measurement_test.go:3: role=worker code_prompt_bytes=3341 sha256=9cfe2314eccfa52e3e1fb5fb10f952e7a06a17e6f7fad3506e5b070d5569330d
+--- PASS: TestContextPromptMetrics (0.00s)
+PASS
+ok  	github.com/neouks/series/agent	0.019s
+
+
+series-context-prompts-final.log
+=== RUN   TestContextPromptMetrics
+    context_prompt_measurement_test.go:19: role=auto code_prompt_bytes=1053 sha256=8eec58f253f03172b8e48db159ec8a1cb5b001ee0e6f929f56782b239f3fa5d8
+    context_prompt_measurement_test.go:19: role=goals code_prompt_bytes=2208 sha256=72a7a0159443b41dde29dfba8a3de6a2c8a15b273935495a7b88561fa708aa68
+    context_prompt_measurement_test.go:19: role=mainagent code_prompt_bytes=2430 sha256=09742a82b10a359d9fe681abf4bb45fc671b6a3dd640efcf14a15b0315e30217
+    context_prompt_measurement_test.go:19: role=pentest code_prompt_bytes=6907 sha256=6748a1c27d106679a2162985946d5813b3dfbf6a998736076723a555ce099aa7
+    context_prompt_measurement_test.go:19: role=planner code_prompt_bytes=9716 sha256=c549a5b26d070ccb6a4c2face9fc794a3d94cac0f2366088b0780c11adce28af
+    context_prompt_measurement_test.go:19: role=reporter code_prompt_bytes=3646 sha256=d95a892584a10ac8afb2434714601caa346e158f839785ff132d5424028fd628
+    context_prompt_measurement_test.go:19: role=worker code_prompt_bytes=3341 sha256=9cfe2314eccfa52e3e1fb5fb10f952e7a06a17e6f7fad3506e5b070d5569330d
+--- PASS: TestContextPromptMetrics (0.00s)
+PASS
+ok  	github.com/neouks/series/agent	0.019s
+
+
+series-context-metrics-fresh-before.log
+=== RUN   TestContextScenarioMetrics
+    context_performance_test.go:36: nodes=10 role=planner initial_context_bytes=851 sql_queries=16.0 elapsed_avg=24.312624ms allocated_avg=673016B
+    context_performance_test.go:36: nodes=10 role=worker initial_context_bytes=851 sql_queries=16.0 elapsed_avg=15.630883ms allocated_avg=649192B
+    context_performance_test.go:36: nodes=1000 role=planner initial_context_bytes=1458 sql_queries=16.0 elapsed_avg=238.677099ms allocated_avg=56458152B
+    context_performance_test.go:36: nodes=1000 role=worker initial_context_bytes=1458 sql_queries=16.0 elapsed_avg=229.488808ms allocated_avg=56457182B
+--- PASS: TestContextScenarioMetrics (4.10s)
+PASS
+ok  	github.com/neouks/series/agent	4.131s
+
+
+series-context-metrics-fresh-after.log
+=== RUN   TestContextScenarioMetrics
+    context_performance_test.go:84: nodes=10 role=planner initial_context_bytes=851 sql_queries=12.0 elapsed_avg=17.119108ms allocated_avg=78243B
+    context_performance_test.go:84: nodes=10 role=worker initial_context_bytes=347 sql_queries=1.0 elapsed_avg=2.753958ms allocated_avg=15872B
+    context_performance_test.go:109: nodes=10 scenario=body_search_and_read tool_calls=2 sql_queries=2 response_bytes=21732 elapsed=14.685375ms allocated=295024B
+    context_performance_test.go:84: nodes=1000 role=planner initial_context_bytes=1440 sql_queries=12.0 elapsed_avg=20.190191ms allocated_avg=97568B
+    context_performance_test.go:84: nodes=1000 role=worker initial_context_bytes=353 sql_queries=1.0 elapsed_avg=2.987991ms allocated_avg=12361B
+    context_performance_test.go:109: nodes=1000 scenario=body_search_and_read tool_calls=2 sql_queries=2 response_bytes=21930 elapsed=292.759416ms allocated=263392B
+--- PASS: TestContextScenarioMetrics (1.93s)
+PASS
+ok  	github.com/neouks/series/agent	1.967s

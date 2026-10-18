@@ -1,0 +1,6 @@
+    context_performance_test.go:84: nodes=10 role=planner initial_context_bytes=888 sql_queries=12.0 elapsed_avg=10.614475ms allocated_avg=78752B
+    context_performance_test.go:84: nodes=10 role=worker initial_context_bytes=365 sql_queries=1.0 elapsed_avg=1.89175ms allocated_avg=19820B
+    context_performance_test.go:109: nodes=10 scenario=body_search_and_read tool_calls=2 sql_queries=2 response_bytes=21827 elapsed=10.604792ms allocated=336352B
+    context_performance_test.go:84: nodes=1000 role=planner initial_context_bytes=1448 sql_queries=12.0 elapsed_avg=8.699666ms allocated_avg=95174B
+    context_performance_test.go:84: nodes=1000 role=worker initial_context_bytes=365 sql_queries=1.0 elapsed_avg=1.787425ms allocated_avg=16608B
+    context_performance_test.go:109: nodes=1000 scenario=body_search_and_read tool_calls=2 sql_queries=2 response_bytes=21930 elapsed=297.606042ms allocated=300048B

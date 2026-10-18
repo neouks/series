@@ -1,0 +1,11 @@
+=== RUN   TestDefaultContextSurfaceMetrics
+    context_surface_metrics_test.go:102: role=goals catalog=2 all_schema_bytes=2133 initial_schema_and_deferred_names_bytes=2133 deferred=0
+    context_surface_metrics_test.go:102: role=planner catalog=18 all_schema_bytes=15645 initial_schema_and_deferred_names_bytes=15645 deferred=0
+    context_surface_metrics_test.go:102: role=mainagent catalog=27 all_schema_bytes=32642 initial_schema_and_deferred_names_bytes=32642 deferred=0
+    context_surface_metrics_test.go:102: role=worker catalog=18 all_schema_bytes=22564 initial_schema_and_deferred_names_bytes=22564 deferred=0
+    context_surface_metrics_test.go:102: role=auto catalog=32 all_schema_bytes=31935 initial_schema_and_deferred_names_bytes=26684 deferred=7
+    context_surface_metrics_test.go:102: role=pentest catalog=17 all_schema_bytes=18116 initial_schema_and_deferred_names_bytes=18116 deferred=0
+    context_surface_metrics_test.go:102: role=reporter catalog=17 all_schema_bytes=12991 initial_schema_and_deferred_names_bytes=12991 deferred=0
+--- PASS: TestDefaultContextSurfaceMetrics (0.00s)
+PASS
+ok  	github.com/neouks/series/server	0.054s
