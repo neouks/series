@@ -39,7 +39,6 @@ type Planner struct {
 	nonStreamingFn    func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
-	shellProfile      actool.ShellProfile
 	compactor         *Compactor // cold-node compaction (§7); nil = disabled
 
 	// todos keeps ONE plan-scratchpad per task (keyed by exploration id) so the
@@ -94,7 +93,6 @@ func (p *Planner) compactionWindow() int {
 // it trusts to verify HTTPS through it (empty addr = direct).
 func (p *Planner) SetProxy(addr, caCert string) { p.proxyAddr, p.proxyCACert = addr, caCert }
 
-func (p *Planner) SetShellProfile(profile actool.ShellProfile) { p.shellProfile = profile }
 
 // SetWebSearch selects the web_search backend for the planner (off by default).
 func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
@@ -389,11 +387,10 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	// Resolve the run directory before tool assembly so Bash describes the same
 	// path mapping that the executor uses.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
-	runProfile := shellProfileFor(p.shellProfile, taskDir)
 	// Planner 只保留开局极轻量探测需要的 Bash；文件编辑、目录遍历与 Sleep 都不属于
 	// 规划职责，避免它们的 schema 在每次 completion 中反复占用输入。
 	// 资产覆盖度关闭时移除 add_task_scope，保留普通资产检索。
-	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.NewBashWithProfile(runProfile))
+	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.NewBash())
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "planner"})
 	ctx = WithTaskToolSet(ctx, tsx)
 	tools, def, cleanup, err := AugmentTools(ctx, "planner", base)
@@ -477,7 +474,6 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		UnlockSet:              def.Unlock,
 		PermissionMode:         permission.ModeBypass,
 		DisableBackgroundTasks: true,
-		EnableTaskManager:      toolsNeedTaskManager(tools),
 		EnableWebFetch:         true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
 		WebFetchProxy:          runProxyAddr,
 		WebFetchCACert:         p.proxyCACert,
@@ -489,7 +485,6 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		TavilySearchAPIKey:    p.webSearch.TavilyKey,
 		WebSearchProxy:        p.webSearch.Proxy,
 		BashEnv:               proxyEnv(runProxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		ShellProfile:          runProfile,
 		WorkingDir:            taskDir, // 本任务工作目录 <workDir>/tasks/<taskID>
 		ToolOutputDir:         cmdOutDir(taskDir),
 		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)

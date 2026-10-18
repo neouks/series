@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -423,15 +422,6 @@ func (s *Server) webSearchFor(key string) agent.WebSearchOpts {
 	return o
 }
 
-func (s *Server) executionProfile() actool.ShellProfile {
-	p, err := s.m.ShellProfile()
-	if err != nil {
-		log.Printf("[shell] configured interpreter unavailable: %v", err)
-		return actool.ShellProfile{Mode: "unavailable", ShellPath: "__series_shell_unavailable__"}
-	}
-	return p
-}
-
 // buildPlannerWorker builds a planner+worker pair. Each agent resolves its OWN LLM by
 // precedence agent-binding → pin → the passed global fallback (gProv/gCfg), so planner
 // and worker can run on different models (e.g. a stronger planner, a cheaper worker).
@@ -440,7 +430,6 @@ func (s *Server) executionProfile() actool.ShellProfile {
 // provider behavior. Shared by applyLLM (global) and agentsForProfile (per-task pin).
 func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent.Config) (*agent.Planner, *agent.Worker) {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts")) // raw LLM conversation logs
-	shellProfile := s.executionProfile()
 	// traffic host tools flow through ToolAugment for every agent and are filtered by
 	// the tools-table binding (default = worker), so worker behavior is unchanged.
 	wProv, wCfg := s.providerForAgent("worker", pinID, gProv, gCfg)
@@ -449,7 +438,6 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
 	wk.SetTrafficRecording(s.m.TrafficEnabled())
-	wk.SetShellProfile(shellProfile)
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开;每轮读)
@@ -462,7 +450,6 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	pl.SetKillWork(s.engine.KillWork)                       // planner kill_work → terminate a running work
 	pl.SetSteerWork(s.engine.SteerWork)                     // planner steer_work → inject mid-run course-correction
 	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
-	pl.SetShellProfile(shellProfile)
 	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInject(s.constraintInjectPlanner) // 操作约束注入 planner(可配置,默认开;每轮读)
 	pl.SetNonStreaming(nonStreamingResolver(pCfg))    // 该 profile 选非流式时走 Provider.Complete
@@ -529,7 +516,6 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	win := cfg.CompactionWindow()
-	shellProfile := s.executionProfile()
 	// mainagent resolves its own binding (→ global fallback); chat stays the GLOBAL
 	// fallback since one ChatAgent serves many agent keys — its per-agent binding is
 	// resolved at Chat time (runConversationSync → chatAgentForProfile).
@@ -538,7 +524,6 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.mainAgent = agent.NewMainAgent(mProv, mCfg.Model, s.m.dir, tx, mCfg.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	s.mainAgent.SetFindingRecorder(s.evidenceStore())
 	s.mainAgent.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
-	s.mainAgent.SetShellProfile(shellProfile)
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))
 	s.mainAgent.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
 	s.mainAgent.SetNonStreaming(nonStreamingResolver(mCfg))
@@ -548,7 +533,6 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	// (backend/key) and gates Enabled per-conversation-agent at Chat time. 对话始终用激活配置。
 	s.chatAgent = agent.NewChatAgent(prov, cfg.Model, s.m.dir, tx, win) // chat page runner
 	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
-	s.chatAgent.SetShellProfile(shellProfile)
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
 	s.chatAgent.SetGuard(s.chatGuard())
 	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
@@ -733,7 +717,6 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	ca := agent.NewChatAgent(s.poolForBinding(id, prov, cfg), cfg.Model, s.m.dir, tx, cfg.CompactionWindow())
 	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
-	ca.SetShellProfile(s.executionProfile())
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
 	ca.SetNonStreaming(nonStreamingResolver(cfg))
@@ -3482,8 +3465,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"tavily_key_set":           strings.TrimSpace(tavilyKey) != "",
 		"web_search_proxy":         proxy,             // 独立出口代理(http/https/socks5)，空=直连
 		"global_proxy":             s.m.GlobalProxy(), // 全局出口代理(http/https/socks5)，所有目标流量走它，空=直连
-		"shell_mode":               s.m.ShellMode(),
-		"shell_detected":           shellProfilePayload(s.m.ShellProfile()),
+		"shell_detected":           shellDetectedPayload(),
 		"python_interpreter":       strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
 		"workers":                  s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
 		"task_concurrency_enabled": concOn,                      // 任务并发上限开关(默认关)
@@ -3498,20 +3480,6 @@ func (s *Server) settingsPayload() map[string]any {
 		// 实验功能:noa 模型驱动上下文压缩(默认关)。开启后平台接入的四类 agent 由 noa
 		// 接管上下文压缩,取代内置 compaction;每 run 读一次,对之后启动的 run 生效。
 		"noa_compaction": s.m.NoaCompactionEnabled(),
-	}
-}
-
-func shellProfilePayload(profile actool.ShellProfile, err error) map[string]any {
-	if err != nil {
-		return map[string]any{"ok": false, "os": runtime.GOOS, "interactive": runtime.GOOS != "windows", "error": err.Error()}
-	}
-	return map[string]any{
-		"ok":          true,
-		"os":          profile.OS,
-		"mode":        profile.Mode,
-		"path":        profile.ShellPath,
-		"path_style":  profile.PathStyle,
-		"interactive": profile.InteractiveSupported(),
 	}
 }
 
@@ -3543,15 +3511,15 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		LLMRecord            *bool   `json:"llm_record"`             // LLM 录制开关（默认关）；即时生效，无需重建 agent
 		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
 		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
-		WebSearchEnabled *bool   `json:"web_search_enabled"`
-		WebSearchBackend *string `json:"web_search_backend"`
-		BraveKey         *string `json:"brave_search_api_key"`
-		TavilyKey        *string `json:"tavily_search_api_key"`
-		WebSearchProxy   *string `json:"web_search_proxy"` // 独立出口代理(http/https/socks5)；null=不改，""=清空
-		GlobalProxy      *string `json:"global_proxy"`     // 全局出口代理(http/https/socks5)；null=不改，""=清空(直连)
-		ShellMode        *string `json:"shell_mode"`
-		PythonInterp     *string `json:"python_interpreter"` // 自定义脚本工具的 python 解释器路径
-		Workers          *int    `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
+		WebSearchEnabled *bool           `json:"web_search_enabled"`
+		WebSearchBackend *string         `json:"web_search_backend"`
+		BraveKey         *string         `json:"brave_search_api_key"`
+		TavilyKey        *string         `json:"tavily_search_api_key"`
+		WebSearchProxy   *string         `json:"web_search_proxy"` // 独立出口代理(http/https/socks5)；null=不改，""=清空
+		GlobalProxy      *string         `json:"global_proxy"`     // 全局出口代理(http/https/socks5)；null=不改，""=清空(直连)
+		ShellMode        json.RawMessage `json:"shell_mode"`
+		PythonInterp     *string         `json:"python_interpreter"` // 自定义脚本工具的 python 解释器路径
+		Workers          *int            `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
 		// 任务并发上限:同时「运行中」的任务数上限。关闭=不限;开启后新建任务超限则排队,有空位自动启动。
 		ConcurrencyEnabled *bool `json:"task_concurrency_enabled"`
 		ConcurrencyLimit   *int  `json:"task_concurrency_limit"`
@@ -3567,6 +3535,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if len(req.ShellMode) > 0 {
+		writeErr(w, 400, "shell_mode 已移除；命令执行使用官方 norma 的平台默认解释器")
 		return
 	}
 	if req.TrafficRetentionDays != nil && (*req.TrafficRetentionDays < 0 || *req.TrafficRetentionDays > 3650) {
@@ -3678,17 +3650,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		changed = true // capture-off egress is baked into agents at build time → rebuild
 	}
-	if req.ShellMode != nil {
-		if err := s.m.SetShellMode(*req.ShellMode); err != nil {
-			writeErr(w, 400, err.Error())
-			return
-		}
-		// Cached pinned/profile agents also carry a shell snapshot. Dropping the
-		// caches affects only subsequent runs; currently executing sessions retain
-		// their ToolContext and Manager profile.
-		s.invalidateProfileAgents()
-		changed = true
-	}
+
 	if req.WebSearchEnabled != nil || req.WebSearchBackend != nil || req.BraveKey != nil || req.TavilyKey != nil || req.WebSearchProxy != nil {
 		// Fill unspecified fields from current state so a partial PUT doesn't reset them.
 		on, backend, _, _, _ := s.m.WebSearch()

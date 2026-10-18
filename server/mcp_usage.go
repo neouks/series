@@ -35,3 +35,12 @@ func (m *meteredMCPTool) Call(ctx context.Context, input json.RawMessage, tc *ac
 	}
 	return m.CoreTool.Call(ctx, input, tc)
 }
+
+func (t *meteredMCPTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
+	return agent.PrepareToolInput(t.CoreTool, in)
+}
+
+func (t *meteredMCPTool) AcceptsRawInput() bool {
+	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && raw.AcceptsRawInput()
+}

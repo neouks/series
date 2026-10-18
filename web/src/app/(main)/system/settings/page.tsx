@@ -51,7 +51,6 @@ export default function SystemSettingsPage() {
   const [savingGlobalProxy, setSavingGlobalProxy] = React.useState(false);
   const [testingGlobalProxy, setTestingGlobalProxy] = React.useState(false);
   const [globalProxyProbe, setGlobalProxyProbe] = React.useState<GlobalProxyProbeResult | null>(null);
-  const [shellMode, setShellMode] = React.useState<NonNullable<Settings["shell_mode"]>>("auto");
   const [shellDetected, setShellDetected] = React.useState<Settings["shell_detected"]>(undefined);
   const [testing, setTesting] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
@@ -80,7 +79,6 @@ export default function SystemSettingsPage() {
     setTavilyKeySet(!!s.tavily_key_set);
     setProxyInput(s.web_search_proxy ?? "");
     setGlobalProxyInput(s.global_proxy ?? "");
-    setShellMode(s.shell_mode ?? "auto");
     setShellDetected(s.shell_detected);
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
@@ -293,23 +291,6 @@ export default function SystemSettingsPage() {
       .finally(() => setSavingGlobalProxy(false));
   };
 
-  const saveShellMode = (mode: string) => {
-    const previous = shellMode;
-    setShellMode(mode as NonNullable<Settings["shell_mode"]>);
-    setSaving(true);
-    api
-      .setSettings({ shell_mode: mode as Settings["shell_mode"] })
-      .then((s) => {
-        apply(s);
-        toast.success("已保存 Shell 配置（对新建运行生效）");
-      })
-      .catch((e) => {
-        setShellMode(previous);
-        toast.error(`Shell 配置保存失败：${(e as Error).message}`);
-      })
-      .finally(() => setSaving(false));
-  };
-
   const testGlobalProxy = () => {
     setTestingGlobalProxy(true);
     setGlobalProxyProbe(null);
@@ -467,34 +448,15 @@ export default function SystemSettingsPage() {
               命令执行 Shell
             </CardTitle>
             <CardDescription>
-              统一控制 Bash、后台任务和受支持平台上的交互会话。auto 会按当前平台探测；配置变更只影响新建运行。
+              使用官方 norma 的平台默认解释器：Windows 为 PowerShell，Linux / macOS 为 Bash。以下为只读检测信息。
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <FieldGroup className="gap-3">
-              <Field orientation="responsive">
-                <FieldLabel>执行模式</FieldLabel>
-                <Select value={shellMode} disabled={!loaded || saving} onValueChange={saveShellMode}>
-                  <SelectTrigger className="@md/field-group:w-52 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">自动探测</SelectItem>
-                    <SelectItem value="powershell">Windows PowerShell</SelectItem>
-                    <SelectItem value="pwsh">PowerShell 7 (pwsh)</SelectItem>
-                    <SelectItem value="gitbash">Git Bash</SelectItem>
-                    <SelectItem value="wsl">WSL</SelectItem>
-                    <SelectItem value="bash">Bash</SelectItem>
-                    <SelectItem value="cmd">cmd.exe</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <FieldDescription>
-                {shellDetected?.ok
-                  ? `当前解释器：${shellDetected.mode ?? "未知"}${shellDetected.path ? ` · ${shellDetected.path}` : ""} · 交互终端${shellDetected.interactive == null ? "状态未知" : shellDetected.interactive ? "可用" : "不可用"}`
-                  : `探测失败：${shellDetected?.error ?? "未知错误"}`}
-              </FieldDescription>
-            </FieldGroup>
+            <FieldDescription>
+              {shellDetected?.ok
+                ? `当前解释器：${shellDetected.mode ?? "未知"}${shellDetected.path ? ` · ${shellDetected.path}` : ""} · 交互终端${shellDetected.interactive == null ? "状态未知" : shellDetected.interactive ? "可用" : "不可用"}`
+                : `探测失败：${shellDetected?.error ?? "未知错误"}`}
+            </FieldDescription>
           </CardContent>
         </Card>
 

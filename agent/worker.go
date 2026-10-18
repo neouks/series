@@ -94,8 +94,7 @@ type Worker struct {
 	noaEnabledFn func() bool
 	// maxTokensFn resolves the per-reply output cap in tokens, on the same
 	// per-run basis. nil or 0 = send no cap and let the endpoint decide.
-	maxTokensFn  func() int
-	shellProfile actool.ShellProfile
+	maxTokensFn func() int
 }
 
 // WorkerSessionID returns the stable transcript key used by a worker intent.
@@ -210,8 +209,6 @@ func (w *Worker) SetProxy(addr, caCert string) {
 }
 
 func (w *Worker) SetTrafficRecording(enabled bool) { w.trafficRecording = enabled }
-
-func (w *Worker) SetShellProfile(profile actool.ShellProfile) { w.shellProfile = profile }
 
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
@@ -469,7 +466,6 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// Capture the run directory before tool assembly so Bash's model-facing
 	// prompt can use the shell-specific path (notably /mnt/c/... for WSL).
 	runDir := ensureRunDir(w.workDir, taskID, intent.ID)
-	runProfile := shellProfileFor(w.shellProfile, runDir)
 	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
 	// then augment with the agent's visible skills/MCP. During the SDK settlement
 	// phase, Bash is hidden and execution-gated via Settlement.DisabledTools.
@@ -477,7 +473,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	base := append(tsx.WorkerTools(), w.extraTools...)
 	// Worker 需要本地读写与 Bash，但不会派后台任务；Sleep 只为后台任务轮询服务，
 	// 不把它的 schema 重复发送给每一次 completion。
-	base = append(base, workerLocalTools(runProfile)...)
+	base = append(base, workerLocalTools()...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID, AgentKey: "worker"})
 	ctx = WithTaskToolSet(ctx, tsx)
 	tools, def, cleanup, err := AugmentTools(ctx, "worker", base)
@@ -574,7 +570,6 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		UnlockSet:              def.Unlock,
 		PermissionMode:         permission.ModeBypass,
 		DisableBackgroundTasks: true,
-		EnableTaskManager:      toolsNeedTaskManager(tools),
 		// WebFetch 走记录代理，其 HTTP 与 curl 一样被留痕；载入代理 CA 让经 MITM
 		// 重签的 HTTPS 证书能【正常校验通过】（而非关掉校验）。proxy 空则直连。
 		EnableWebFetch: true,
@@ -591,10 +586,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
 		WebSearchProxy:        w.webSearch.Proxy,
 		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:      proxyEnv(runProxyAddr, w.proxyCACert),
-		ShellProfile: runProfile,
-		WorkingDir:   runDir,
-		MaxTurns:     w.maxTurns, // 0 = unlimited (configurable in agent management)
+		BashEnv:    proxyEnv(runProxyAddr, w.proxyCACert),
+		WorkingDir: runDir,
+		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,
 		// 距 deadline 剩余),让本 run 在任务到点时自然进收尾(见 taskclock.go)。
 		MaxDuration: maxDur,
@@ -639,8 +633,11 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	noaSession := WorkerSessionID(ts.ID(), intent.ID)
 	enableNoa(&opts, w.noaEnabledFn, w.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
-	s := agentcore.NewSession(opts)
-	defer s.Close() // release the session's background-task manager (temp dir + processes)
+	s, closeSession, err := newSession(opts)
+	if err != nil {
+		return "", tsx.Writes(), err
+	}
+	defer closeSession() // release the session's background-task manager (temp dir + processes)
 
 	// Resume prior conversation if this intent was paused/blocked/exhausted and is
 	// being re-run. The transcript ID is deterministic per intent, so if a prior

@@ -22,7 +22,7 @@ func TestShellDetectionDoesNotExecute(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	command, e := shellDetectionCommand(bin, "", actool.ShellProfile{})
+	command, e := shellDetectionCommand(bin, "", "bash")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -39,7 +39,7 @@ func TestShellDetectionDoesNotExecute(t *testing.T) {
 	if e := os.WriteFile(local, []byte("#!/bin/sh\nexit 99\n"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	command, e = shellDetectionCommand("sh", dir, actool.ShellProfile{})
+	command, e = shellDetectionCommand("sh", dir, "bash")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -49,13 +49,13 @@ func TestShellDetectionDoesNotExecute(t *testing.T) {
 		t.Fatal(r, e)
 	}
 	os.Chmod(bin, 0600)
-	command, _ = shellDetectionCommand(bin, "", actool.ShellProfile{})
+	command, _ = shellDetectionCommand(bin, "", "bash")
 	raw, _ = json.Marshal(map[string]any{"command": command})
 	r, _ = actool.NewBash().Call(t.Context(), raw, nil)
 	if !r.IsError {
 		t.Fatal("non-executable accepted")
 	}
-	if _, e := shellDetectionCommand("nmap --version", "", actool.ShellProfile{}); e == nil {
+	if _, e := shellDetectionCommand("nmap --version", "", "bash"); e == nil {
 		t.Fatal("accepted arguments")
 	}
 }

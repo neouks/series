@@ -34,7 +34,6 @@ type MainAgent struct {
 	nonStreamingFn  func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn    func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn     func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
-	shellProfile    actool.ShellProfile
 }
 
 // SetNoaEnabled wires a resolver deciding whether runs use the experimental noa
@@ -75,8 +74,6 @@ func (m *MainAgent) compactionWindow() int {
 // SetProxy points the main agent's WebFetch at the recording proxy plus the CA
 // cert it trusts to verify HTTPS through it (empty addr = direct).
 func (m *MainAgent) SetProxy(addr, caCert string) { m.proxyAddr, m.proxyCACert = addr, caCert }
-
-func (m *MainAgent) SetShellProfile(profile actool.ShellProfile) { m.shellProfile = profile }
 
 // SetWebSearch selects the web_search backend for the main agent (off by default).
 func (m *MainAgent) SetWebSearch(o WebSearchOpts) { m.webSearch = o }
@@ -133,13 +130,12 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	tsx.SetNotifyHint(notifyHint) // add_hint 新增提示 → 给 planner 记一条「人新增了 N 条战略提示：…」触发
 	tsx.steerWork = m.steerWork   // enable steer_work tool (nil = unavailable)
 	mainDir := ensureRunDir(m.workDir, taskID, 0)
-	runProfile := shellProfileFor(m.shellProfile, mainDir)
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
 	// 资产覆盖度功能关闭时剔除 add_task_scope/asset_search（不入 prompt）。
 	ctx = WithMainDispatchSession(ctx, mainSeg)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "mainagent", Trigger: "human_message"})
 	tsx.enableMainExecution(ctx)
-	base := append(tsx.DropCoverageTools(tsx.MainAgentTools()), workerLocalTools(runProfile)...)
+	base := append(tsx.DropCoverageTools(tsx.MainAgentTools()), workerLocalTools()...)
 	ctx = WithTaskToolSet(ctx, tsx)
 	tools, def, cleanup, err := AugmentTools(ctx, "mainagent", base)
 	tools = tsx.StripCoverageParams(tools) // 覆盖度关闭时隐藏 insert_assets 的 related 入参
@@ -177,8 +173,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		TavilySearchAPIKey:    m.webSearch.TavilyKey,
 		WebSearchProxy:        m.webSearch.Proxy,
 		BashEnv:               proxyEnv(runProxyAddr, m.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		ShellProfile:          runProfile,
-		WorkingDir:            mainDir, // 本任务工作目录 <workDir>/tasks/<taskID>
+		WorkingDir:            mainDir,                               // 本任务工作目录 <workDir>/tasks/<taskID>
 		ToolOutputDir:         cmdOutDir(mainDir),
 		MaxTurns:              m.maxTurns,                             // 0 = unlimited (configurable in agent management)
 		Compaction:            compactionConfig(m.compactionWindow()), // long chats stay within the window
@@ -213,8 +208,11 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	}
 	enableNoa(&opts, m.noaEnabledFn, m.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
-	s := agentcore.NewSession(opts)
-	defer s.Close()
+	s, closeSession, err := newSession(opts)
+	if err != nil {
+		return "", err
+	}
+	defer closeSession()
 	// reload the prior conversation from the transcript so the agent has context
 	// across turns (each Chat is a fresh session; without this it can't see earlier
 	// messages). First turn: no file yet → Resume loads nothing and proceeds.

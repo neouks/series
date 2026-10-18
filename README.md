@@ -275,6 +275,8 @@ server {
 
 SERIES 是一套 **LLM 多 agent 驱动的自主渗透系统**：Go 单体后端（内嵌 Next.js 前端）+ PostgreSQL，agent 能力由 [`norma`](https://github.com/Autumn-27/norma) SDK 提供（`agentcore` / `tool` / `permission` / `harness` / `memory` / `transcript`）。核心是**双图架构**，以及围绕它的两条自主性机制：**worker 间过程级信息交换**与 **planner 多轮共享 todolist 稳定攻击链路**。
 
+SDK 固定使用官方提交 `bbbb4c607966`（Go 伪版本 `v0.4.5-0.20261017151310-bbbb4c607966`），没有本地源码替换。命令执行沿用官方默认解释器：Windows PowerShell、Linux/macOS Bash；系统配置仅展示检测结果。[迁移说明、行为差异与验证记录](docs/norma-official-20261018.md)。
+
 ### 总体分层
 
 ```mermaid

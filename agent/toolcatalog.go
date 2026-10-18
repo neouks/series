@@ -116,7 +116,7 @@ func DecorateTool(t actool.CoreTool, desc string, schema map[string]any) actool.
 	if t.Name() == "record_fact" && !strings.Contains(desc, factWriteContract) {
 		desc = factWriteContract + "\n" + desc
 	}
-	return &overriddenTool{CoreTool: t, desc: desc, schema: schema}
+	return &overriddenTool{CoreTool: t, desc: desc, schema: schema, validation: normalizeToolSchema(schema)}
 }
 
 // overriddenTool is a CoreTool decorator: it embeds the original (so all behavioral
@@ -124,21 +124,27 @@ func DecorateTool(t actool.CoreTool, desc string, schema map[string]any) actool.
 // and overrides only the model-facing description/schema plus default injection.
 type overriddenTool struct {
 	actool.CoreTool
-	desc   string
-	schema map[string]any
+	desc       string
+	schema     map[string]any
+	validation map[string]any
 }
 
 func (o *overriddenTool) Description() string         { return o.desc }
 func (o *overriddenTool) InputSchema() map[string]any { return o.schema }
 
-func (o *overriddenTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+// Defaults must be applied before approval, including required defaulted fields.
+// Validation remains mandatory in both the host hook and execution boundary.
+func (o *overriddenTool) AcceptsRawInput() bool { return true }
+
+func (o *overriddenTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
 	resolved := injectDefaults(in, o.schema)
-	if err := actool.ValidateInput(o.schema, resolved); err != nil {
+	return resolved, validateBusinessInput(o.validation, resolved)
+}
+
+func (o *overriddenTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+	resolved, err := o.PrepareInput(in)
+	if err != nil {
 		return actool.Errorf("参数错误: " + err.Error()), nil
 	}
 	return o.CoreTool.Call(ctx, resolved, tc)
-}
-
-func injectDefaults(in json.RawMessage, schema map[string]any) json.RawMessage {
-	return actool.ApplyInputDefaults(in, schema)
 }

@@ -217,6 +217,7 @@ build_target() {
   GOOS="$goos" \
   GOARCH="$goarch" \
   go build \
+    -mod=readonly \
     -tags embedui \
     -trimpath \
     -ldflags "-s -w -buildid= -X main.version=${SERIES_BUILD_VERSION}" \

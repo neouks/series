@@ -11,20 +11,18 @@ import (
 	"time"
 )
 
-func shellDetectionCommand(executable, directory string, profile actool.ShellProfile) (string, error) {
+func shellDetectionCommand(executable, directory string, mode string) (string, error) {
 	executable = strings.TrimSpace(executable)
 	if executable == "" || strings.ContainsAny(executable, "\x00\r\n") || (!filepath.IsAbs(executable) && strings.ContainsAny(executable, " /\\\t")) {
 		return "", fmt.Errorf("请填写命令名或绝对路径，不含参数")
 	}
-	quote := func(v string) string { return shellQuoteFor(profile, v) }
+	quote := func(v string) string { return shellQuoteFor(mode, v) }
 	candidate := executable
 	if !filepath.IsAbs(candidate) && strings.TrimSpace(directory) != "" {
 		candidate = filepath.Join(directory, candidate)
 	}
-	switch profile.Mode {
-	case "cmd":
-		return "", fmt.Errorf("可用性检测需 Bash 或 PowerShell 执行环境")
-	case "powershell", "pwsh":
+	switch mode {
+	case "powershell":
 		check := ""
 		if filepath.IsAbs(executable) || strings.TrimSpace(directory) != "" {
 			check = "if (Test-Path -LiteralPath " + quote(candidate) + " -PathType Leaf) { (Resolve-Path -LiteralPath " + quote(candidate) + ").Path; exit 0 }; "
@@ -46,7 +44,7 @@ func shellDetectionCommand(executable, directory string, profile actool.ShellPro
 
 }
 func (s *Server) testShellTool(w http.ResponseWriter, r *http.Request, req testToolReq) {
-	profile := s.executionProfile()
+	mode := defaultShellMode()
 	command := req.Command
 	switch req.Action {
 	case "check":
@@ -59,7 +57,7 @@ func (s *Server) testShellTool(w http.ResponseWriter, r *http.Request, req testT
 		if directory != "" && !filepath.IsAbs(directory) {
 			directory = filepath.Join(s.m.dir, directory)
 		}
-		command, err = shellDetectionCommand(executable, directory, profile)
+		command, err = shellDetectionCommand(executable, directory, mode)
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
@@ -80,13 +78,13 @@ func (s *Server) testShellTool(w http.ResponseWriter, r *http.Request, req testT
 		return
 	}
 	started := time.Now()
-	manager, err := actool.NewManagerWithProfile("tool-test-"+uuid.NewString(), profile)
+	manager, err := actool.NewManager("tool-test-" + uuid.NewString())
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
 	defer manager.Cleanup()
-	task, finished, output, err := manager.RunForeground(ctx, actool.SpawnSpec{Command: command, Kind: actool.KindBash, WorkingDir: s.m.dir, ShellProfile: profile}, time.Minute)
+	task, finished, output, err := manager.RunForeground(ctx, actool.SpawnSpec{Command: command, Kind: actool.KindBash, WorkingDir: s.m.dir}, time.Minute)
 	failed := err != nil || !finished
 	if task != nil {
 		info, _ := manager.Get(task.ID)

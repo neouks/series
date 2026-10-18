@@ -123,3 +123,12 @@ func migrateContextCatalog(pg *db.DB) error {
 	}
 	return nil
 }
+
+func (t *contextPolicyTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
+	return agent.PrepareToolInput(t.CoreTool, in)
+}
+
+func (t *contextPolicyTool) AcceptsRawInput() bool {
+	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && raw.AcceptsRawInput()
+}

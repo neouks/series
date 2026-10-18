@@ -115,6 +115,15 @@ func guardPanic(t actool.CoreTool) actool.CoreTool { return &guardedTool{CoreToo
 
 type guardedTool struct{ actool.CoreTool }
 
+func (g *guardedTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
+	return PrepareToolInput(g.CoreTool, in)
+}
+
+func (g *guardedTool) AcceptsRawInput() bool {
+	t, ok := g.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && t.AcceptsRawInput()
+}
+
 func (g *guardedTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (res actool.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {

@@ -200,3 +200,12 @@ func (m *shellMeteredTool) Call(ctx context.Context, in json.RawMessage, tc *act
 	}
 	return m.CoreTool.Call(ctx, in, tc)
 }
+
+func (t *shellMeteredTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
+	return agent.PrepareToolInput(t.CoreTool, in)
+}
+
+func (t *shellMeteredTool) AcceptsRawInput() bool {
+	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && raw.AcceptsRawInput()
+}

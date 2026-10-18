@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/norma/llm"
-	actool "github.com/Autumn-27/norma/tool"
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
 )
@@ -227,7 +226,7 @@ func TestTargetAccessUnavailableAndCap(t *testing.T) {
 		t.Fatal("status accumulated")
 	}
 	tool := NewToolSet(nil, "planner").checkTargetAccess()
-	if err := actool.ValidateInput(tool.InputSchema(), json.RawMessage(`{"asset_ids":[-1]}`)); err == nil {
+	if err := validateBusinessInput(normalizeToolSchema(tool.InputSchema()), json.RawMessage(`{"asset_ids":[-1]}`)); err == nil {
 		t.Fatal("schema accepted invalid ID")
 	}
 }

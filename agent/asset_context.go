@@ -215,6 +215,7 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 	ri := RunInfoFrom(ctx)
 	main := ri.AgentKey == "mainagent" && ri.TaskID == p.taskID && p.taskID > 0 && ri.IntentID == 0
 	worker := ri.AgentKey == "worker" && ri.TaskID == p.taskID && ri.IntentID > 0
+	req = redactUnverifiableStructuredHistory(req)
 	req = deduplicateToolHistory(req)
 	var refreshErr error
 	var accessSnapshot *targetAccessSnapshot

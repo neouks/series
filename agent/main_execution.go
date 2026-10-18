@@ -58,3 +58,12 @@ func (tool mainRoleTool) Call(ctx context.Context, raw json.RawMessage, tc *acto
 	}
 	return tool.CoreTool.Call(ctx, raw, tc)
 }
+
+func (t mainRoleTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
+	return PrepareToolInput(t.CoreTool, in)
+}
+
+func (t mainRoleTool) AcceptsRawInput() bool {
+	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && raw.AcceptsRawInput()
+}

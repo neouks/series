@@ -191,9 +191,7 @@ func TestCustomToolDirectAndDeferredUsage(t *testing.T) {
 		reg := actool.NewRegistry(resolved[0])
 		extra := actool.NewExecuteExtraTool(reg, nil)
 		raw, _ := json.Marshal(map[string]any{"tool_name": key, "params": map[string]any{}})
-		result, err := extra.Call(t.Context(), raw, &actool.ToolContext{ExecuteTool: func(ctx context.Context, name string, input json.RawMessage) (actool.Result, error) {
-			return resolved[0].Call(ctx, input, nil)
-		}})
+		result, err := extra.Call(t.Context(), raw, &actool.ToolContext{ToolUseID: "deferred-usage"})
 		if err != nil || result.IsError {
 			t.Fatal(result, err)
 		}
@@ -201,8 +199,9 @@ func TestCustomToolDirectAndDeferredUsage(t *testing.T) {
 		if err != nil || counts[key] != 2 || calls != 2 {
 			t.Fatal(counts[key], calls, err)
 		}
-		// Missing policy dispatcher must not reach the metered inner tool.
-		extra.Call(t.Context(), raw, nil)
+		// Official unlock gate must not reach the metered inner tool.
+		locked := actool.NewExecuteExtraTool(reg, actool.NewUnlockSet())
+		locked.Call(t.Context(), raw, nil)
 		counts, _ = s.m.pg.ToolUsageCounts()
 		if counts[key] != 2 {
 			t.Fatal("denied deferred call counted")

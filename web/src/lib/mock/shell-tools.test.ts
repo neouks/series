@@ -3,6 +3,17 @@ import test from "node:test";
 import { mockHandle } from "./handler";
 import type { Tool } from "../types";
 
+test("Shell interpreter is read-only and legacy writes fail before saving", async () => {
+  const settings = await mockHandle<Record<string, unknown>>("GET", "/settings");
+  assert.equal(Object.hasOwn(settings, "shell_mode"), false);
+  const proxy = settings.global_proxy;
+  for (const shell_mode of ["cmd", null, 42]) {
+    await assert.rejects(mockHandle("PUT", "/settings", JSON.stringify({ shell_mode, global_proxy: "invalid" })), /shell_mode/);
+    assert.equal((await mockHandle<Record<string, unknown>>("GET", "/settings")).global_proxy, proxy);
+  }
+  assert.equal((settings.shell_detected as { mode: string }).mode, "bash");
+});
+
 test("shell editor metadata roundtrips and testing does not increment usage", async () => {
   const key = "shell_probe_test";
   await mockHandle(

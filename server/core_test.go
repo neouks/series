@@ -28,6 +28,15 @@ func TestCoreTaskLifecyclePG(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s := New(ctx, m, td, td, td)
+	defer func() {
+		// New restores other admitted test tasks too. Drain all of this server's
+		// runtimes before its temporary transcript directory/database is removed.
+		cancel()
+		for _, task := range m.List() {
+			s.engine.StopTask(task.ID)
+		}
+		s.archiveWG.Wait()
+	}()
 	// This tests HTTP/PG lifecycle, not a real provider's retry latency. Keep
 	// goal decomposition deterministic and local even when another test seeded
 	// an active model profile. Empty decomposition exercises the real fallback.

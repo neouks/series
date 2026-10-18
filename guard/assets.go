@@ -89,6 +89,18 @@ type assetPolicyHooks struct {
 }
 
 func (h assetPolicyHooks) PreToolUse(ctx context.Context, name string, input []byte) (bool, string, []byte) {
+	if reason := h.RecheckToolInput(ctx, name, input); reason != "" {
+		return true, reason, nil
+	}
+	if h.inner != nil {
+		return h.inner.PreToolUse(ctx, name, input)
+	}
+	return false, "", nil
+}
+
+// RecheckToolInput validates hook-rewritten arguments without running action
+// approval a second time. The original call still has exactly one approval.
+func (h assetPolicyHooks) RecheckToolInput(ctx context.Context, name string, input []byte) string {
 	h.policy.Scope = AssetSkipScope(ctx)
 	ri := llmrec.RunInfoFrom(ctx)
 	if ri.TaskID != h.policy.TaskID || (ri.AgentKey != "mainagent" && ri.AgentKey != "planner" && !(ri.AgentKey == "worker" && ri.IntentID > 0)) {
@@ -98,12 +110,9 @@ func (h assetPolicyHooks) PreToolUse(ctx context.Context, name string, input []b
 		if h.audit != nil && audit {
 			h.audit.record(name, "block", reason, assetPolicyAuditSubject(name, input))
 		}
-		return true, reason, nil
+		return reason
 	}
-	if h.inner != nil {
-		return h.inner.PreToolUse(ctx, name, input)
-	}
-	return false, "", nil
+	return ""
 }
 func (h assetPolicyHooks) PostToolUse(ctx context.Context, name string, input, result []byte, isErr bool) {
 	if h.inner != nil {

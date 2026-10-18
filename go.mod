@@ -3,7 +3,7 @@ module github.com/neouks/series
 go 1.26.3
 
 require (
-	github.com/Autumn-27/norma v0.4.3
+	github.com/Autumn-27/norma v0.4.5-0.20261017151310-bbbb4c607966
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -17,8 +17,6 @@ require (
 	modernc.org/sqlite v1.52.0
 	mvdan.cc/sh/v3 v3.12.0
 )
-
-replace github.com/Autumn-27/norma => ./third_party/norma
 
 require (
 	github.com/andybalholm/brotli v1.2.1 // indirect
@@ -34,7 +32,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

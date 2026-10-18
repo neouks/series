@@ -72,3 +72,12 @@ func (t submissionTool) Call(ctx context.Context, in json.RawMessage, tc *actool
 		return t.CoreTool.Call(context.WithValue(locked, intentSubmissionLockedKey{}, true), in, tc)
 	})
 }
+
+func (t submissionTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
+	return PrepareToolInput(t.CoreTool, in)
+}
+
+func (t submissionTool) AcceptsRawInput() bool {
+	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && raw.AcceptsRawInput()
+}

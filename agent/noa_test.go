@@ -113,18 +113,25 @@ func TestNoaViewRefreshesTaskAssetAuthorization(t *testing.T) {
 	}
 }
 
+// Upstream's pacing floor is 50k. Use its pressure threshold to verify that
+// SERIES forwards the model window; don't assert the removed local SDK pacing.
 func TestNoaUsesConfiguredModelWindow(t *testing.T) {
-	opts := agentcore.Options{Compaction: &compaction.Config{ContextWindow: 40000}}
-	enableNoa(&opts, func() bool { return true }, t.TempDir(), "small-window", nil)
 	var history []llm.Message
 	for i := 0; i < 20; i++ {
-		history = append(history, llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.TextBlock(fmt.Sprintf("message %d: %s", i, strings.Repeat("history ", 625)))}})
+		history = append(history, llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.TextBlock(fmt.Sprintf("message %d: %s", i, strings.Repeat("history ", 1000)))}})
 	}
-	view := opts.Compactor.(harness.ContextView).View(t.Context(), history)
-	for _, m := range view {
-		if strings.Contains(m.Text(), "HOW TO COMPRESS") {
-			return
+	for _, window := range []int{40000, 200000} {
+		opts := agentcore.Options{Compaction: &compaction.Config{ContextWindow: window}}
+		enableNoa(&opts, func() bool { return true }, t.TempDir(), "window", nil)
+		view := opts.Compactor.(harness.ContextView).View(t.Context(), history)
+		nudged := false
+		for _, m := range view {
+			if strings.Contains(m.Text(), "HOW TO COMPRESS") {
+				nudged = true
+			}
+		}
+		if nudged != (window == 40000) {
+			t.Fatalf("window=%d nudged=%v", window, nudged)
 		}
 	}
-	t.Fatal("40k window did not request compression; noa may still be using its 200k fallback")
 }

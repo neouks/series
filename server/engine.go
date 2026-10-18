@@ -598,6 +598,15 @@ func (h steerHooks) PostToolUse(ctx context.Context, name string, input, result 
 	}
 }
 
+func (h steerHooks) RecheckToolInput(ctx context.Context, name string, input []byte) string {
+	if policy, ok := h.inner.(interface {
+		RecheckToolInput(context.Context, string, []byte) string
+	}); ok {
+		return policy.RecheckToolInput(ctx, name, input)
+	}
+	return ""
+}
+
 // Stop 在 guard 原有语义之上补一层「空转回合」续跑:模型只输出了思考、既没给正文
 // 也没调工具时，harness 会把它当成自然结束并以空 summary 收场(query.go 的
 // ReasonCompleted + asst.Text())，一条本来还没做完的意图就这样断在半路。此时注入

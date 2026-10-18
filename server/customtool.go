@@ -14,8 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -186,7 +184,7 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	tc := &actool.ToolContext{WorkingDir: s.m.dir, ShellProfile: s.executionProfile()} // run in the project dir, like a real call
+	tc := &actool.ToolContext{WorkingDir: s.m.dir} // run in the project dir, like a real call
 	var res actool.Result
 	switch req.Kind {
 	case "command":
@@ -363,24 +361,9 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 	if strings.TrimSpace(spec.Command) == "" {
 		return actool.Errorf("command 为空"), nil
 	}
-	profile := shellProfileForToolContext(tc)
-	cmd, paramEnv := renderCommandTemplate(spec.Command, params, profile)
+	cmd := renderCommandTemplate(spec.Command, params, defaultShellMode())
 	if reason := s.customToolAssetPolicy(ctx, "custom_command", map[string]any{"command": cmd, "params": params}); reason != "" {
 		return actool.Errorf(reason), nil
-	}
-	if profile.Mode == "cmd" {
-		// cmd expands %VAR% before it understands quoting. Inject template values
-		// during delayed expansion instead, after metacharacters have been parsed.
-		profile.Args = cmdDelayedExpansionArgs(profile.Args)
-		if tc == nil {
-			tc = &actool.ToolContext{}
-		} else {
-			copy := *tc
-			copy.Env = append([]string(nil), tc.Env...)
-			tc = &copy
-		}
-		tc.ShellProfile = profile
-		tc.Env = append(tc.Env, paramEnv...)
 	}
 	// 复用 Bash 也在用的底层 run(经 Bash CoreTool.Call):自动继承安全 floor/超时/
 	// 代理 env/输出溢出。工具与 Bash 平级、共用底层,不经过 Bash 这个工具让模型调。
@@ -390,7 +373,7 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 		ctx, cancel = context.WithTimeout(ctx, timeoutOr(spec.TimeoutMs, 120000))
 		defer cancel()
 	}
-	return actool.NewBashWithProfile(profile).Call(ctx, bashIn, tc)
+	return actool.NewBash().Call(ctx, bashIn, tc)
 }
 
 // ---------- script(仅 Python):临时文件 + stdin JSON + env ----------
@@ -584,81 +567,15 @@ func identity(s string) string { return s }
 // shellQuote single-quotes a value for safe shell interpolation.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-func shellQuoteFor(profile actool.ShellProfile, s string) string {
-	if profile.Mode == "" && runtime.GOOS == "windows" {
-		profile.Mode = "powershell"
+func shellQuoteFor(mode, value string) string {
+	if mode == "powershell" {
+		return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 	}
-	switch profile.Mode {
-	case "powershell", "pwsh":
-		return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-	case "cmd":
-		return `"` + cmdQuoteContent(s) + `"`
-	default:
-		return shellQuote(s)
-	}
+	return shellQuote(value)
 }
 
-func renderCommandTemplate(tmpl string, params map[string]any, profile actool.ShellProfile) (string, []string) {
-	if profile.Mode != "cmd" {
-		return renderTemplate(tmpl, params, func(v string) string { return shellQuoteFor(profile, v) }), nil
-	}
-	keys := make([]string, 0, len(params))
-	for key := range params {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := tmpl
-	env := make([]string, 0, len(keys))
-	for i, key := range keys {
-		name := fmt.Sprintf("SERIES_TOOL_PARAM_%d", i)
-		out = strings.ReplaceAll(out, "{"+key+"}", `"!`+name+`!"`)
-		env = append(env, name+"="+cmdQuoteContent(valToStr(params[key])))
-	}
-	return out, env
-}
-
-// cmdQuoteContent applies the CommandLineToArgvW/CRT quoting convention to
-// content placed between a surrounding pair of double quotes. Delayed cmd
-// expansion keeps %, ! and command metacharacters in the value from becoming
-// part of cmd's command structure.
-func cmdQuoteContent(s string) string {
-	var out strings.Builder
-	backslashes := 0
-	for _, r := range s {
-		if r == '\\' {
-			backslashes++
-			continue
-		}
-		if r == '"' {
-			out.WriteString(strings.Repeat(`\`, backslashes*2+1))
-			out.WriteRune(r)
-		} else {
-			out.WriteString(strings.Repeat(`\`, backslashes))
-			out.WriteRune(r)
-		}
-		backslashes = 0
-	}
-	// The closing quote follows this content, so trailing slashes must be doubled.
-	out.WriteString(strings.Repeat(`\`, backslashes*2))
-	return out.String()
-}
-
-func cmdDelayedExpansionArgs(args []string) []string {
-	out := append([]string(nil), args...)
-	for i, arg := range out {
-		if strings.HasPrefix(strings.ToUpper(arg), "/V:") {
-			out[i] = "/V:ON"
-			return out
-		}
-	}
-	return append([]string{"/V:ON"}, out...)
-}
-
-func shellProfileForToolContext(tc *actool.ToolContext) actool.ShellProfile {
-	if tc == nil {
-		return actool.ShellProfile{}
-	}
-	return tc.ShellProfile
+func renderCommandTemplate(tmpl string, params map[string]any, mode string) string {
+	return renderTemplate(tmpl, params, func(value string) string { return shellQuoteFor(mode, value) })
 }
 
 // renderTemplate replaces {name} placeholders with each param's rendered value.

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	actool "github.com/Autumn-27/norma/tool"
 )
 
 func TestRenderTemplateCommand(t *testing.T) {
@@ -82,34 +80,16 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-func TestShellQuoteForProfiles(t *testing.T) {
-	if got := shellQuoteFor(actool.ShellProfile{Mode: "powershell"}, "a'b"); got != "'a''b'" {
+func TestPlatformShellQuoting(t *testing.T) {
+	if got := shellQuoteFor("powershell", "a'b"); got != "'a''b'" {
 		t.Fatalf("powershell quote = %q", got)
 	}
-	if got := shellQuoteFor(actool.ShellProfile{Mode: "cmd"}, "a b"); got != `"a b"` {
-		t.Fatalf("cmd quote = %q", got)
-	}
-}
-
-func TestRenderCommandTemplateCmdUsesDelayedExpansion(t *testing.T) {
-	value := "space quote\" slash\\ & | < > ^ %PATH% !bang!\nnext"
-	cmd, env := renderCommandTemplate("probe.exe --value={value}", map[string]any{"value": value}, actool.ShellProfile{Mode: "cmd"})
-	if cmd != `probe.exe --value="!SERIES_TOOL_PARAM_0!"` {
-		t.Fatalf("cmd template = %q", cmd)
-	}
-	want := "SERIES_TOOL_PARAM_0=space quote\\\" slash\\ & | < > ^ %PATH% !bang!\nnext"
-	if len(env) != 1 || env[0] != want {
-		t.Fatalf("cmd env = %#v, want %q", env, want)
-	}
-	args := cmdDelayedExpansionArgs([]string{"/D", "/V:OFF", "/S", "/C"})
-	if strings.Join(args, " ") != "/D /V:ON /S /C" {
-		t.Fatalf("cmd args = %#v", args)
-	}
-}
-
-func TestCmdQuoteContentDoublesTrailingSlashes(t *testing.T) {
-	if got := shellQuoteFor(actool.ShellProfile{Mode: "cmd"}, `C:\Program Files\`); got != `"C:\Program Files\\"` {
-		t.Fatalf("cmd trailing slash quote = %q", got)
+	value := "$(touch /tmp/not-executed) & | < > %PATH% !bang!\nnext"
+	for _, mode := range []string{"bash", "powershell"} {
+		want := "probe --value=" + shellQuoteFor(mode, value)
+		if got := renderCommandTemplate("probe --value={value}", map[string]any{"value": value}, mode); got != want {
+			t.Fatalf("%s: %q", mode, got)
+		}
 	}
 }
 

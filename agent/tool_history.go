@@ -119,6 +119,16 @@ func deduplicateToolHistory(req llm.CompletionRequest) llm.CompletionRequest {
 // siblings. Such a response cannot replace an older successful batch in the
 // model view. Live authorization still revalidates the retained history.
 func partialReadFailure(key string, block llm.ContentBlock) bool {
+	for _, c := range block.Content {
+		if c.Type == llm.BlockText && strings.Contains(c.Text, `"context_unavailable"`) {
+			var status struct {
+				Unavailable bool `json:"context_unavailable"`
+			}
+			if json.Unmarshal([]byte(c.Text), &status) == nil && status.Unavailable {
+				return true
+			}
+		}
+	}
 	if !strings.HasPrefix(key, "context_get:") && !strings.HasPrefix(key, "asset_get:") {
 		return false
 	}

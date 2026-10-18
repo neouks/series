@@ -34,7 +34,7 @@ func TestBuiltinSchemaCannotBeReplacedByStoredVersion(t *testing.T) {
 func TestFactBatchStructureAndDecodeFailBeforeWriting(t *testing.T) {
 	tool := NewToolSet(nil, "worker").recordFact()
 	for _, input := range []string{`{"facts":[{"summary":42}]}`, `{"facts":[{"summary":"ok"}, {"summary":"bad","confidence":{}}]}`} {
-		if err := actool.ValidateInput(tool.InputSchema(), json.RawMessage(input)); err == nil {
+		if err := validateBusinessInput(normalizeToolSchema(tool.InputSchema()), json.RawMessage(input)); err == nil {
 			t.Fatal("nested invalid type accepted")
 		}
 		// nil store would panic if any write happened before decoding completed.
@@ -43,7 +43,7 @@ func TestFactBatchStructureAndDecodeFailBeforeWriting(t *testing.T) {
 			t.Fatal("decode error not returned")
 		}
 	}
-	if err := actool.ValidateInput(tool.InputSchema(), json.RawMessage(`{"facts":[{"summary":"ok","confidence":"observed"}]}`)); err != nil {
+	if err := validateBusinessInput(normalizeToolSchema(tool.InputSchema()), json.RawMessage(`{"facts":[{"summary":"ok","confidence":"observed"}]}`)); err != nil {
 		t.Fatal(err)
 	}
 }
