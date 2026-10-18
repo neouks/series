@@ -54,8 +54,11 @@ func (t *ToolSet) contextTarget(ctx context.Context, task string, cap string) (*
 	if t == nil {
 		return nil, fmt.Errorf("缺少任务探索上下文")
 	}
-	cross := task != ""
+	cross := t.contextCrossTask(task)
 	if !contextAllows(ctx, cap, cross) {
+		if cross {
+			return nil, fmt.Errorf("当前角色没有跨任务 %s 读取权限", cap)
+		}
 		return nil, fmt.Errorf("当前角色没有 %s 读取权限", cap)
 	}
 	if !cross {
@@ -81,15 +84,15 @@ func (t *ToolSet) ContextSearchTool() actool.CoreTool { return t.contextSearch()
 func (t *ToolSet) ContextGetTool() actool.CoreTool    { return t.contextGet() }
 
 type contextSearchInput struct {
-	TaskID   string   `json:"task_id"`
-	Types    []string `json:"types"`
-	Q        string   `json:"q"`
-	State    string   `json:"state"`
-	Severity string   `json:"severity"`
-	AssetID  int64    `json:"asset_id"`
-	IntentID int64    `json:"intent_id"`
-	Limit    int      `json:"limit"`
-	Cursor   string   `json:"cursor"`
+	TaskID   contextTaskID `json:"task_id"`
+	Types    []string      `json:"types"`
+	Q        string        `json:"q"`
+	State    string        `json:"state"`
+	Severity string        `json:"severity"`
+	AssetID  int64         `json:"asset_id"`
+	IntentID int64         `json:"intent_id"`
+	Limit    int           `json:"limit"`
+	Cursor   string        `json:"cursor"`
 }
 type readCursor struct {
 	Signature string `json:"s"`
@@ -119,7 +122,7 @@ func querySignature(v any) string {
 }
 func (t *ToolSet) contextSearch() actool.CoreTool {
 	return readTool("context_search", "按类型检索当前任务及直接关联任务的摘要和正文，返回命中片段及带类型引用；正文用 context_get。activity 只含 Worker 执行记录。", obj(map[string]any{
-		"task_id": str("仅跨任务授权角色可指定；默认当前任务"), "types": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": ContextTypes}},
+		"task_id": contextTaskSchema(), "types": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": ContextTypes}},
 		"q": str("字面关键词；留空列出记录"), "asset_id": idp("关联资产"), "intent_id": idp("所属意图"), "state": str("状态"), "severity": str("漏洞严重度"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("原条件下的 next_cursor"),
 	}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a contextSearchInput
@@ -137,7 +140,7 @@ func (t *ToolSet) contextSearch() actool.CoreTool {
 			return actool.Errorf("limit 必须为1..50"), nil
 		}
 		a.Limit = min(a.Limit, max(1, (readOutputBudget(ctx)-1024)/1800))
-		cross := a.TaskID != ""
+		cross := t.contextCrossTask(string(a.TaskID))
 		if len(a.Types) == 0 {
 			for _, k := range []string{"fact", "finding", "intent"} {
 				if contextAllows(ctx, k, cross) {
@@ -163,7 +166,7 @@ func (t *ToolSet) contextSearch() actool.CoreTool {
 				cap = "activity_all"
 			}
 			var err error
-			target, err = t.contextTarget(ctx, a.TaskID, cap)
+			target, err = t.contextTarget(ctx, string(a.TaskID), cap)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
@@ -171,7 +174,7 @@ func (t *ToolSet) contextSearch() actool.CoreTool {
 		signatureInput := a
 		signatureInput.Cursor = ""
 		signatureInput.Limit = 0
-		signatureInput.TaskID = strconv.FormatInt(target.taskID, 10)
+		signatureInput.TaskID = contextTaskID(strconv.FormatInt(target.taskID, 10))
 		signature := querySignature(signatureInput)
 		var cursor readCursor
 		var err error
@@ -226,9 +229,9 @@ func parseContextRef(ref string) (string, int64, error) {
 }
 func (t *ToolSet) contextGet() actool.CoreTool {
 	item := obj(map[string]any{"ref": str("搜索返回的 node:ID / activity:ID"), "view": map[string]any{"type": "string", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("JSON Pointer"), "index": intp("集合续页"), "offset": intp("文本续读"), "before": intp("成员或上游事实续页")}, "ref")
-	return readTool("context_get", "批量读取至多5个引用。detail 正文；意图 output 最新结果/进度，parents 上游事实/漏洞；摘要 members 成员。每项独立返回错误和续读位置。", obj(map[string]any{"task_id": str("仅跨任务授权角色可指定"), "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": item}, "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000}}, "items"), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	return readTool("context_get", "批量读取至多5个引用。detail 正文；意图 output 最新结果/进度，parents 上游事实/漏洞；摘要 members 成员。每项独立返回错误和续读位置。", obj(map[string]any{"task_id": contextTaskSchema(), "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": item}, "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000}}, "items"), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
-			TaskID   string        `json:"task_id"`
+			TaskID   contextTaskID `json:"task_id"`
 			Items    []contextRead `json:"items"`
 			MaxChars int           `json:"max_chars"`
 		}
@@ -244,7 +247,7 @@ func (t *ToolSet) contextGet() actool.CoreTool {
 		a.MaxChars = readContentBudget(ctx, a.MaxChars, len(a.Items))
 		rows := []map[string]any{}
 		for _, item := range a.Items {
-			row, e := t.readContextItem(ctx, a.TaskID, item, max(1, a.MaxChars/len(a.Items)))
+			row, e := t.readContextItem(ctx, string(a.TaskID), item, max(1, a.MaxChars/len(a.Items)))
 			if e != nil {
 				row = map[string]any{"ref": item.Ref, "error": e.Error()}
 			}

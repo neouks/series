@@ -450,14 +450,14 @@ func jsonResult(v any) (actool.Result, error) {
 // --- read tools (planner + worker) ---
 
 func (t *ToolSet) graphOverview() actool.CoreTool {
-	return readTool("graph_overview", "任务态势摘要。Planner 每轮已预取，仅需刷新时调用。", obj(map[string]any{"task_id": str("仅跨任务授权角色可指定")}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	return readTool("graph_overview", "任务态势摘要。Planner 每轮已预取，仅需刷新时调用。", obj(map[string]any{"task_id": contextTaskSchema()}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
-			TaskID string `json:"task_id"`
+			TaskID contextTaskID `json:"task_id"`
 		}
 		if err := decodeToolInput(raw, &a); err != nil {
 			return actool.Errorf(err.Error()), nil
 		}
-		target, err := t.contextTarget(ctx, a.TaskID, "overview")
+		target, err := t.contextTarget(ctx, string(a.TaskID), "overview")
 		if err != nil {
 			return actool.Errorf(err.Error()), nil
 		}
