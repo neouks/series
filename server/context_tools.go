@@ -7,6 +7,7 @@ import (
 	"log"
 	"slices"
 	"strconv"
+	"strings"
 
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/neouks/series/agent"
@@ -22,9 +23,11 @@ type contextPolicyTool struct {
 	actool.CoreTool
 	policy agent.ContextAccess
 	schema map[string]any
+	desc   string
 }
 
 func (t *contextPolicyTool) InputSchema() map[string]any { return t.schema }
+func (t *contextPolicyTool) Description() string         { return t.desc }
 func (t *contextPolicyTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 	if err := actool.ValidateInput(t.schema, in); err != nil {
 		return actool.Errorf(err.Error()), nil
@@ -41,18 +44,26 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 	var schema map[string]any
 	_ = json.Unmarshal(b, &schema)
 	props, _ := schema["properties"].(map[string]any)
+	desc := t.Description()
 	if len(p.Cross) == 0 {
 		delete(props, "task_id")
 	}
 	if t.Name() == "context_search" {
 		allowed := []string{}
 		for _, kind := range agent.ContextTypes {
-			if slices.Contains(p.Local, kind) || slices.Contains(p.Cross, kind) {
+			if slices.Contains(p.Local, kind) || slices.Contains(p.Cross, kind) || (kind == "activity" && (slices.Contains(p.Local, "activity_all") || slices.Contains(p.Cross, "activity_all"))) {
 				allowed = append(allowed, kind)
 			}
 		}
 		if prop, ok := props["types"].(map[string]any); ok {
 			prop["items"].(map[string]any)["enum"] = allowed
+			defaults := []string{}
+			for _, kind := range []string{"fact", "finding", "intent"} {
+				if slices.Contains(allowed, kind) {
+					defaults = append(defaults, kind)
+				}
+			}
+			prop["description"] = "可选类型：" + strings.Join(allowed, "/") + "；省略时按所选任务权限从 " + strings.Join(defaults, "/") + " 中选择；activity须显式指定"
 		}
 	}
 	if t.Name() == "asset_search" && !slices.Contains(p.Local, "untested") {
@@ -68,9 +79,24 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 		if slices.Contains(p.Local, "detail") || slices.Contains(p.Cross, "detail") {
 			views = append(views, "parents")
 		}
-		props["items"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["view"].(map[string]any)["enum"] = views
+		item := props["items"].(map[string]any)["items"].(map[string]any)
+		view := item["properties"].(map[string]any)["view"].(map[string]any)
+		view["enum"] = views
+		labels := map[string]string{"detail": "detail：正文；activity仅此视图", "output": "output：意图最新结果/进度", "members": "members：摘要成员", "parents": "parents：意图上游事实/漏洞"}
+		parts := []string{}
+		for _, v := range views {
+			parts = append(parts, labels[v])
+		}
+		view["description"] = strings.Join(parts, "；")
+		if slices.Contains(views, "detail") {
+			view["description"] = view["description"].(string) + "；省略默认detail"
+		} else {
+			item["required"] = []any{"ref", "view"}
+		}
+		delete(view, "default") // Nested defaults are not injected; do not advertise one.
+		desc = "批量读取1..5个引用，按view枚举选择当前角色获准的视图。每项独立返回错误及next续读参数；顶层max_chars为总预算（缺省值见default、最多24000），每项均分，每项max_chars只能收紧，工具输出上限仍有效。"
 	}
-	return &contextPolicyTool{CoreTool: t, policy: p, schema: schema}
+	return &contextPolicyTool{CoreTool: t, policy: p, schema: schema, desc: desc}
 }
 func (s *Server) wireContextReads() {
 	agent.ResolveContextTask = func(ctx context.Context, id string) (*agent.ToolSet, error) {
@@ -115,6 +141,14 @@ func migrateContextCatalog(pg *db.DB) error {
 	defaults["reporter"] = agent.ReporterDefaultPrompt
 	if err := pg.MigrateContextPrompts(defaults, agent.PreviousContextPromptHashes); err != nil {
 		return err
+	}
+	if err := pg.MigrateBuiltinPromptContracts(defaults, agent.PreviousToolContractPromptHashes); err != nil {
+		return err
+	}
+	if report, ok, err := pg.GetSetting("tool_prompt_contracts_report_v2"); err != nil {
+		return err
+	} else if ok && report != "{}" {
+		log.Printf("[tools] 工具契约提示词升级记录（自定义原文保留）: %s", report)
 	}
 	if report, ok, err := pg.GetSetting("tool_context_prompt_migration_report"); err != nil {
 		return err

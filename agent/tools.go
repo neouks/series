@@ -1572,16 +1572,30 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 	return id, true, nil
 }
 
+// Batch and single submissions expose the same fields. Keep required-field
+// and authorization errors in the per-item result rather than rejecting the batch.
+func intentInputSchema() map[string]any {
+	fields := map[string]any{
+		"summary":    str("一句话描述这个探索方向：做什么+为什么。已写清方向即可，不依赖资产 id。"),
+		"asset_ids":  map[string]any{"type": "array", "description": "目标资产ID（来自asset_search），不能传探索节点ID；具体目标务必填写，纯全局侦察无具体资产时留空。"},
+		"parent_ids": map[string]any{"type": "array", "description": "上游fact/finding探索节点ID，不是独立finding_id；禁止意图/目标/提示节点。顶层新方向留空，系统挂到任务起点。"},
+		"priority":   intp("优先级建议1-10；省略或0按5处理"),
+	}
+	for _, key := range []string{"asset_ids", "parent_ids"} {
+		fields[key].(map[string]any)["items"] = map[string]any{"anyOf": []any{map[string]any{"type": "integer"}, map[string]any{"type": "string"}}, "description": "已知正整数ID，可用数字字符串"}
+	}
+	props := map[string]any{}
+	for k, v := range fields {
+		props[k] = v
+	}
+	props["intents"] = map[string]any{"type": "array", "maxItems": 4, "description": "优先批量，1..4条；非空时仅处理数组，忽略顶层单条字段。ids/errors/duplicates与输入同序。", "items": obj(fields)}
+	return obj(props)
+}
+
 func (t *ToolSet) addIntent() actool.CoreTool {
 	return submissionTool{writeTool("add_intent", "生成【探索方向】写入 frontier，并连入探索链路。意图是开放的探索方向，不是固定类型——用 summary 一句话自由描述要探索/验证/利用什么。\n"+
 		"主 Agent 成功下发后结束本轮，Worker 自动回传总结，不轮询等待。Planner 对未审批候选本轮跳过；主 Agent 可明确下发待审批资产方向，但封禁和撤回仍拒绝。未知候选先批量 check_target_access。★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（最多 4 条，比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors；已存在的活跃同方向见 duplicates）。单条则省略 intents 直接给顶层 summary。",
-		obj(map[string]any{
-			"intents":    map[string]any{"type": "array", "maxItems": 4, "description": "【优先用这个】要新增的探索方向数组，最多 4 条，按顺序处理。每个元素字段同下方顶层字段（summary/asset_ids/parent_ids/priority）。返回 ids 与本数组等长、同序。", "items": map[string]any{"type": "object"}},
-			"summary":    str("[单条] 一句话描述这个探索方向：做什么+为什么。已写清方向即可，不依赖资产 id。"),
-			"asset_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "本方向要测试/攻击的【目标资产 id】（**尽量传**，0/1/多个；是 asset_search 返回的资产 id，不是探索节点 id）：这条探索方向针对哪些资产（站点/接口/参数/主机等）。只要方向围绕某些具体资产就务必传上——它是「这条探索打哪些目标」的结构化标记，用于覆盖去重、把意图连入资产链路。仅当纯全局侦察、确实没有具体目标资产时才留空。"},
-			"parent_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "上游锚点 id（可选，0/1/多个）：本方向由哪些【已确认的事实(fact)/发现(finding)】综合得出。**只能填已存在的 fact/finding 节点 id,不能填意图/目标/提示**——意图必须锚在已确认知识上,发现驱动而非凭空规划。多个事实共同产生一个新意图就传多个;顶层全新侦察方向请留空（会自动挂到任务起点 origin fact）。"},
-			"priority":   intp("优先级 0-10，默认5"),
-		}),
+		intentInputSchema(),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			t := t
 			if locked, _ := ctx.Value(intentSubmissionLockedKey{}).(bool); locked && RunInfoFrom(ctx).AgentKey == "mainagent" && RunInfoFrom(ctx).TaskID == t.taskID && RunInfoFrom(ctx).IntentID == 0 {

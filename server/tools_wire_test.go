@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	actool "github.com/Autumn-27/norma/tool"
@@ -93,7 +94,7 @@ func TestWireTools(t *testing.T) {
 	if got == nil {
 		t.Fatal("record_fact missing after edit")
 	}
-	if got.Description() != baseDescription(base, "record_fact") {
+	if !strings.HasPrefix(got.Description(), baseDescription(base, "record_fact")) || !strings.Contains(got.Description(), "default 为准") {
 		t.Errorf("runtime contract replaced by outdated saved text: %q", got.Description())
 	}
 	if saved, err := pg.GetTool(rf.Key); err != nil || saved.Description != "EDITED DESC" {

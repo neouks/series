@@ -10,7 +10,7 @@ import (
 )
 
 func (t *ToolSet) assetSearch() actool.CoreTool {
-	return readTool("asset_search", "检索当前角色可见资产摘要。dsl 支持 domain/ip/url/port/technology 等字段、AND/OR、=模糊、==精确。untested 查询任务覆盖范围内未测试资产；详情用 asset_get。", obj(map[string]any{"dsl": str("筛选表达式，如 port==443 AND technology=nginx"), "type": str("资产类型"), "untested": map[string]any{"type": "boolean"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "offset": intp("next_offset 续页")}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	return readTool("asset_search", "检索当前角色可见资产摘要；详情用asset_get。通常必须提供非空dsl，不能只传type/limit；有untested权限时可用untested=true查询任务覆盖范围内未测试资产。默认10条、最多50条；保留筛选条件，以next_offset作为offset续页。", obj(map[string]any{"dsl": str("非空筛选表达式，如 port==443 AND technology=nginx；支持domain/ip/url/port/technology、AND/OR、=模糊、==精确；untested=true时可省略"), "type": str("资产类型，不能单独代替dsl"), "untested": map[string]any{"type": "boolean"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "offset": intp("next_offset 续页")}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			DSL      string `json:"dsl"`
 			Type     string `json:"type"`
@@ -76,7 +76,7 @@ func (t *ToolSet) assetSearch() actool.CoreTool {
 	})
 }
 func (t *ToolSet) assetGet() actool.CoreTool {
-	return readTool("asset_get", "读取1..5个资产。默认身份与指纹；auth 凭证须显式选择。支持字段及连续分页。", obj(map[string]any{
+	return readTool("asset_get", "按ids读取1..5个资产，重复ID去重。默认身份与指纹；凭证需fields显式包含auth。field从字段组根取，如/identity/domain；省略先看字段目录。max_chars是整批总预算（默认8000、最多24000），工具输出上限仍生效；按每项next续读。", obj(map[string]any{
 		"ids":    map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": map[string]any{"type": "integer", "minimum": 1}},
 		"fields": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"identity", "fingerprint", "dns", "params", "auth", "extra"}}},
 		"field":  str("JSON Pointer"), "index": intp("集合续页"), "offset": intp("文本续读"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000},

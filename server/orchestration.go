@@ -519,37 +519,59 @@ func (s *Server) seedOrchestrationTools() {
 // reaches an old DB otherwise. Preserves each tool's agent binding + enabled flag.
 // Bump the flag whenever these tools' schemas/descriptions change in code.
 func (s *Server) refreshBuiltinToolSchemas() {
-	const flag = "tool_schema_refresh_v8_context_reads"
-	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+	const flag = "tool_schema_refresh_v9_contract_docs"
+	if v, _, err := s.m.pg.GetSetting(flag); err != nil {
+		log.Printf("[tools] read schema refresh flag: %v", err)
+		return
+	} else if v == "true" {
 		return
 	}
-	tools := append(s.orchestrationTools(), s.platformTools()...)
-	for _, t := range tools {
-		schema, _ := json.Marshal(t.InputSchema())
-		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
-			log.Printf("[tools] refresh %s schema failed: %v", t.Name(), err)
+	complete := true
+	refresh := func(t actool.CoreTool) {
+		row, err := s.m.pg.GetTool(t.Name())
+		if err != nil {
+			complete = false
+			log.Printf("[tools] read %s: %v", t.Name(), err)
+			return
+		}
+		if row == nil || !row.System {
+			return
+		}
+		var saved map[string]any
+		if len(row.Schema) > 0 {
+			if err = json.Unmarshal(row.Schema, &saved); err != nil {
+				complete = false
+				log.Printf("[tools] decode %s schema: %v", t.Name(), err)
+				return
+			}
+		}
+		resolved := agent.ResolveBuiltinTool(t, row.Description, saved)
+		schema, err := json.Marshal(resolved.InputSchema())
+		if err == nil {
+			err = s.m.pg.RefreshToolDefaults(t.Name(), resolved.Description(), schema)
+		}
+		if err != nil {
+			complete = false
+			log.Printf("[tools] refresh %s: %v", t.Name(), err)
 		}
 	}
-	// Refresh only contract-owned metadata; keep bindings and enable switches.
-	for _, tool := range traffic.SeedToolMetas() {
-		schema, _ := json.Marshal(tool.InputSchema())
-		if err := s.m.pg.RefreshToolDefaults(tool.Name(), tool.Description(), schema); err != nil {
-			log.Printf("[tools] refresh %s: %v", tool.Name(), err)
-		}
+	for _, t := range append(s.orchestrationTools(), s.platformTools()...) {
+		refresh(t)
 	}
-	refreshBuiltin := map[string]bool{"insert_assets": true, "context_search": true, "context_get": true, "asset_search": true, "asset_get": true, "graph_overview": true, "update_finding_report": true}
-
-	for _, sd := range agent.BuiltinToolSeeds() {
-		if !refreshBuiltin[sd.Key] {
-			continue
-		}
-		schema, _ := json.Marshal(sd.Schema)
-		if err := s.m.pg.RefreshToolDefaults(sd.Key, sd.Desc, schema); err != nil {
-			log.Printf("[tools] refresh %s desc failed: %v", sd.Key, err)
-		}
+	for _, t := range traffic.SeedToolMetas() {
+		refresh(t)
 	}
-	_ = s.m.pg.SetSetting(flag, "true")
-	log.Printf("[tools] 已刷新 orchestration/platform 工具 schema 到代码默认(一次性)")
+	// Resolve against the same code schemas used by model requests. Bindings,
+	// enable switches and compatible scalar defaults are preserved.
+	for _, t := range agent.NewToolSet(nil, "").AllDomainTools() {
+		refresh(t)
+	}
+	if !complete {
+		return
+	} // retry incomplete upgrades on the next startup
+	if err := s.m.pg.SetSetting(flag, "true"); err != nil {
+		log.Printf("[tools] save schema refresh flag: %v", err)
+	}
 }
 
 // unbindGoalMetDefault removes goal_met's default "planner" binding ONCE (guarded by

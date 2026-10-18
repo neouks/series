@@ -4,14 +4,28 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
+	"slices"
 	"sort"
-	"strings"
 )
 
 // MigrateContextPrompts appends defaults as a new prompt version. Custom text
 // and prior versions remain unchanged; the report contains names, never content.
 func (d *DB) MigrateContextPrompts(defaults, previousHashes map[string]string) error {
-	const flag = "tool_context_prompts_v1"
+	hashes := map[string][]string{}
+	for key, hash := range previousHashes {
+		hashes[key] = []string{hash}
+	}
+	return d.migratePromptContracts("tool_context_prompts_v1", "tool_context_prompt_migration_report", defaults, hashes)
+}
+
+// Separate version: deployments that already completed the tool rename still
+// need corrected code defaults. Only exact known defaults get a new version.
+func (d *DB) MigrateBuiltinPromptContracts(defaults map[string]string, hashes map[string][]string) error {
+	return d.migratePromptContracts("tool_prompt_contracts_v2", "tool_prompt_contracts_report_v2", defaults, hashes)
+}
+
+func (d *DB) migratePromptContracts(flag, reportKey string, defaults map[string]string, previousHashes map[string][]string) error {
 	tx, e := d.Begin()
 	if e != nil {
 		return e
@@ -53,7 +67,7 @@ func (d *DB) MigrateContextPrompts(defaults, previousHashes map[string]string) e
 	for _, a := range entries {
 		sum := sha256.Sum256([]byte(a.text))
 		next := defaults[a.key]
-		if next != "" && a.text != next && previousHashes[a.key] == hex.EncodeToString(sum[:]) {
+		if next != "" && a.text != next && slices.Contains(previousHashes[a.key], hex.EncodeToString(sum[:])) {
 			var pid int64
 			e = tx.QueryRow(`INSERT INTO agent_prompts(agent_id,version,template_text,note,updated_by) SELECT $1,COALESCE(max(version),0)+1,$2,'上下文工具迁移','system' FROM agent_prompts WHERE agent_id=$1 RETURNING id`, a.id, next).Scan(&pid)
 			if e != nil {
@@ -66,12 +80,16 @@ func (d *DB) MigrateContextPrompts(defaults, previousHashes map[string]string) e
 		} else {
 			refs := []string{}
 			for old := range RetiredToolReplacements {
-				if strings.Contains(a.text, old) {
+				if regexp.MustCompile(`\b` + regexp.QuoteMeta(old) + `\b`).MatchString(a.text) {
 					refs = append(refs, old)
 				}
 			}
-			// A renamed parameter also requires review in customized reporter prompts.
-			if strings.Contains(a.text, "update_finding_report") && strings.Contains(a.text, "finding_id") {
+			if regexp.MustCompile(`\bupdate_skill\b`).MatchString(a.text) {
+				refs = append(refs, "update_skill -> update_skill_file")
+			}
+			// Do not flag a correct report prompt just because get_finding_traffic
+			// legitimately uses the independent finding_id in another sentence.
+			if legacyFindingReportParameter.MatchString(a.text) {
 				refs = append(refs, "update_finding_report.finding_node_id")
 			}
 			sort.Strings(refs)
@@ -81,7 +99,7 @@ func (d *DB) MigrateContextPrompts(defaults, previousHashes map[string]string) e
 		}
 	}
 	b, _ := json.Marshal(report)
-	if _, e = tx.Exec(`INSERT INTO settings(key,value) VALUES('tool_context_prompt_migration_report',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, string(b)); e != nil {
+	if _, e = tx.Exec(`INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, reportKey, string(b)); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(`INSERT INTO settings(key,value) VALUES($1,'true') ON CONFLICT(key) DO UPDATE SET value='true'`, flag); e != nil {
@@ -89,3 +107,5 @@ func (d *DB) MigrateContextPrompts(defaults, previousHashes map[string]string) e
 	}
 	return tx.Commit()
 }
+
+var legacyFindingReportParameter = regexp.MustCompile(`(?s)\bupdate_finding_report\s*\([^)]*\bfinding_id\s*(?:=|,|\))`)

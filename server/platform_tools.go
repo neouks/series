@@ -184,14 +184,14 @@ func customToolSchema(keyDesc string) map[string]any {
 	return objSchema(map[string]any{
 		"key":         strParam(keyDesc),
 		"description": strParam("发给模型的描述"),
-		"kind":        strParam("shell | command | script(仅Python) | http。shell=bash 环境声明(仅告知模型该工具可在 bash 中直接调用，无需 exec/schema)；其余三种需提供 exec"),
+		"kind":        strParam("shell | command | script(仅Python) | http。shell=系统解释器环境声明（Bash工具在Linux/macOS用Bash、Windows用PowerShell；不注册独立执行入口，无需exec/schema）；其余三种需提供 exec"),
 		"exec":        map[string]any{"type": "object", "description": "执行规格(shell 类型不需要): command→{command}; script→{code}; http→{method,url,headers,body,proxy,use_recording_proxy}"},
 		"schema":      map[string]any{"type": "object", "description": "参数 JSON-Schema(shell/command/script 可留空; http 必填且需含 properties)"},
 		"agents":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "绑定的 agent key(可选)"},
 		"deferred":    map[string]any{"type": "boolean", "description": "是否延迟(shell 类型无效；仅 command/script/http 的不常用工具才开)"},
 		"enabled":     map[string]any{"type": "boolean", "description": "是否启用(默认 true)"},
-		"executable":  strParam("实际可执行命令名或绝对路径，仅 kind=shell 有效；留空使用 key，不含参数"),
-		"directory":   strParam("工具所在目录，仅 kind=shell 有效；只作为 Bash 环境提示，不改变工作目录"),
+		"executable":  strParam("实际可执行文件名或绝对路径，仅kind=shell有效；用于检测和Bash请求归属统计。留空使用key，文件名与key不同时必须填写，不含参数"),
+		"directory":   strParam("工具所在目录，仅kind=shell有效；用于可用性检测、命令归属统计及环境提示，不改变工作目录或持久PATH"),
 		"usage_help":  strParam("工具用法帮助，仅 kind=shell 有效"),
 		"when_to_use": strParam("何时调用该工具，仅 kind=shell 有效"),
 	}, "key", "kind")
@@ -210,7 +210,7 @@ func toDBTool(a customToolToolInput) *db.Tool {
 }
 
 func (s *Server) toolCreateCustomTool() actool.CoreTool {
-	return wrTool("create_custom_tool", "【重要】当安装一些平台没有的工具时，调用该工具将安装的工具放入平台中，让平台可以调用！创建一个自定义工具(shell/command/script/http)。shell=bash 环境声明，可填写 directory、usage_help、when_to_use，无需 exec/schema。",
+	return wrTool("create_custom_tool", "【重要】当安装一些平台没有的工具时，调用该工具将安装的工具放入平台中，让平台可以调用！创建一个自定义工具(shell/command/script/http)。shell为系统解释器环境声明，可填写executable、directory、usage_help、when_to_use，无需exec/schema；统计按进入Bash执行器的匹配请求计次。",
 		customToolSchema("工具 key(小写字母开头，字母/数字/下划线)"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a customToolToolInput

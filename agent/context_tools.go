@@ -124,9 +124,9 @@ func querySignature(v any) string {
 	return hex.EncodeToString(sum[:12])
 }
 func (t *ToolSet) contextSearch() actool.CoreTool {
-	return readTool("context_search", "按类型检索当前任务及直接关联任务的摘要和正文，返回命中片段及带类型引用；正文用 context_get。activity 只含 Worker 执行记录，可与节点类型混合，混合结果按登记时间倒序。", obj(map[string]any{
-		"task_id": contextTaskSchema(), "types": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": ContextTypes}},
-		"q": str("字面关键词；留空列出记录"), "asset_id": idp("关联资产"), "intent_id": idp("所属意图"), "state": str("状态"), "severity": str("漏洞严重度"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("原条件下的 next_cursor"),
+	return readTool("context_search", "按类型检索授权可见的任务上下文摘要和正文，返回命中片段及 node:ID/activity:ID；正文用 context_get。默认查询有权限的 fact/finding/intent。activity 只含 Worker 执行记录，需显式选择，可混合查询；混合结果按登记时间倒序，单类按ID倒序。默认10条、最多50条，输出预算可能缩小页长；has_more/next_cursor续页。", obj(map[string]any{
+		"task_id": contextTaskSchema(), "types": map[string]any{"type": "array", "description": "选择当前角色可用类型；省略时从 fact/finding/intent 中取有权限的类型，activity须显式选择", "items": map[string]any{"type": "string", "enum": ContextTypes}},
+		"q": str("不区分大小写的字面关键词，最多200字符；查摘要及正文（漏洞含报告），空值列出记录，不支持正则"), "asset_id": idp("关联资产ID"), "intent_id": idp("意图节点ID：查询该意图及其产出；activity查询该Worker记录"), "state": str("节点状态；activity按所属意图状态筛选，如open/running/done/blocked/exhausted/stopped"), "severity": str("payload.severity精确筛选，如critical/high/medium/low；其他不含该字段的记录也被排除"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("保留原查询条件，传入next_cursor；新消息不插入当前分页"),
 	}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a contextSearchInput
 		if err := decodeToolInput(raw, &a); err != nil {
@@ -232,8 +232,8 @@ func parseContextRef(ref string) (string, int64, error) {
 	return parts[0], id, nil
 }
 func (t *ToolSet) contextGet() actool.CoreTool {
-	item := obj(map[string]any{"ref": str("搜索返回的 node:ID / activity:ID"), "view": map[string]any{"type": "string", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("JSON Pointer"), "index": intp("集合续页"), "offset": intp("文本续读"), "before": intp("成员或上游事实续页"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"}}, "ref")
-	return readTool("context_get", "批量读取至多5个引用。detail 正文；意图 output 最新结果/进度，parents 上游事实/漏洞；摘要 members 成员。每项独立返回错误和续读位置；顶层 max_chars 是总预算，每项 max_chars 是额外上限。", obj(map[string]any{"task_id": contextTaskSchema(), "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": item}, "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000}}, "items"), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	item := obj(map[string]any{"ref": str("node:探索节点ID 或 activity:活动ID；不能使用独立finding_id或资产ID"), "view": map[string]any{"type": "string", "description": "默认detail；output/parents仅意图节点，members仅摘要节点；activity仅detail", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("detail的JSON Pointer；节点从payload根取，如/evidence、/report；activity可取/detail或/summary；省略先看字段目录"), "index": intp("detail集合的next_index，默认0"), "offset": intp("detail/output文本的next_offset，按Unicode字符计，默认0"), "before": intp("members/parents的next_before；不能与field/index/offset组合"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"}}, "ref")
+	return readTool("context_get", "批量读取1..5个引用；view选择正文、意图输出、上游事实或摘要成员。每项独立返回错误和可直接调用的next；output区分最终结果与中途进度。顶层max_chars为总预算（默认8000、最多24000），各项均分，每项max_chars只能进一步收紧；工具输出上限仍生效。", obj(map[string]any{"task_id": contextTaskSchema(), "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": item}, "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000}}, "items"), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			TaskID   contextTaskID `json:"task_id"`
 			Items    []contextRead `json:"items"`
