@@ -2,23 +2,17 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* Theme preset styles: these override CSS variables based on the selected data-theme-preset */
-@import "../styles/presets/brutalist.css";
-@import "../styles/presets/soft-pop.css";
-@import "../styles/presets/tangerine.css";
-@import "../styles/control-radius.css";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --radius-xs: var(--radius);
-  --radius-sm: var(--radius);
-  --radius-md: var(--radius);
-  --radius-lg: var(--radius);
-  --radius-xl: var(--radius);
-  --radius-2xl: var(--radius);
-  --radius-3xl: var(--radius);
-  --radius-4xl: var(--radius);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
+  --radius-4xl: 32px;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -57,7 +51,7 @@
 /* Default theme styles (used when no data-theme-preset is set or when 'default' is selected).
 These serve as the fallback; there is no separate default.css file. */
 :root {
-  --radius: 5px;
+  --radius: 8px;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
@@ -79,7 +73,7 @@ These serve as the fallback; there is no separate default.css file. */
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(1 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -91,7 +85,7 @@ These serve as the fallback; there is no separate default.css file. */
   /* fonts */
   --font-sans: var(--font-geist);
   --font-mono: var(--font-geist-mono);
-  --background: oklch(1 0 0);
+  --background: oklch(0.978 0 0);
   --foreground: oklch(0.145 0 0);
 }
 
@@ -121,7 +115,7 @@ These serve as the fallback; there is no separate default.css file. */
   --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary: oklch(0.922 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
@@ -135,7 +129,7 @@ These serve as the fallback; there is no separate default.css file. */
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground text-sm;
     font-family: var(--font-sans), system-ui, sans-serif;
   }
   html {
@@ -283,4 +277,27 @@ html {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
+}
+
+/* Workspace surfaces share semantic tokens with standalone settings and auth pages. */
+@layer components {
+  .workspace-page { width: 100%; min-width: 0; padding: 24px; }
+  .workspace-page h1 { font-size: 22px; font-weight: 600; letter-spacing: -.025em; }
+  .workspace-page [data-slot="table-container"] { border-radius: var(--radius-xl); background: var(--card); }
+  .workspace-page [data-slot="table"] { font-size: 13px; }
+  .workspace-page [data-slot="table-row"] { height: 40px; }
+  .task-workspace [data-slot="table"] { font-size: 13px; }
+  .workspace-page [data-slot="table-header"] { background: var(--muted); color: var(--muted-foreground); }
+  .settings-panel { min-width: 0; }
+  .settings-panel h1 { display: none; }
+  .settings-panel > div > div:first-child:has(h1) { position: sticky; top: -24px; z-index: 10; background: var(--popover); padding-block: 12px; }
+  .settings-panel > div { min-width: 0; }
+  .settings-panel [data-slot="card"] { box-shadow: none; }
+
+  .task-composer { border-radius: var(--radius-3xl); background: var(--card); box-shadow: 0 8px 32px -16px oklch(0 0 0 / 15%); }
+  .task-composer [data-slot="input-group-control"] { font-size: 16px; line-height: 1.7; }
+  .task-composer [data-slot="input-group-addon"] { padding: 12px 16px; }
+  .auth-surface { display: flex; min-height: 100dvh; align-items: center; justify-content: center; padding: 24px; }
+  .auth-panel { width: 100%; max-width: 420px; border: 1px solid var(--border); border-radius: var(--radius-2xl); padding: 32px; background: var(--card); }
+  @media (max-width: 767px) { .workspace-page { padding: 16px; } .auth-panel { padding: 24px; } }
 }

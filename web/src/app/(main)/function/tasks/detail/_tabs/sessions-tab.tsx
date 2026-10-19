@@ -1,10 +1,10 @@
 "use client";
 
-import * as React from "react";
+import { SourceTranscript } from "@/components/source-transcript";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { lastMainActivity } from "@/lib/worker-feedback";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { SourceTranscript } from "@/components/source-transcript";
+import * as React from "react";
 
 import {
   ArrowUpIcon,
@@ -33,10 +33,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
+import { MentionTextarea } from "@/components/mention-textarea";
 import { SessionToolCalls } from "@/components/session-tool-calls";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
-import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { Transcript } from "@/components/transcript";
 import {
   AlertDialog,
@@ -49,7 +50,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { MentionTextarea } from "@/components/mention-textarea";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -1836,7 +1836,7 @@ export function SessionsTab({
         )}
       >
         {/* Left: session list */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card">
           <div className="border-b px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <button
@@ -2108,7 +2108,7 @@ export function SessionsTab({
           side={side}
           label={active.role === "worker" ? `Worker #${active.intent_id} · ${activeDisplayTitle}` : activeDisplayTitle}
         >
-          <div className="flex min-h-0 flex-1 min-w-0 flex-col overflow-hidden rounded-lg border bg-card">
+          <div className="flex min-h-0 flex-1 min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 sm:px-4 sm:py-2.5">
               {(() => {
                 const isWorker = active.role === "worker";
@@ -2298,7 +2298,7 @@ export function SessionsTab({
                   type="auto"
                   className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!"
                 >
-                  <div className="min-w-0 max-w-full p-4" ref={contentRef}>
+                  <div className="mx-auto w-full min-w-0 max-w-[960px] p-4 sm:px-6" ref={contentRef}>
                     {activeState?.loadingMore && (
                       <div className="flex items-center justify-center gap-2 pb-2 text-xs text-muted-foreground">
                         <Loader2Icon className="size-3.5 animate-spin" />
@@ -2341,7 +2341,7 @@ export function SessionsTab({
               )}
             </SessionToolCalls>
             {isMain ? (
-              <div className="border-t p-3">
+              <div className="mx-auto w-full max-w-[960px] p-3 sm:px-5">
                 {attachments.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
                     {attachments.map((a) => (
@@ -2372,7 +2372,7 @@ export function SessionsTab({
                   className="hidden"
                   onChange={(e) => void pickFiles(e.target.files)}
                 />
-                <InputGroup className="min-h-9 has-disabled:opacity-100">
+                <InputGroup className="min-h-9 rounded-3xl bg-muted/30 p-2 has-disabled:opacity-100">
                   <MentionTextarea
                     inputGroup
                     rows={1}
@@ -2437,8 +2437,8 @@ export function SessionsTab({
             ) : active.role === "worker" &&
               !active.inherited &&
               (active.status === "running" || active.status === "paused") ? (
-              <div className="border-t p-3">
-                <InputGroup className="min-h-9 has-disabled:opacity-100">
+              <div className="mx-auto w-full max-w-[960px] p-3 sm:px-5">
+                <InputGroup className="min-h-9 rounded-3xl bg-muted/30 p-2 has-disabled:opacity-100">
                   <MentionTextarea
                     inputGroup
                     rows={1}

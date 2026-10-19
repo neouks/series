@@ -1,9 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
-import { useShallow } from "zustand/react/shallow";
-
+import { useSettings } from "@/components/settings/settings-context";
 import {
   Sidebar,
   SidebarContent,
@@ -12,51 +9,54 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
-import { APP_CONFIG } from "@/config/app-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { sidebarItems } from "@/navigation/sidebar/sidebar-items";
-import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
-
+import { Palette, Settings2 } from "lucide-react";
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
-import { SidebarSupportCard } from "./sidebar-support-card";
 
-
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
   const currentUser = useCurrentUser();
-  const { sidebarVariant, sidebarCollapsible, isSynced } = usePreferencesStore(
-    useShallow((s) => ({
-      sidebarVariant: s.sidebarVariant,
-      sidebarCollapsible: s.sidebarCollapsible,
-      isSynced: s.isSynced,
-    })),
-  );
-
-  const variant = isSynced ? sidebarVariant : props.variant;
-  const collapsible = isSynced ? sidebarCollapsible : props.collapsible;
-
+  const settings = useSettings();
+  const { setOpenMobile } = useSidebar();
   return (
-    <Sidebar {...props} variant={variant} collapsible={collapsible}>
-      <SidebarHeader>
+    <Sidebar {...props} variant="sidebar" collapsible="icon">
+      <SidebarHeader className="items-end px-3 py-2">
+        <SidebarTrigger aria-label="折叠侧栏" />
+      </SidebarHeader>
+      <SidebarContent className="gap-1 px-2">
+        <NavMain items={sidebarItems} />
+      </SidebarContent>
+      <SidebarFooter className="gap-1 border-t p-3">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <Link prefetch={false} href="/function/tasks">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/series-icon.svg" alt="SERIES" width={40} height={40} className="shrink-0" />
-                <span className="font-semibold text-base">{APP_CONFIG.name}</span>
-              </Link>
+            <SidebarMenuButton
+              tooltip="设置"
+              onClick={() => {
+                setOpenMobile(false);
+                settings.open();
+              }}
+            >
+              <Settings2 />
+              <span>设置</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="外观"
+              onClick={() => {
+                setOpenMobile(false);
+                settings.open("appearance");
+              }}
+            >
+              <Palette />
+              <span>外观</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-      </SidebarHeader>
-      <SidebarContent>
-        <NavMain items={sidebarItems} />
-        {/* <NavDocuments items={data.documents} /> */}
-        {/* <NavSecondary items={data.navSecondary} className="mt-auto" /> */}
-      </SidebarContent>
-      <SidebarFooter>
         <NavUser user={currentUser} />
       </SidebarFooter>
     </Sidebar>

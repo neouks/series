@@ -22,11 +22,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { SessionToolCalls } from "@/components/session-tool-calls";
+import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { MentionTextarea } from "@/components/mention-textarea";
+import { SessionToolCalls } from "@/components/session-tool-calls";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
-import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { Transcript } from "@/components/transcript";
 import {
   AlertDialog,
@@ -188,7 +188,7 @@ function Composer({
     onSend();
   }
   return (
-    <div className="border-t p-3">
+    <div className="mx-auto w-full max-w-[960px] p-4">
       {atts.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {atts.map((a) => (
@@ -214,7 +214,7 @@ function Composer({
           ))}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-3xl border bg-muted/30 p-3">
         {leftSlot ? <div className="w-full sm:w-auto">{leftSlot}</div> : null}
         {onPickFiles && (
           <>
@@ -243,7 +243,7 @@ function Composer({
           </>
         )}
         <MentionTextarea
-          className="max-h-40 min-h-10 min-w-0 flex-1 resize-none"
+          className="max-h-40 min-h-10 min-w-0 flex-1 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
           rows={1}
           placeholder={placeholder}
           value={value}
@@ -1377,11 +1377,11 @@ export default function ChatPage() {
   return (
     <div
       data-content-padding="false"
-      className="flex h-[calc(100svh-3rem)] min-w-0 flex-col overflow-hidden p-3 sm:p-4 md:h-[calc(100svh-4rem)] md:p-6"
+      className="flex h-[calc(100svh-3rem)] min-w-0 flex-col overflow-hidden p-3 sm:p-4 md:h-dvh md:p-6"
     >
       <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(10rem,15rem)_minmax(0,1fr)] gap-3 md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:gap-4">
         {/* left: conversation list */}
-        <div className="bg-card flex flex-col overflow-hidden rounded-lg border">
+        <div className="bg-card flex flex-col overflow-hidden rounded-xl border">
           <div className="flex flex-col gap-2 border-b p-2">
             <Button size="sm" className="w-full" onClick={() => selectConversation(null)}>
               <PlusIcon /> 新建对话
@@ -1533,7 +1533,7 @@ export default function ChatPage() {
         </div>
 
         {/* right: chat view */}
-        <div className="bg-card flex min-w-0 flex-col overflow-hidden rounded-lg border">
+        <div className="bg-card flex min-w-0 flex-col overflow-hidden rounded-xl border">
           {selected ? (
             <ChatView
               key={selected.id}

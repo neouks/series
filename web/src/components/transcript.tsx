@@ -1,6 +1,13 @@
 "use client";
 
-import * as React from "react";
+import { ApprovalDetail } from "@/components/approval-records";
+import { Markdown } from "@/components/markdown";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { api } from "@/lib/api";
+import type { Activity, InterceptPending } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import {
   CheckIcon,
   ChevronDown,
@@ -15,15 +22,8 @@ import {
   Wrench,
   XIcon,
 } from "lucide-react";
+import * as React from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
-import { Markdown } from "@/components/markdown";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ApprovalDetail } from "@/components/approval-records";
-import type { Activity, InterceptPending } from "@/lib/types";
 
 // ---- per-agent lane color (planner + work#1/#2/#3 …) ---------------------------
 const workerColors = ["bg-sky-600", "bg-violet-600", "bg-teal-600", "bg-pink-600", "bg-orange-600"];
@@ -646,7 +646,7 @@ function UserRow({
   }, [inView, step.seq, getDetail, step.summary, inline]);
   const { text, attachments } = parseUserBody(full ?? step.summary);
   return (
-    <div ref={ref} data-activity-id={step.seq} className="mt-3 mb-2 flex min-w-0 justify-end gap-2">
+    <div ref={ref} data-activity-id={step.seq} className="mt-5 mb-4 flex min-w-0 justify-end gap-2">
       <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
         {attachments.length > 0 && (
           <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-1.5">
@@ -664,7 +664,7 @@ function UserRow({
           </div>
         )}
         {text && (
-          <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-lg rounded-tr-sm bg-primary px-3 py-1.5 text-sm text-primary-foreground [overflow-wrap:anywhere]">
+          <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-2xl bg-muted px-4 py-3 text-sm text-foreground leading-relaxed [overflow-wrap:anywhere]">
             {text}
           </div>
         )}
@@ -701,7 +701,7 @@ function AnswerBlock({ step, getDetail }: { step: Activity; getDetail: (seq: num
     <div ref={ref} data-activity-id={step.seq} className="mb-2 mt-1 flex min-w-0 flex-col gap-1">
       <div
         className={
-          "min-w-0 flex-1 break-words rounded-lg bg-muted px-3 py-2 " +
+          "min-w-0 flex-1 break-words px-1 py-3 text-sm leading-relaxed " +
           (step.is_error ? "text-sm text-red-600 dark:text-red-400" : "")
         }
       >

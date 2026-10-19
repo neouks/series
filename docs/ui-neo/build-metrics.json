@@ -1,0 +1,60 @@
+{
+  "method": "Unique initial script src files in each exported HTML; sum raw and per-file gzip bytes. Not runtime request timing or token usage.",
+  "before": {
+    "total_bytes": 7725017,
+    "js_bytes": 5544057,
+    "routes": {
+      "function/tasks": {
+        "scripts": 24,
+        "js_bytes": 1567406,
+        "js_gzip": 480430
+      },
+      "function/tasks/detail": {
+        "scripts": 27,
+        "js_bytes": 1856313,
+        "js_gzip": 574717
+      },
+      "system/settings": {
+        "scripts": 23,
+        "js_bytes": 1286727,
+        "js_gzip": 394201
+      },
+      "chat": {
+        "scripts": 26,
+        "js_bytes": 1623442,
+        "js_gzip": 498999
+      }
+    }
+  },
+  "after": {
+    "total_bytes": 7955477,
+    "js_bytes": 5767538,
+    "routes": {
+      "function/tasks/new": {
+        "scripts": 23,
+        "js_bytes": 1408977,
+        "js_gzip": 433331
+      },
+      "function/tasks": {
+        "scripts": 23,
+        "js_bytes": 1388696,
+        "js_gzip": 422617
+      },
+      "function/tasks/detail": {
+        "scripts": 27,
+        "js_bytes": 1844215,
+        "js_gzip": 570415
+      },
+      "system/settings": {
+        "scripts": 22,
+        "js_bytes": 1278260,
+        "js_gzip": 390379
+      },
+      "chat": {
+        "scripts": 25,
+        "js_bytes": 1614034,
+        "js_gzip": 495485
+      }
+    }
+  }
+}

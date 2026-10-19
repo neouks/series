@@ -71,12 +71,12 @@ export function ThemeBootScript() {
         }
 
         var rawMode = readPreference("theme_mode", DEFAULTS.theme_mode);
-        var rawPreset = readPreference("theme_preset", DEFAULTS.theme_preset);
+        var rawPreset = DEFAULTS.theme_preset;
         var rawFont = readPreference("font", DEFAULTS.font);
-        var rawContentLayout = readPreference("content_layout", DEFAULTS.content_layout);
-        var rawNavbarStyle = readPreference("navbar_style", DEFAULTS.navbar_style);
-        var rawSidebarVariant = readPreference("sidebar_variant", DEFAULTS.sidebar_variant);
-        var rawSidebarCollapsible = readPreference("sidebar_collapsible", DEFAULTS.sidebar_collapsible);
+        var rawContentLayout = DEFAULTS.content_layout;
+        var rawNavbarStyle = DEFAULTS.navbar_style;
+        var rawSidebarVariant = DEFAULTS.sidebar_variant;
+        var rawSidebarCollapsible = DEFAULTS.sidebar_collapsible;
 
         var isValidMode = rawMode === "dark" || rawMode === "light" || rawMode === "system";
         var mode = isValidMode ? rawMode : DEFAULTS.theme_mode;

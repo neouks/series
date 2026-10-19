@@ -71,7 +71,7 @@ export const PREFERENCE_DEFAULTS: PreferenceValueMap = {
   font: "geist",
   content_layout: "full-width",
   navbar_style: "sticky",
-  sidebar_variant: "floating",
+  sidebar_variant: "sidebar",
   sidebar_collapsible: "icon",
 };
 
@@ -81,10 +81,10 @@ export const PREFERENCE_DEFAULTS: PreferenceValueMap = {
  */
 export const PREFERENCE_PERSISTENCE: PreferencePersistenceConfig = {
   theme_mode: "client-cookie",
-  theme_preset: "client-cookie",
+  theme_preset: "none",
   font: "client-cookie",
-  content_layout: "client-cookie",
-  navbar_style: "client-cookie",
-  sidebar_variant: "client-cookie", // layout-critical → cannot be "localStorage"
-  sidebar_collapsible: "client-cookie", // layout-critical → cannot be "localStorage"
+  content_layout: "none",
+  navbar_style: "none",
+  sidebar_variant: "none", // layout-critical → cannot be "localStorage"
+  sidebar_collapsible: "none", // layout-critical → cannot be "localStorage"
 };

@@ -1,0 +1,30 @@
+{
+  "before": {
+    "windowMs": 3000,
+    "totalRequests": 14,
+    "endpoints": {
+      "/intercept/pending": 2,
+      "/update/check": 2,
+      "/llm/profiles": 2,
+      "/companies": 2,
+      "/tasks": 2,
+      "/task-categories": 2,
+      "/tasks/notifications": 2
+    }
+  },
+  "after": {
+    "windowMs": 3000,
+    "totalRequests": 4,
+    "endpoints": {
+      "/intercept/pending": 2,
+      "/task-templates": 2
+    }
+  },
+  "method": "Local HTTP mock API, Next development mode with React Strict Mode. First 3 seconds after first non-auth GET of default landing page. This includes Strict Mode duplicate effects, excludes login and static resources; not production latency.",
+  "settingsAndSSE": {
+    "settingsClosedObservationSeconds": 52,
+    "settingsRequestsAfterClose": [],
+    "sseConnections": 1,
+    "sseDisconnections": 0
+  }
+}

@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Combobox,
   ComboboxContent,
@@ -27,6 +28,7 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -278,6 +280,7 @@ function TaskTemplateManager({
 }
 
 interface TaskTemplateControlsProps {
+  presentation?: "picker" | "cards";
   description: string;
   goal: string;
   selectedTemplateID: number | null;
@@ -287,6 +290,7 @@ interface TaskTemplateControlsProps {
 }
 
 export function TaskTemplateControls({
+  presentation = "picker",
   description,
   goal,
   selectedTemplateID,
@@ -387,39 +391,72 @@ export function TaskTemplateControls({
             </Button>
           </div>
         </div>
-        <Combobox
-          items={templates}
-          itemToStringLabel={(template) => template.name}
-          itemToStringValue={(template) => String(template.id)}
-          inputValue={templateInputValue}
-          onInputValueChange={(value) => setTemplateInputValue(value)}
-          value={selectedTemplate}
-          onValueChange={chooseTemplate}
-        >
-          <ComboboxInput
-            id="task-template-picker"
-            className="w-full"
-            placeholder={pickerPlaceholder}
-            disabled={loading || templates.length === 0}
-            showClear
-          />
-          <ComboboxContent portalContainer={portalContainer}>
-            <ComboboxEmpty>没有匹配的模板</ComboboxEmpty>
-            <ComboboxList>
-              {(template) => (
-                <ComboboxItem key={template.id} value={template}>
-                  <LibraryIcon />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-sm">{template.name}</p>
-                    {template.description && (
-                      <p className="truncate text-muted-foreground text-xs">{template.description}</p>
-                    )}
-                  </div>
-                </ComboboxItem>
+        {presentation === "cards" ? (
+          <Card className="py-0">
+            <CardContent className="px-0">
+              {loading ? (
+                <p role="status" className="p-5 text-muted-foreground">
+                  正在加载任务模板…
+                </p>
+              ) : templates.length === 0 ? (
+                <p className="p-5 text-muted-foreground">尚无任务模板，可将常用描述和目标保存为模板。</p>
+              ) : (
+                templates.map((template, index) => (
+                  <React.Fragment key={template.id}>
+                    {index > 0 && <Separator />}
+                    <Button
+                      variant="ghost"
+                      className="h-auto min-h-16 w-full justify-start whitespace-normal rounded-none px-5 py-4 text-left"
+                      onClick={() => chooseTemplate(template)}
+                    >
+                      <LibraryIcon data-icon="inline-start" />
+                      <span className="flex min-w-0 flex-1 flex-col gap-1">
+                        <span>{template.name}</span>
+                        <span className="line-clamp-1 text-xs font-normal text-muted-foreground">
+                          {template.description}
+                        </span>
+                      </span>
+                    </Button>
+                  </React.Fragment>
+                ))
               )}
-            </ComboboxList>
-          </ComboboxContent>
-        </Combobox>
+            </CardContent>
+          </Card>
+        ) : (
+          <Combobox
+            items={templates}
+            itemToStringLabel={(template) => template.name}
+            itemToStringValue={(template) => String(template.id)}
+            inputValue={templateInputValue}
+            onInputValueChange={(value) => setTemplateInputValue(value)}
+            value={selectedTemplate}
+            onValueChange={chooseTemplate}
+          >
+            <ComboboxInput
+              id="task-template-picker"
+              className="w-full"
+              placeholder={pickerPlaceholder}
+              disabled={loading || templates.length === 0}
+              showClear
+            />
+            <ComboboxContent portalContainer={portalContainer}>
+              <ComboboxEmpty>没有匹配的模板</ComboboxEmpty>
+              <ComboboxList>
+                {(template) => (
+                  <ComboboxItem key={template.id} value={template}>
+                    <LibraryIcon />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-sm">{template.name}</p>
+                      {template.description && (
+                        <p className="truncate text-muted-foreground text-xs">{template.description}</p>
+                      )}
+                    </div>
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
+        )}
         <FieldDescription>选择后会复制模板的描述和目标，不与模板保持关联。</FieldDescription>
       </Field>
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useSettingsDraft } from "@/components/settings/settings-context";
+
 // LLM 重试配置的共用件：五层重试各自的「次数 + 间隔」。
 //
 // 五层从内到外：建连(SDK) → 空响应(SDK) → 同 provider 安全窗口 → 轮询熔断 → 意图重跑。
@@ -267,10 +269,14 @@ export function RetryPolicyPanel() {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
 
+  const [draftVersion, resetDraft] = React.useReducer((n: number) => n + 1, 0);
+  useSettingsDraft(policy, draftVersion, !loading);
+
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
       const p = await api.llmRetryPolicy();
+      resetDraft();
       setPolicy({ ...ZERO_POLICY, ...p });
     } catch (e) {
       toast.error(`读取重试策略失败：${(e as Error).message}`);
@@ -289,6 +295,7 @@ export function RetryPolicyPanel() {
     try {
       // 后端会把越界值夹回区间并回传，直接用回传值刷新，所见即所存。
       const saved = await api.saveLLMRetryPolicy(policy);
+      resetDraft();
       setPolicy({ ...ZERO_POLICY, ...saved });
       toast.success("已保存，即时生效（正在跑的这一轮调用仍用旧参数）");
     } catch (e) {
