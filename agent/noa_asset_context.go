@@ -40,10 +40,18 @@ func (p assetContextProvider) filter(ctx context.Context, req llm.CompletionRequ
 			b.Content[r.c].Text = noaadapter.StripRefTag(b.Content[r.c].Text)
 		}
 	}
-	out, err := p.filterPlain(ctx, req)
+	req = clearRetrievalDirectory(req)
+	var out llm.CompletionRequest
+	var err error
+	if p.assets == nil {
+		out = req
+	} else {
+		out, err = p.filterPlain(ctx, req)
+	}
 	if err != nil {
 		return out, err
 	}
+	out = boundRetrievalHistory(deduplicateToolHistory(out))
 	for _, r := range refs {
 		b := &out.Messages[r.m].Content[r.b]
 		if r.c < len(b.Content) && b.Content[r.c].Type == llm.BlockText {

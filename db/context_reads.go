@@ -20,18 +20,20 @@ type ContextSearch struct {
 	Limit                            int
 }
 type ContextHit struct {
-	Ref           string `json:"ref"`
-	ID            int64  `json:"id"`
-	Kind          string `json:"kind"`
-	NodeID        int64  `json:"node_id"`
-	TaskID        int64  `json:"source_task_id"`
-	Inherited     bool   `json:"inherited,omitempty"`
-	State         string `json:"state,omitempty"`
-	Summary       string `json:"summary"`
-	Field         string `json:"match_field,omitempty"`
-	Snippet       string `json:"snippet,omitempty"`
-	FindingID     int64  `json:"finding_id,omitempty"`
-	FindingNodeID int64  `json:"finding_node_id,omitempty"`
+	Ref           string         `json:"ref"`
+	ID            int64          `json:"id"`
+	Kind          string         `json:"kind"`
+	NodeID        int64          `json:"node_id"`
+	TaskID        int64          `json:"source_task_id"`
+	Inherited     bool           `json:"inherited,omitempty"`
+	State         string         `json:"state,omitempty"`
+	Summary       string         `json:"summary"`
+	Field         string         `json:"match_field,omitempty"`
+	Snippet       string         `json:"snippet,omitempty"`
+	MatchOffset   *int           `json:"match_offset,omitempty"` // zero-based Unicode offset; nil for compound fields
+	Read          map[string]any `json:"read,omitempty"`         // populated by the role-aware tool layer
+	FindingID     int64          `json:"finding_id,omitempty"`
+	FindingNodeID int64          `json:"finding_node_id,omitempty"`
 }
 
 // Keep the lineage/asset policy shared with existing tool reads. The roots are
@@ -120,17 +122,18 @@ func (s *ExplorationStore) contextSearchSQL(activity, mixed bool) string {
 	sql := contextVisibility(roots, s.workerRead)
 	if activity {
 		sql += ` SELECT 'activity:'||a.id,a.id,'activity',n.id AS node_id,n.owner,n.exploration_id<>$1,n.state,
- left(COALESCE(a.summary,''),240),COALESCE(hit.path,''),COALESCE(hit.snippet,''),0::bigint` + extra + `
+ left(COALESCE(a.summary,''),240),COALESCE(hit.path,''),COALESCE(hit.snippet,''),hit.match_offset,0::bigint` + extra + `
  FROM visible n JOIN activity a ON a.node_id=n.id AND a.exploration_id=n.exploration_id
- LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet FROM (VALUES ('/detail',COALESCE(a.detail,'')),('/summary',COALESCE(a.summary,''))) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
+ LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet,strpos(lower(body),lower($3))-1 match_offset FROM (VALUES ('/detail',COALESCE(a.detail,'')),('/summary',COALESCE(a.summary,''))) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
  WHERE a.kind NOT IN ('thinking','usage') AND a.id<=` + upper + ` AND ($6::bigint=0 OR a.id<$6)` + before + `
  AND ($3='' OR hit.path IS NOT NULL)
  AND $8::boolean AND $2::text[] IS NOT NULL ORDER BY ` + order + ` LIMIT $7`
 	} else {
 		sql += ` SELECT 'node:'||n.id,n.id,n.kind,n.id AS node_id,v.owner,n.exploration_id<>$1,n.state,left(COALESCE(n.payload->>'summary',n.payload->>'text',n.payload->>'body',''),240),
- COALESCE(hit.path,''),COALESCE(hit.snippet,''),CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END` + extra + `
+ COALESCE(hit.path,''),COALESCE(hit.snippet,''),hit.match_offset,CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END` + extra + `
  FROM visible v JOIN exploration_nodes n ON n.id=v.id
- LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet
+ LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet,
+ CASE WHEN path='/report' OR jsonb_typeof(n.payload->substr(path,2))='string' THEN strpos(lower(body),lower($3))-1 END match_offset
  FROM (` + contextNodeFields + `) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
  WHERE $8::boolean ORDER BY ` + order + ` LIMIT $7`
 	}
@@ -153,7 +156,7 @@ func (s *ExplorationStore) SearchContext(ctx context.Context, q ContextSearch) (
 	out := []ContextHit{}
 	for rows.Next() {
 		var h ContextHit
-		if err = rows.Scan(&h.Ref, &h.ID, &h.Kind, &h.NodeID, &h.TaskID, &h.Inherited, &h.State, &h.Summary, &h.Field, &h.Snippet, &h.FindingID); err != nil {
+		if err = rows.Scan(&h.Ref, &h.ID, &h.Kind, &h.NodeID, &h.TaskID, &h.Inherited, &h.State, &h.Summary, &h.Field, &h.Snippet, &h.MatchOffset, &h.FindingID); err != nil {
 			return nil, err
 		}
 		if h.Kind == "finding" {

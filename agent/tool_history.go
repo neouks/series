@@ -20,7 +20,7 @@ func cloneToolMessages(req llm.CompletionRequest) llm.CompletionRequest {
 func normalizedReadQuery(name string, raw json.RawMessage) string {
 	defaults := map[string]any{}
 	switch name {
-	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
+	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
 		// New contracts have explicit continuation positions. Never deduplicate writes.
 		var v any
 		dec := json.NewDecoder(bytes.NewReader(raw))
@@ -120,6 +120,12 @@ func deduplicateToolHistory(req llm.CompletionRequest) llm.CompletionRequest {
 // model view. Live authorization still revalidates the retained history.
 func partialReadFailure(key string, block llm.ContentBlock) bool {
 	for _, c := range block.Content {
+		if c.Type == llm.BlockText && strings.HasPrefix(key, "graph_overview:") {
+			var status map[string]any
+			if json.Unmarshal([]byte(c.Text), &status) == nil && overviewHasFailure(status) {
+				return true
+			}
+		}
 		if c.Type == llm.BlockText && strings.Contains(c.Text, `"context_unavailable"`) {
 			var status struct {
 				Unavailable bool `json:"context_unavailable"`
@@ -154,6 +160,37 @@ func partialReadFailure(key string, block llm.ContentBlock) bool {
 				if json.Unmarshal(row[key], &value) == nil && value.Error != "" {
 					return true
 				}
+			}
+		}
+	}
+	return false
+}
+
+func overviewHasFailure(value any) bool {
+	switch x := value.(type) {
+	case map[string]any:
+		for key, v := range x {
+			if (key == "partial" || key == "unavailable") && v == true {
+				return true
+			}
+			if key == "unavailable" {
+				if m, ok := v.(map[string]any); ok && len(m) > 0 {
+					return true
+				}
+			}
+			if key == "error" || strings.HasSuffix(key, "_error") {
+				if s, ok := v.(string); ok && s != "" {
+					return true
+				}
+			}
+			if overviewHasFailure(v) {
+				return true
+			}
+		}
+	case []any:
+		for _, v := range x {
+			if overviewHasFailure(v) {
+				return true
 			}
 		}
 	}

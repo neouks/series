@@ -58,7 +58,7 @@ func (s *ExplorationStore) SearchMixedContext(ctx context.Context, q ContextSear
 	for rows.Next() {
 		var h ContextHit
 		var c ContextMixedCursor
-		if err := rows.Scan(&h.Ref, &h.ID, &h.Kind, &h.NodeID, &h.TaskID, &h.Inherited, &h.State, &h.Summary, &h.Field, &h.Snippet, &h.FindingID, &c.Time, &c.Source, &c.NodeUpper, &c.ActivityUpper); err != nil {
+		if err := rows.Scan(&h.Ref, &h.ID, &h.Kind, &h.NodeID, &h.TaskID, &h.Inherited, &h.State, &h.Summary, &h.Field, &h.Snippet, &h.MatchOffset, &h.FindingID, &c.Time, &c.Source, &c.NodeUpper, &c.ActivityUpper); err != nil {
 			return nil, nil, err
 		}
 		c.ID = h.ID

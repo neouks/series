@@ -124,7 +124,7 @@ func querySignature(v any) string {
 	return hex.EncodeToString(sum[:12])
 }
 func (t *ToolSet) contextSearch() actool.CoreTool {
-	return readTool("context_search", "按类型检索授权可见的任务上下文摘要和正文，返回命中片段及 node:ID/activity:ID；正文用 context_get。默认查询有权限的 fact/finding/intent。activity 只含 Worker 执行记录，需显式选择，可混合查询；混合结果按登记时间倒序，单类按ID倒序。默认10条、最多50条，输出预算可能缩小页长；has_more/next_cursor续页。", obj(map[string]any{
+	return readTool("context_search", "按类型检索授权可见的任务上下文摘要和正文，返回命中片段、match_offset及node:ID/activity:ID；read可直接传给context_get，从命中附近读取。默认查询有权限的 fact/finding/intent。activity 只含 Worker 执行记录，需显式选择，可混合查询；混合结果按登记时间倒序，单类按ID倒序。默认10条、最多50条，输出预算可能缩小页长；has_more/next_cursor续页。", obj(map[string]any{
 		"task_id": contextTaskSchema(), "types": map[string]any{"type": "array", "description": "选择当前角色可用类型；省略时从 fact/finding/intent 中取有权限的类型，activity须显式选择", "items": map[string]any{"type": "string", "enum": ContextTypes}},
 		"q": str("不区分大小写的字面关键词，最多200字符；查摘要及正文（漏洞含报告），空值列出记录，不支持正则"), "asset_id": idp("关联资产ID"), "intent_id": idp("意图节点ID：查询该意图及其产出；activity查询该Worker记录"), "state": str("节点状态；activity按所属意图状态筛选，如open/running/done/blocked/exhausted/stopped"), "severity": str("payload.severity精确筛选，如critical/high/medium/low；其他不含该字段的记录也被排除"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("保留原查询条件，传入next_cursor；新消息不插入当前分页"),
 	}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
@@ -177,7 +177,7 @@ func (t *ToolSet) contextSearch() actool.CoreTool {
 		signatureInput.TaskID = contextTaskID(strconv.FormatInt(target.taskID, 10))
 		signature := querySignature(signatureInput)
 		if len(a.Types) > 1 && slices.Contains(a.Types, "activity") {
-			return target.searchMixedContext(ctx, a, signature)
+			return target.searchMixedContext(ctx, a, signature, cross)
 		}
 		var cursor readCursor
 		var err error
@@ -198,6 +198,7 @@ func (t *ToolSet) contextSearch() actool.CoreTool {
 		if more {
 			hits = hits[:a.Limit]
 		}
+		t.addContextHitReads(ctx, a, hits, cross)
 		out := map[string]any{"items": hits, "has_more": more}
 		if more {
 			if a.Cursor == "" {
@@ -208,6 +209,29 @@ func (t *ToolSet) contextSearch() actool.CoreTool {
 		}
 		return contextJSON(ctx, out)
 	})
+}
+
+// Keep the original query scope, not source_task_id: inherited records are read
+// through the current task's permissions, never an implicit cross-task grant.
+func (t *ToolSet) addContextHitReads(ctx context.Context, a contextSearchInput, hits []db.ContextHit, cross bool) {
+	for i := range hits {
+		h := &hits[i]
+		cap := "detail"
+		if h.Kind == "activity" {
+			cap = "activity_detail"
+		}
+		if !contextAllows(ctx, cap, cross) {
+			continue
+		}
+		item := contextRead{Ref: h.Ref, Field: h.Field}
+		if h.MatchOffset != nil {
+			item.Offset = max(0, *h.MatchOffset-60)
+		}
+		h.Read = map[string]any{"items": []contextRead{item}}
+		if a.TaskID != "" {
+			h.Read["task_id"] = a.TaskID
+		}
+	}
 }
 
 type contextRead struct {

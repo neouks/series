@@ -466,7 +466,7 @@ func jsonResult(v any) (actool.Result, error) {
 // --- read tools (planner + worker) ---
 
 func (t *ToolSet) graphOverview() actool.CoreTool {
-	return readTool("graph_overview", "任务态势摘要。Planner 每轮已预取，仅需刷新时调用。", obj(map[string]any{"task_id": contextTaskSchema()}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	return readTool("graph_overview", "任务态势窗口。sections给出shown、has_more（null表示未知）及读取入口；省略字段按omitted_fields读取，未展示不代表不存在。Planner每轮已预取，仅需刷新时调用。", obj(map[string]any{"task_id": contextTaskSchema()}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			TaskID contextTaskID `json:"task_id"`
 		}
@@ -477,7 +477,7 @@ func (t *ToolSet) graphOverview() actool.CoreTool {
 		if err != nil {
 			return actool.Errorf(err.Error()), nil
 		}
-		return jsonResult(target.graphOverviewData())
+		return contextJSON(ctx, boundedGraphOverview(target.graphOverviewData(), plannerOverviewRunes, readOutputBudget(ctx), string(a.TaskID)))
 	})
 }
 
@@ -684,7 +684,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		out["cold_digests"] = cds
 	}
 	if len(more) > 0 {
-		out["cold_digests_more"] = more
+		out["cold_digests_more"] = more[:min(50, len(more))]
+		out["cold_digests_has_more"] = true
+		out["cold_digests_read"] = overviewRead("cold_digests")
 	}
 	// the original task (root) so the planner always has it, not just the
 	// decomposed goals.
@@ -1135,7 +1137,9 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 				item["cold_digests"] = cds
 			}
 			if len(more) > 0 {
-				item["cold_digests_more"] = more
+				item["cold_digests_more"] = more[:min(50, len(more))]
+				item["cold_digests_has_more"] = true
+				item["cold_digests_read"] = overviewRead("cold_digests")
 			}
 		}
 		if statsErr == nil && t.as == nil {

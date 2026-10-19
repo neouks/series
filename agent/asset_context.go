@@ -55,7 +55,7 @@ type assetContextProvider struct {
 }
 
 func withAssetContext(provider llm.Provider, assets *db.AssetStore, taskID int64) llm.Provider {
-	if assets == nil || taskID <= 0 {
+	if taskID <= 0 {
 		return provider
 	}
 	return assetContextProvider{Provider: provider, assets: assets, taskID: taskID}
@@ -70,7 +70,7 @@ func WithTaskAssetContext(provider llm.Provider, assets *db.AssetStore, taskID i
 // FilterTaskAssetRequest runs before a host compresses a stored task snapshot.
 // It returns a model-view copy; the source transcript remains unchanged.
 func FilterTaskAssetRequest(ctx context.Context, assets *db.AssetStore, taskID int64, req llm.CompletionRequest) (llm.CompletionRequest, error) {
-	if assets == nil || taskID <= 0 {
+	if taskID <= 0 {
 		return req, nil
 	}
 	return (assetContextProvider{assets: assets, taskID: taskID}).filter(ctx, req)
@@ -216,7 +216,6 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 	main := ri.AgentKey == "mainagent" && ri.TaskID == p.taskID && p.taskID > 0 && ri.IntentID == 0
 	worker := ri.AgentKey == "worker" && ri.TaskID == p.taskID && ri.IntentID > 0
 	req = redactUnverifiableStructuredHistory(req)
-	req = deduplicateToolHistory(req)
 	var refreshErr error
 	var accessSnapshot *targetAccessSnapshot
 	req, accessSnapshot, refreshErr = p.refreshTargetAccess(ctx, req)

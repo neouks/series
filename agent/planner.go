@@ -287,12 +287,11 @@ func truncOutput(s string, n int) string {
 // lightweight tagged projection is bounded; full persisted detail remains one
 // tool call away (context_get / context_search / …).
 func renderGraphOverview(data map[string]any) string {
-	const plannerOverviewMaxRunes = 24_000
-	return "\n\n【本轮态势（graph_overview 的轻量预取；需要细节再按需调 context_get/context_search 等）】：\n" +
-		renderLightTaggedOrdered("graph_overview", data, []string{
-			"task", "asset_approval_counts", "asset_approval_error", "frontier_open", "findings_total", "facts", "running_intents", "goals", "hints",
-			"open_intents", "recent_done_intents", "recent_facts", "coverage", "related_tasks",
-		}, plannerOverviewMaxRunes)
+	const prefix = "\n\n【本轮态势：有界窗口，未展示不代表不存在；sections 提供遗漏状态和读取入口】：\n<graph_overview>\n"
+	const suffix = "\n</graph_overview>"
+	view := boundedGraphOverview(data, plannerOverviewRunes-len([]rune(prefix+suffix)), 0)
+	body, _ := json.Marshal(view)
+	return prefix + string(body) + suffix
 }
 
 // plannerDefaultTmpl is the built-in EDITABLE body (段 [A]) of the planner prompt,

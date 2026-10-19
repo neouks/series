@@ -9,7 +9,7 @@ import (
 	"github.com/neouks/series/db"
 )
 
-func (t *ToolSet) searchMixedContext(ctx context.Context, a contextSearchInput, signature string) (actool.Result, error) {
+func (t *ToolSet) searchMixedContext(ctx context.Context, a contextSearchInput, signature string, cross bool) (actool.Result, error) {
 	var envelope struct {
 		Signature string                 `json:"s"`
 		Position  *db.ContextMixedCursor `json:"m"`
@@ -28,6 +28,7 @@ func (t *ToolSet) searchMixedContext(ctx context.Context, a contextSearchInput, 
 	if more {
 		hits = hits[:a.Limit]
 	}
+	t.addContextHitReads(ctx, a, hits, cross)
 	out := map[string]any{"items": hits, "has_more": more}
 	if more {
 		envelope.Signature, envelope.Position = signature, next
