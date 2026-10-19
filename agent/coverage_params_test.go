@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	actool "github.com/Autumn-27/norma/tool"
@@ -55,5 +56,13 @@ func TestStripCoverageParams(t *testing.T) {
 	original, _ := nestedMap(search.InputSchema(), "properties")
 	if original["untested"] == nil {
 		t.Fatal("不应修改共享的资产检索 Schema")
+	}
+	if !strings.Contains(filtered[0].Description(), "本任务已关闭覆盖度") {
+		t.Fatal("工具说明仍引导未测试查询")
+	}
+	narrow := deepCopyJSONMap(search.InputSchema())
+	narrow["required"] = []string{"untested"}
+	if got := ts.StripCoverageParams([]actool.CoreTool{DecorateTool(search, "only untested", narrow)}); len(got) != 0 {
+		t.Fatal("覆盖度关闭时不应提供仅能查未测试资产的工具")
 	}
 }

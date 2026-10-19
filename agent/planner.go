@@ -398,6 +398,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		return false, "", err
 	}
 	tools = tsx.StripCoverageParams(tools)
+	def.AssetGuidance = plannerAssetGuidance(tools)
 	if err := requireRoleTools("planner", tools); err != nil {
 		return false, "", err
 	}

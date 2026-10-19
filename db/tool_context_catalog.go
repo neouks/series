@@ -195,7 +195,8 @@ func DefaultContextGrants(role string) ContextToolGrants {
 }
 
 // An explicit new binding grants the new tool's local capabilities. Unchanged
-// bindings keep their migrated subset; editing descriptions cannot enlarge it.
+// bindings keep their migrated subset, except Planner's bound asset_search must
+// support normal DSL searches as well as any retained untested capability.
 func updateContextBindingGrants(tx *sql.Tx, key string, agents json.RawMessage, enabled bool) error {
 	caps := map[string][]string{
 		"context_search": {"fact", "finding", "intent", "goal", "hint", "digest", "activity", "activity_all"},
@@ -243,6 +244,11 @@ func updateContextBindingGrants(tx *sql.Tx, key string, agents json.RawMessage, 
 		if !exists {
 			p = DefaultContextGrants(role)
 		}
+		if key == "asset_search" && role == "planner" && !slices.Contains(p.Local, "assets") {
+			p.Local = append(p.Local, "assets")
+			policies[role] = p
+			changed = true
+		}
 		if slices.Contains(old, role) {
 			// A disable/re-enable preserves any migrated subset. Only a
 			// previously disabled, ungranted capability needs a fresh grant.
@@ -269,4 +275,41 @@ func updateContextBindingGrants(tx *sql.Tx, key string, agents json.RawMessage, 
 	}
 	_, err = tx.Exec(`INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, ContextCapabilitiesSetting, string(raw))
 	return err
+}
+
+const plannerAssetSearchMigration = "tool_planner_asset_search_v1"
+
+// MigratePlannerAssetSearch repairs the legacy untested-only Planner binding.
+// It grants only local asset reads, never enables or binds a disabled tool, and
+// leaves all other roles and cross-task grants intact. No asset approval changes.
+func (d *DB) MigratePlannerAssetSearch() error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`SELECT pg_advisory_xact_lock(719047221)`); err != nil {
+		return err
+	}
+	var done bool
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM settings WHERE key=$1 AND value='true')`, plannerAssetSearchMigration).Scan(&done); err != nil {
+		return err
+	}
+	if done {
+		return tx.Commit()
+	}
+	var agents json.RawMessage
+	err = tx.QueryRow(`SELECT agents FROM tools WHERE key='asset_search' AND system AND enabled AND agents ? 'planner' FOR UPDATE`).Scan(&agents)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil {
+		if err = updateContextBindingGrants(tx, "asset_search", agents, true); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(`INSERT INTO settings(key,value) VALUES($1,'true') ON CONFLICT(key) DO UPDATE SET value='true'`, plannerAssetSearchMigration); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

@@ -18,6 +18,7 @@ import (
 type DeferredInfo struct {
 	ContextReads    bool              // final role surface has unified context readers
 	FindingGuidance string            // derived from the final permitted tools, including DB overrides
+	AssetGuidance   string            // Planner guidance follows the final bound asset readers
 	Deferred        []string          // all MCP tool names (schema withheld)
 	GlobalNames     []string          // MCP names to list in the system-prompt block
 	Unlock          *actool.UnlockSet // shared call-gate; nil when no MCP tools
@@ -97,6 +98,9 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 		}
 	}
 	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
+	if agentKey == "planner" {
+		def.AssetGuidance = plannerAssetGuidance(out)
+	}
 	for i, tool := range out {
 		if tool.Name() == "context_search" || tool.Name() == "context_get" || tool.Name() == "asset_search" {
 			def.ContextReads = true

@@ -40,7 +40,7 @@ func TestContextCatalogMigrationPreservesGrants(t *testing.T) {
 			}
 		}
 	}()
-	for _, key := range []string{"tool_context_catalog_v1", ContextCapabilitiesSetting} {
+	for _, key := range []string{"tool_context_catalog_v1", ContextCapabilitiesSetting, plannerAssetSearchMigration} {
 		v, ok, e := d.GetSetting(key)
 		if e != nil {
 			t.Fatal(e)
@@ -68,6 +68,7 @@ func TestContextCatalogMigrationPreservesGrants(t *testing.T) {
 	seed("node_detail", `["reader"]`)
 	seed("list_task_findings", `["remote-reader"]`)
 	seed("list_assets", `["asset-reader"]`)
+	seed("list_untested_assets", `["planner","coverage-reader"]`)
 	seed("get_worker_trace", `["reader"]`)
 	d.Exec(`UPDATE tools SET enabled=false WHERE key='get_worker_trace'`)
 	if _, e = d.Exec(`UPDATE tools SET system=false WHERE key='context_search'`); e != nil {
@@ -91,6 +92,20 @@ func TestContextCatalogMigrationPreservesGrants(t *testing.T) {
 	}
 	var grants map[string]ContextToolGrants
 	json.Unmarshal([]byte(raw), &grants)
+	if slices.Contains(grants["planner"].Local, "assets") || !slices.Contains(grants["planner"].Local, "untested") {
+		t.Fatal("fixture did not reproduce legacy untested-only Planner", grants)
+	}
+	if e = d.MigratePlannerAssetSearch(); e != nil {
+		t.Fatal(e)
+	}
+	raw, _, e = d.GetSetting(ContextCapabilitiesSetting)
+	if e != nil {
+		t.Fatal(e)
+	}
+	json.Unmarshal([]byte(raw), &grants)
+	if !slices.Contains(grants["planner"].Local, "assets") || !slices.Contains(grants["planner"].Local, "untested") || len(grants["planner"].Cross) != 0 || slices.Contains(grants["coverage-reader"].Local, "assets") {
+		t.Fatal("Planner repair changed unrelated grants", grants)
+	}
 	if !slices.Contains(grants["reader"].Local, "fact") || !slices.Contains(grants["reader"].Local, "detail") || slices.Contains(grants["reader"].Local, "activity") {
 		t.Fatal(grants)
 	}

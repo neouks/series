@@ -25,6 +25,7 @@ func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary
 		sysText += contextReadRule
 	}
 	sysText += def.FindingGuidance
+	sysText += def.AssetGuidance
 	block := actool.RenderDeferredToolsBlock(def.GlobalNames)
 	if block == "" {
 		return []string{sysText}, 1
@@ -32,6 +33,28 @@ func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary
 	system = []string{sysText, block}
 	boundary = len(system) // b >= len → whole system prompt cached (SDK guard)
 	return system, boundary
+}
+
+// Appended after editable prompts so saved instructions cannot advertise an
+// unbound asset reader. The handler still enforces all grants and task scope.
+func plannerAssetGuidance(tools []actool.CoreTool) string {
+	search, get := false, false
+	for _, tool := range tools {
+		search = search || tool.Name() == "asset_search"
+		get = get || tool.Name() == "asset_get"
+	}
+	text := "\nPlanner 资产读取："
+	if search {
+		text += "本轮已提供 asset_search，普通检索传非空 dsl（如 ip==192.0.2.1）；仅检索本任务及直接关联任务的授权可见资产，不传 task_id。"
+	} else {
+		text += "本轮未提供 asset_search，不得调用；使用已提供的态势及其他实际可用工具，不猜测资产 ID。"
+	}
+	if get {
+		text += "已知资产 ID 时按需用 asset_get 读取详情。"
+	} else {
+		text += "本轮未提供 asset_get，不得调用。"
+	}
+	return text + "工具读取权限不等于资产审批；未审批、封禁、撤回或越界方向仍须跳过，不能通过其他工具绕过。"
 }
 
 // seedUnlockFromHistory replays prior Skill() invocations in the conversation so

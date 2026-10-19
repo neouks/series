@@ -256,21 +256,37 @@ func (t *ToolSet) StripCoverageParams(tools []actool.CoreTool) []actool.CoreTool
 	if !t.coverageDisabled {
 		return tools
 	}
-	for i, tool := range tools {
+	out := make([]actool.CoreTool, 0, len(tools))
+	for _, tool := range tools {
 		if tool.Name() != "insert_assets" && tool.Name() != "asset_search" {
+			out = append(out, tool)
 			continue
 		}
 		schema := deepCopyJSONMap(tool.InputSchema())
+		desc := tool.Description()
 		if tool.Name() == "asset_search" {
+			untestedOnly := false
+			if required, ok := schema["required"].([]any); ok {
+				for _, key := range required {
+					untestedOnly = untestedOnly || key == "untested"
+				}
+			}
+			if untestedOnly {
+				// A migrated coverage-only reader has no usable mode while coverage
+				// is off. Do not expose a schema requiring a removed property.
+				continue
+			}
 			if props, ok := nestedMap(schema, "properties"); ok {
 				delete(props, "untested")
 			}
+			schema["required"] = []string{"dsl"}
+			desc = "检索当前角色授权可见的资产摘要，必须提供非空dsl；本任务已关闭覆盖度，不提供未测试筛选。默认页长见limit.default，最多50条；保持筛选条件用next_offset续页。任务范围及资产审批过滤仍生效。"
 		} else if props, ok := nestedMap(schema, "properties", "assets", "items", "properties"); ok {
 			delete(props, "related")
 		}
-		tools[i] = DecorateTool(tool, tool.Description(), schema)
+		out = append(out, DecorateTool(tool, desc, schema))
 	}
-	return tools
+	return out
 }
 
 // deepCopyJSONMap returns a JSON round-trip deep copy of a schema map so callers can

@@ -66,8 +66,27 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 			prop["description"] = "可选类型：" + strings.Join(allowed, "/") + "；省略时按所选任务权限从 " + strings.Join(defaults, "/") + " 中选择；activity须显式指定"
 		}
 	}
-	if t.Name() == "asset_search" && !slices.Contains(p.Local, "untested") {
-		delete(props, "untested")
+	if t.Name() == "asset_search" {
+		assets, untested := slices.Contains(p.Local, "assets"), slices.Contains(p.Local, "untested")
+		switch {
+		case assets && untested:
+			desc = "检索当前角色授权可见的资产摘要；普通搜索提供非空dsl，untested=true仅查询任务覆盖范围内未测试资产。"
+		case assets:
+			delete(props, "untested")
+			schema["required"] = []string{"dsl"}
+			desc = "检索当前角色授权可见的资产摘要，必须提供非空dsl。当前未授予未测试资产筛选能力。"
+		case untested:
+			// Other roles keep their migrated subset; show its actual contract.
+			props["untested"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "必须显式传true；当前仅允许查询未测试资产"}
+			schema["required"] = []string{"untested"}
+			desc = "仅查询当前任务覆盖范围内授权可见的未测试资产，必须显式传untested=true；dsl可选。不提供普通资产搜索。"
+		default:
+			desc = "当前未授予资产搜索能力，请检查工具绑定和读取权限，不要重复调用。"
+		}
+		if dsl, ok := props["dsl"].(map[string]any); ok {
+			dsl["description"] = "筛选表达式，如 ip==192.0.2.1；支持domain/ip/url/port/technology、AND/OR、=模糊、==精确"
+		}
+		desc += " 默认页长见limit.default，最多50条；保持筛选条件用next_offset续页。任务范围及资产审批过滤仍生效，不能指定其他任务。"
 	}
 	if t.Name() == "context_get" {
 		views := []string{}
@@ -135,6 +154,9 @@ func loadContextAccess(pg *db.DB, role string) (agent.ContextAccess, error) {
 
 func migrateContextCatalog(pg *db.DB) error {
 	if e := pg.MigrateContextTools(); e != nil {
+		return e
+	}
+	if e := pg.MigratePlannerAssetSearch(); e != nil {
 		return e
 	}
 	defaults := agent.BuiltinPromptSeeds()
