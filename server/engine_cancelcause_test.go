@@ -21,22 +21,33 @@ func TestPauseCancelsWithNamedCause(t *testing.T) {
 	}
 }
 
-func TestKillWorkCancelsOnlyThatWorkWithNamedCause(t *testing.T) {
+func TestPlannerStopCancelsOnlyThatWorkWithNamedCause(t *testing.T) {
 	e := NewEngine(nil)
 	execCtx := e.execContextFor(context.Background(), "t1")
 	workCtx, workCancel := context.WithCancelCause(execCtx)
 	e.registerWork(42, workCancel)
-	if err := e.KillWork(42); err != nil {
-		t.Fatal(err)
-	}
+	done := make(chan error, 1)
+	go func() { done <- e.controlWork(context.Background(), 42, "kill", agent.AbortKilledByPlanner) }()
+	<-workCtx.Done()
 	if code, _, _, ok := agent.AbortReason(workCtx); !ok || code != "killed_by_planner" {
 		t.Fatalf("code=%q ok=%v, want killed_by_planner", code, ok)
 	}
 	if execCtx.Err() != nil {
 		t.Fatal("kill_work cancelled the entire task context")
 	}
-	_, complete := e.detachWork(42)
+	select {
+	case err := <-done:
+		t.Fatalf("termination returned before settlement: %v", err)
+	default:
+	}
+	action, complete := e.detachWork(42)
+	if action != "kill" {
+		t.Fatalf("action=%q, want kill", action)
+	}
 	complete(nil)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestControlWorkCarriesUserActionCause(t *testing.T) {

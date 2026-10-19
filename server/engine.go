@@ -407,8 +407,8 @@ func (e *Engine) registerWork(intentID int64, cancel context.CancelCauseFunc) {
 }
 
 // detachWork removes the live control handle once Execute has returned. complete
-// must be called after the final intent state write so a waiting cancel handler can
-// safely delete the worker's blackboard output without racing a late write.
+// must be called after the final state write so a waiting controller can safely
+// finish cancellation without racing a late Worker write.
 func (e *Engine) detachWork(intentID int64) (action string, complete func(error)) {
 	e.workMu.Lock()
 	run := e.work[intentID]
@@ -427,15 +427,27 @@ func (e *Engine) detachWork(intentID int64) (action string, complete func(error)
 	return action, func(err error) { run.done <- err }
 }
 
-// ControlWork requests a user-visible pause or cancellation and waits until the
-// worker has fully stopped writing. Cancellation cleanup is performed by the API
-// handler after this returns; pause state is committed by runWorkerStep itself.
+// ControlWork requests a user pause/cancellation and waits until the worker has
+// stopped writing. The API then records the user cancellation without deleting output.
 func (e *Engine) ControlWork(ctx context.Context, intentID int64, action string) error {
 	if action != "pause" && action != "cancel" {
 		return fmt.Errorf("unsupported work action %q", action)
 	}
+	cause := error(agent.AbortWorkPausedByUser)
+	if action == "cancel" {
+		cause = agent.AbortWorkCancelledByUser
+	}
+	return e.controlWork(ctx, intentID, action, cause)
+}
+
+// controlWork also supports the internal planner kill action. Settlement errors
+// propagate to the caller, so sending a signal alone never counts as success.
+func (e *Engine) controlWork(ctx context.Context, intentID int64, action string, cause error) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	e.workMu.Lock()
 	run := e.work[intentID]
@@ -449,10 +461,6 @@ func (e *Engine) ControlWork(ctx context.Context, intentID int64, action string)
 	}
 	run.action = action
 	done := run.done
-	cause := error(agent.AbortWorkPausedByUser)
-	if action == "cancel" {
-		cause = agent.AbortWorkCancelledByUser
-	}
 	run.cancel(cause)
 	e.workMu.Unlock()
 
@@ -632,19 +640,6 @@ func (h steerHooks) Stop(ctx context.Context, messages []llm.Message) (bool, []s
 	}
 	log.Printf("[work %s] 空转回合(仅思考、无正文无工具)，注入续跑指令 (%d/%d)", h.label, n, h.limit)
 	return false, []string{emptyTurnNudge}, ""
-}
-
-// KillWork cancels the in-flight work running intentID (planner's kill_work tool).
-// The work's agent-core session honors ctx cancellation and aborts promptly.
-func (e *Engine) KillWork(intentID int64) error {
-	e.workMu.Lock()
-	run := e.work[intentID]
-	e.workMu.Unlock()
-	if run == nil {
-		return fmt.Errorf("意图 %d 当前没有运行中的 work（可能已结束或未被领取）", intentID)
-	}
-	run.cancel(agent.AbortKilledByPlanner)
-	return nil
 }
 
 // CancelWorkersForAssets stops only workers anchored to revoked/deleted assets
@@ -1211,6 +1206,14 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	var controlErr error
 	defer func() { completeWork(controlErr) }()
+	if action == "kill" {
+		controlErr = transitionIntentState(t.Store, intent.ID, "running", "stopped")
+		if controlErr != nil {
+			log.Printf("[worker %s] task %s 意图 #%d 规划者终止状态落库失败: %v", name, t.ID, intent.ID, controlErr)
+		}
+		e.touch(t.ID)
+		return true
+	}
 	if action == "pause" {
 		controlErr = transitionIntentState(t.Store, intent.ID, "running", "paused")
 		if controlErr != nil {
@@ -1222,15 +1225,15 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		return true
 	}
 	if action == "cancel" {
-		// Park the stopped run in paused before handing cleanup to the API. If the
+		// Park the stopped run in paused before recording user cancellation. If the
 		// request disconnects after cancellation, the intent remains recoverable and
-		// a later cancel can finish cleanup instead of leaving a phantom running row.
+		// a later cancel can finish recording the reason and execution lock.
 		controlErr = transitionIntentState(t.Store, intent.ID, "running", "paused")
 		if controlErr != nil {
 			log.Printf("[worker %s] task %s 意图 #%d 取消栅栏落库失败: %v", name, t.ID, intent.ID, controlErr)
 			return true
 		}
-		log.Printf("[worker %s] task %s 意图 #%d 已停止，等待取消清理", name, t.ID, intent.ID)
+		log.Printf("[worker %s] task %s 意图 #%d 已停止，等待登记用户取消", name, t.ID, intent.ID)
 		e.touch(t.ID)
 		return true
 	}

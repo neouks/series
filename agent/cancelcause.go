@@ -55,7 +55,7 @@ var (
 	AbortWorkPausedByUser = cause("work_paused_by_user", "用户暂停了这条 Worker 意图",
 		"用户暂停了正在运行的 Worker。本次调用被取消，意图转为 paused；已经登记的意图、事实、漏洞和活动记录全部保留，恢复后从头重新执行")
 	AbortWorkCancelledByUser = cause("work_cancelled_by_user", "用户取消了这条 Worker 意图",
-		"用户取消了正在运行的 Worker。本次调用被取消；Worker 退出写入区后，服务端会事务性删除该意图及其直接产生的事实、漏洞和执行记录")
+		"用户通过页面或主 Agent 对话取消了正在运行的 Worker。本次调用被取消；Worker 退出写入区后，意图标记为 stopped 并记录取消原因，保留意图及已有产出，仅用户手动重新开启后可执行")
 	AbortWorkFinished = cause("work_finished", "Worker 已正常结束并释放 context",
 		"Worker 已正常结束，引擎在 detachWork 中释放其 context 资源。这不是运行中断；若它出现在中断消息中，说明取消与收场事件发生了竞态")
 	AbortPausedRaceGuard = cause("paused_race_guard", "任务暂停期间拒绝启动新运行",

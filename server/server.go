@@ -447,7 +447,7 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	pProv, pCfg := s.providerForAgent("planner", pinID, gProv, gCfg)
 	pl := agent.NewPlanner(pProv, pCfg.Model, s.m.dir, tx, pCfg.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.evidenceStore())
-	pl.SetKillWork(s.engine.KillWork)                       // planner kill_work → terminate a running work
+	pl.SetKillWork(s.engine.KillWork)                       // planner kill_work → stop queued/running intent
 	pl.SetSteerWork(s.engine.SteerWork)                     // planner steer_work → inject mid-run course-correction
 	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
 	pl.SetWebSearch(s.webSearchFor("planner"))
@@ -526,6 +526,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.mainAgent.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))
 	s.mainAgent.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
+	s.mainAgent.SetCancelIntent(s.cancelIntentFromMain)
 	s.mainAgent.SetNonStreaming(nonStreamingResolver(mCfg))
 	s.mainAgent.SetMaxTokens(maxTokensResolver(mCfg))
 	s.mainAgent.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(每 run 读)
@@ -1250,8 +1251,8 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 }
 
 // controlIntent pauses, resumes, or cancels one local worker intent. A running
-// worker is always stopped before state mutation/cleanup, preventing tool output
-// that arrives after the user action from recreating deleted blackboard records.
+// worker stops writing before the cancellation reason and execution lock are
+// persisted; the intent and its existing output are retained.
 func (s *Server) controlIntent(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.m.Task(r.PathValue("id"))
 	if !ok {

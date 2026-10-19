@@ -118,9 +118,9 @@ type ToolSet struct {
 	writes          WriteCounts
 	mainExecution   bool // set only by the trusted task MainAgent runtime
 	workerExecution bool // set only by Worker.execute, never by tool arguments/catalog
-	// killWork, if set, terminates a running work by intent id (engine callback,
-	// wired by the planner). nil = the kill_work tool reports unavailable.
-	killWork func(intentID int64) error
+	// Task-scoped host callbacks; nil means the corresponding tool is unavailable.
+	killWork     IntentStopper
+	cancelIntent IntentStopper
 	// steerWork, if set, queues a mid-run course-correction for the work running an
 	// intent id (engine callback, wired by the planner): the worker injects it before
 	// its next tool call and re-plans, without being killed. nil = tool unavailable.
@@ -2351,44 +2351,12 @@ func (t *ToolSet) addHint() actool.CoreTool {
 		})
 }
 
-// killWorkTool lets the planner terminate a single running work (by intent id).
-func (t *ToolSet) killWorkTool() actool.CoreTool {
-	return t.writeExpTool("kill_work", "终止一条正在运行的意图(work)。用于叫停跑偏/无意义的探索；被终止的意图标记为 stopped，不再自动重领。先用 context_get 的 output 视图了解当前进度。",
-		obj(map[string]any{"intent_id": idp("要终止的意图 id（= work 句柄）")}, "intent_id"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
-			if t.killWork == nil {
-				return actool.Errorf("kill_work 当前不可用"), nil
-			}
-			var a struct {
-				IntentID json.RawMessage `json:"intent_id"`
-			}
-			if err := json.Unmarshal(in, &a); err != nil {
-				return actool.Errorf("参数格式错误: " + err.Error()), nil
-			}
-			id := pid(a.IntentID)
-			if id <= 0 {
-				return actool.Errorf("intent_id 必填"), nil
-			}
-			node, err := t.ts.GetNode(id)
-			if err != nil || node == nil || node.Kind != db.KindIntent {
-				return actool.Errorf("intent_id 必须是本任务的意图（关联任务意图只读）"), nil
-			}
-			if !t.nodeAuthorized(node) {
-				return actool.Errorf("该意图关联的任务资产未获授权或已被封禁"), nil
-			}
-			if err := t.killWork(id); err != nil {
-				return actool.Errorf(err.Error()), nil
-			}
-			return actool.Text(fmt.Sprintf("已向意图 %d 的 work 发送终止信号", id)), nil
-		})
-}
-
 // steerWorkTool lets the planner inject a mid-run course-correction into a running
 // work WITHOUT killing it: the message reaches the worker before its next tool call,
 // which re-plans its next step (already-gathered context is kept). For in-intent
 // nudges ("停做 X、聚焦 Y"); if the whole direction is wrong use kill_work + a new intent.
 func (t *ToolSet) steerWorkTool() actool.CoreTool {
-	return t.writeExpTool("steer_work", "给一条正在运行的意图(work)实时注入纠偏指令，不打断它、不丢已有进展：worker 会在下一步动作前收到你的指令并据此调整。用于'别再走 X、聚焦 Y'这类【意图内】纠偏；若方向整个错了应改用 kill_work 再下新意图。建议先用 context_get 的 output 视图了解当前进度。",
+	return t.writeExpTool("steer_work", "给一条正在运行的意图(work)实时注入纠偏指令，不打断它、不丢已有进展：worker 会在下一步动作前收到你的指令并据此调整。用于'别再走 X、聚焦 Y'这类【意图内】纠偏；需要停止执行时，使用当前角色的意图取消或终止工具。建议先用 context_get 的 output 视图了解当前进度。",
 		obj(map[string]any{
 			"intent_id": idp("要纠偏的意图 id（= work 句柄）"),
 			"message":   str("给 worker 的纠偏指令，明确让它停止什么、转向什么"),

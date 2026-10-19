@@ -33,6 +33,8 @@ func ResolveBuiltinTool(t actool.CoreTool, description string, saved map[string]
 
 func builtinContractOwned(name string) bool {
 	switch name {
+	case "cancel_intent", "kill_work", "steer_work":
+		return true
 	case "context_search", "context_get", "asset_search", "asset_get", "graph_overview", "traffic_get", "traffic_search", "update_finding_report", "get_finding_traffic", "bind_finding_traffic", "list_finding_deletion_feedback", "check_target_access", "add_intent", "dispatch_intents", "get_finding_retest_context", "list_task_assets", "register_user_target", "insert_assets", "create_custom_tool", "update_custom_tool", "list_facts", "list_findings", "list_task_findings", "list_assets", "node_detail", "get_task_node_detail", "get_worker_output", "get_worker_trace", "list_worker_traces", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces", "get_task_graph", "add_task_hint", "expand_index", "expand_digest", "record_fact", "report_finding":
 		return true
 	}

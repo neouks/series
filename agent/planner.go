@@ -29,7 +29,7 @@ type Planner struct {
 	window            int                                    // context window in tokens (for compaction)
 	windowFn          func() int                             // optional dynamic task-chain minimum
 	maxTurns          int                                    // max agent turns per run (0 = unlimited)
-	killWork          func(intentID int64) error             // engine callback to terminate a running work (nil = off)
+	killWork          IntentStopper                          // stop a queued or running intent (nil = off)
 	steerWork         func(intentID int64, msg string) error // engine callback to steer a running work mid-run (nil = off)
 	proxyAddr         string                                 // recording proxy for WebFetch (empty = direct)
 	proxyCACert       string                                 // recording proxy's CA cert path (HTTPS verify)
@@ -117,9 +117,8 @@ func (p *Planner) todoFor(expID int64) *actool.TodoStore {
 	return s
 }
 
-// SetKillWork wires the engine's per-work terminate callback so the planner's
-// kill_work tool can stop a single running worker.
-func (p *Planner) SetKillWork(fn func(intentID int64) error) { p.killWork = fn }
+// SetKillWork wires task-scoped termination of queued or running intents.
+func (p *Planner) SetKillWork(fn IntentStopper) { p.killWork = fn }
 
 // SetSteerWork wires the engine's per-work steering callback so the planner's
 // steer_work tool can inject a mid-run course-correction into a running worker.
@@ -343,6 +342,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 func plannerSystem(goal, dataDir, workDir string) string {
 	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, DataDir: dataDir, Now: nowStr()})
+	body += "\n方向错误、重复或已无价值的本任务意图，可用 kill_work(intent_id, reason) 终止，适用于等待中或运行中；保留已有产出，成功返回后为 stopped。已暂停意图由用户控制；用户已取消的意图不得重开或创建同方向替代工作。只有工具成功返回 stopped 才能确认终止，错误或超时不能宣称成功。"
 	return body + artifactSpec(workDir)
 }
 
