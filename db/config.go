@@ -125,8 +125,12 @@ func (d *DB) ActiveProfile() (*LLMProfile, error) {
 // ProfileByID returns one profile with its api key by id, or nil if not found.
 // Used to run a task on a specific (non-default) LLM profile.
 func (d *DB) ProfileByID(id int64) (*LLMProfile, error) {
+	return d.ProfileByIDContext(context.Background(), id)
+}
+
+func (d *DB) ProfileByIDContext(ctx context.Context, id int64) (*LLMProfile, error) {
 	var p LLMProfile
-	err := scanProfile(d.QueryRow(`SELECT `+profileColsKey+` FROM llm_profiles WHERE id=$1`, id), &p.APIKey, &p)
+	err := scanProfile(d.QueryRowContext(ctx, `SELECT `+profileColsKey+` FROM llm_profiles WHERE id=$1`, id), &p.APIKey, &p)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

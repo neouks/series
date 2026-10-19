@@ -1,0 +1,141 @@
+{
+  "date": "2026-10-19",
+  "feature": "任务级漏洞删除反馈与智能禁报",
+  "scope": {
+    "roles": [
+      "planner",
+      "worker",
+      "mainagent"
+    ],
+    "same_task_only": true,
+    "historical_deletions_backfilled": false,
+    "business_services_restarted": false,
+    "git_committed": false
+  },
+  "storage": {
+    "new_table": "finding_suppression_rules",
+    "deletion_atomic": [
+      "feedback",
+      "suppression_rule",
+      "finding_delete",
+      "source_node_delete"
+    ],
+    "archive_restore": true,
+    "task_deletion": "retain history and clear task association",
+    "target_snapshot": "type/domain/IP/port/URL path/bundle identity; excludes URL userinfo, query, fragment, auth and evidence bodies"
+  },
+  "runtime": {
+    "no_active_rules_model_calls": 0,
+    "review_deadline_seconds": 30,
+    "global_review_concurrency": 4,
+    "max_rules_per_batch": 10,
+    "json_input_budget_unicode_chars": 24000,
+    "context_max_feedback_items": 20,
+    "context_json_budget_unicode_chars": 6000,
+    "deny_cache_capacity": 128,
+    "deny_cache_ttl_seconds": 300,
+    "fail_open": [
+      "model_error",
+      "timeout",
+      "invalid_response",
+      "unknown",
+      "input_budget_exceeded"
+    ],
+    "never_fail_open": [
+      "database_error",
+      "authorization_error",
+      "task_cancellation"
+    ],
+    "review_receipt": "committed atomically with finding and activity",
+    "rule_version": "rechecked under shared evidence/task lock before evidence preparation and insertion"
+  },
+  "tests": [
+    {
+      "command": "go build ./...",
+      "status": "passed"
+    },
+    {
+      "command": "go test -p 1 ./db ./agent ./server ./evidence ./guard -count=1",
+      "environment": "isolated PostgreSQL 17, temporary evidence directories",
+      "status": "db/agent/evidence/guard passed; server had two temporary-directory cleanup races"
+    },
+    {
+      "command": "go test -p 1 ./server -count=1",
+      "environment": "separate fresh isolated database",
+      "status": "passed",
+      "elapsed_seconds": 32.279
+    },
+    {
+      "command": "go test -p 1 ./db ./agent ./server -run 'Test(Finding|TaskArchiveDatabaseRoundTrip|Noa|WorkerPending)' -count=1 -v",
+      "status": "passed after final target snapshot changes",
+      "top_level_tests": 45
+    },
+    {
+      "command": "npx tsc --noEmit",
+      "status": "passed"
+    },
+    {
+      "command": "npm run test:ui",
+      "status": "passed",
+      "tests": 54
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    }
+  ],
+  "coverage": [
+    "blank/trimmed reason",
+    "metadata-only target snapshots",
+    "legacy feedback not retroactively enabled",
+    "unassigned findings",
+    "atomic rollback",
+    "concurrent repeated deletion",
+    "rule version race at final transaction",
+    "review-time rule addition",
+    "revocation invalidates deny cache",
+    "asset revoked during review",
+    "cancellation and database errors fail closed",
+    "all three role tools, direct and deferred",
+    "no finding residue or Reporter notification on deny",
+    "all paged rules reviewed",
+    "oversized input marked unchecked",
+    "global concurrency and queued deadline",
+    "current task model envelope without tools or evidence",
+    "feedback role migration preserves disabled state and subsequent user unbinding",
+    "dynamic feedback after deletion",
+    "noa refs preserved, revoked states refreshed for pages and field reads",
+    "raw history unchanged",
+    "archive roundtrip and task deletion history"
+  ],
+  "browser": {
+    "environment": "existing local Mock only",
+    "url": "/function/tasks/detail?id=t-acme-api&tab=findings",
+    "verified": [
+      "delete with reason and count decrement",
+      "rule drawer lazy load",
+      "active rule displays original name and reason",
+      "nested revoke confirmation",
+      "revoked history retained and button disabled",
+      "Escape closes drawer and restores focus to trigger"
+    ],
+    "screenshots": [
+      "rules-active.png",
+      "rules-revoked.png"
+    ]
+  },
+  "measurement": {
+    "fixture_active_rules": 23,
+    "mock_model_calls": 3,
+    "json_input_unicode_chars_total": 5106,
+    "review_and_record_elapsed_ms": 16,
+    "real_model_tokens": null,
+    "note": "Synthetic mock model timing, not a production latency claim. Character count is not token count."
+  },
+  "limitations": [
+    "Real model semantic accuracy was not benchmarked; tests use simulated model responses.",
+    "By user choice, model failure/uncertainty permits registration and persists an unchecked receipt.",
+    "The initial combined suite had TestResolveChatAgentHonoursConversationProfile and TestInheritedActivityDetailAndRelationDeletion temporary-directory cleanup races. The full server suite passed in a fresh isolated database.",
+    "Backend rebuild/restart is needed to apply startup migration; no business service was restarted."
+  ]
+}

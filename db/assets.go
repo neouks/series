@@ -168,6 +168,9 @@ func (s *AssetStore) query(query string, args ...any) (*sql.Rows, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if s.tx != nil {
+		return s.tx.QueryContext(ctx, workerReadSQL(query, s.workerRead), args...)
+	}
 	return s.db.QueryContext(ctx, workerReadSQL(query, s.workerRead), args...)
 }
 
@@ -175,6 +178,9 @@ func (s *AssetStore) queryRow(query string, args ...any) *sql.Row {
 	ctx := s.readCtx
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if s.tx != nil {
+		return s.tx.QueryRowContext(ctx, workerReadSQL(query, s.workerRead), args...)
 	}
 	return s.db.QueryRowContext(ctx, workerReadSQL(query, s.workerRead), args...)
 }

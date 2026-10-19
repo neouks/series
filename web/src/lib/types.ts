@@ -1546,3 +1546,17 @@ export interface InterceptExecution {
 }
 
 export interface HTTPAuthSettings { enabled: boolean; username: string; password_set: boolean; }
+
+export interface FindingSuppressionRule {
+  id: string;
+  feedback_id: string;
+  task_id?: number | string;
+  title: string;
+  vulnclass: string;
+  summary: string;
+  asset_ids: number[];
+  targets: { type: string; domain?: string; ip?: string; port?: number; url?: string; bundle_id?: string }[];
+  reason: string;
+  created_at: string;
+  revoked_at?: string;
+}

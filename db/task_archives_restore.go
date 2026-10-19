@@ -88,6 +88,8 @@ WHERE relation.source_task_id=$1 LIMIT 1`, taskID).Scan(&dependent)
 		query string
 		args  []any
 	}{
+		{`DELETE FROM finding_suppression_rules WHERE task_id=$1`, []any{taskID}},
+		{`DELETE FROM finding_deletion_feedback WHERE task_id=$1`, []any{taskID}},
 		{`DELETE FROM task_relations WHERE task_id=$1 OR source_task_id=$1`, []any{taskID}},
 		{`DELETE FROM task_asset_links WHERE task_id=$1`, []any{taskID}},
 		{`DELETE FROM task_asset_blocks WHERE task_id=$1`, []any{taskID}},
@@ -272,7 +274,7 @@ WHERE archive.id=$1 FOR UPDATE OF archive,task`, archiveID).Scan(&taskID, &expID
 	} else {
 		warnings = append(warnings, warning...)
 	}
-	for _, table := range []string{"task_asset_blocks", "task_asset_grants", "task_asset_links", "task_asset_dns_evidence", "task_asset_skips", "findings", "finding_retests"} {
+	for _, table := range []string{"task_asset_blocks", "task_asset_grants", "task_asset_links", "task_asset_dns_evidence", "task_asset_skips", "findings", "finding_retests", "finding_deletion_feedback", "finding_suppression_rules"} {
 		if err := insertArchiveRows(tx, table, remappedTables[table]); err != nil {
 			return nil, fmt.Errorf("restore %s: %w", table, err)
 		}
@@ -438,8 +440,9 @@ func insertArchiveRows(tx *sql.Tx, table string, raw json.RawMessage) error {
 		"task_constraints": true, "activity": true, "task_asset_links": true, "task_asset_blocks": true, "findings": true,
 		"llm_records": true, "llm_usage": true, "skill_usage": true, "tool_usage": true, "mcp_usage": true,
 		"side_question_sessions": true, "side_question_requests": true,
-		"main_sessions":   true,
-		"finding_retests": true,
+		"main_sessions":             true,
+		"finding_retests":           true,
+		"finding_deletion_feedback": true, "finding_suppression_rules": true,
 	}
 	if !allowed[table] {
 		return fmt.Errorf("archive restore table %q is not allowed", table)
@@ -730,7 +733,7 @@ func remapArchiveAssetReferences(tables map[string]json.RawMessage, mapping map[
 		}
 		out["task_asset_dns_evidence"], _ = json.Marshal(rows)
 	}
-	for _, table := range []string{"exploration_nodes", "findings"} {
+	for _, table := range []string{"exploration_nodes", "findings", "finding_suppression_rules"} {
 		rows, err := decodeArchiveRows(tables[table])
 		if err != nil {
 			return nil, err

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,12 +40,14 @@ var BuildVersion = "dev"
 // Server exposes the SERIES backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
-	httpAuth     *httpEntryAuth
-	httpAuthOnce sync.Once
-	httpAuthErr  error
-	m            *Manager
-	engine       *Engine
-	ctx          context.Context
+	suppressionOnce sync.Once
+	suppression     *findingSuppressionService
+	httpAuth        *httpEntryAuth
+	httpAuthOnce    sync.Once
+	httpAuthErr     error
+	m               *Manager
+	engine          *Engine
+	ctx             context.Context
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -434,7 +437,7 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	// the tools-table binding (default = worker), so worker behavior is unchanged.
 	wProv, wCfg := s.providerForAgent("worker", pinID, gProv, gCfg)
 	wk := agent.NewWorker(wProv, wCfg.Model, s.m.dir, tx, wCfg.CompactionWindow(), s.agentMaxTurns("worker"))
-	wk.SetFindingRecorder(s.evidenceStore())
+	wk.SetFindingRecorder(s.findingRecorder())
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
 	wk.SetTrafficRecording(s.m.TrafficEnabled())
@@ -446,7 +449,7 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)       // 实验功能:noa 上下文压缩(每 run 读)
 	pProv, pCfg := s.providerForAgent("planner", pinID, gProv, gCfg)
 	pl := agent.NewPlanner(pProv, pCfg.Model, s.m.dir, tx, pCfg.CompactionWindow(), s.agentMaxTurns("planner"))
-	pl.SetFindingRecorder(s.evidenceStore())
+	pl.SetFindingRecorder(s.findingRecorder())
 	pl.SetKillWork(s.engine.KillWork)                       // planner kill_work → stop queued/running intent
 	pl.SetSteerWork(s.engine.SteerWork)                     // planner steer_work → inject mid-run course-correction
 	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
@@ -522,7 +525,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	mProv, mCfg := s.providerForAgent("mainagent", nil, prov, cfg)
 	s.cfgMu.Lock()
 	s.mainAgent = agent.NewMainAgent(mProv, mCfg.Model, s.m.dir, tx, mCfg.CompactionWindow(), s.agentMaxTurns("mainagent"))
-	s.mainAgent.SetFindingRecorder(s.evidenceStore())
+	s.mainAgent.SetFindingRecorder(s.findingRecorder())
 	s.mainAgent.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))
 	s.mainAgent.SetSteerWork(s.engine.SteerWork) // steer_work：人对运行中 work 实时纠偏
@@ -559,19 +562,20 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	if err != nil || p == nil {
 		return agent.Config{}, false
 	}
+	cfg := profileConfig(p)
+	s.applyProfileRetry(&cfg, p)
+	return cfg, cfg.APIKey != ""
+}
+
+func profileConfig(p *db.LLMProfile) agent.Config {
 	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
-	cfg.ThinkingType = p.ThinkingType
-	cfg.ReasoningEffort = p.ReasoningEffort
+	cfg.ThinkingType, cfg.ReasoningEffort = p.ThinkingType, p.ReasoningEffort
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
-	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
-		return cfg, false
-	}
-	return cfg, true
+	return cfg
 }
 
 // effectiveProfileForAgent resolves the LLM profile id an agent should run on, by
@@ -623,40 +627,66 @@ func (s *Server) chatUnavailableReason() string {
 // bound/pinned to the same profile shares one provider instance (one rate limiter).
 // ok=false when the profile is missing/invalid → caller falls back to the global pair.
 func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool) {
-	s.provCacheMu.Lock()
-	if e := s.provByProfile[id]; e != nil {
+	p, cfg, err := s.providerForProfileContext(context.Background(), id)
+	return p, cfg, err == nil && p != nil
+}
+
+// Context-aware resolution preserves database errors and pool/lock deadlines.
+// The shared cache still supplies a single rate limiter for each profile.
+func (s *Server) providerForProfileContext(ctx context.Context, id int64) (llm.Provider, agent.Config, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, agent.Config{}, err
+		}
+		s.provCacheMu.Lock()
+		if e := s.provByProfile[id]; e != nil {
+			s.provCacheMu.Unlock()
+			return e.prov, e.cfg, nil
+		}
+		generation := s.provCacheGen
 		s.provCacheMu.Unlock()
-		return e.prov, e.cfg, true
-	}
-	generation := s.provCacheGen
-	s.provCacheMu.Unlock()
-	cfg, ok := s.loadProfileConfig(id)
-	if !ok {
-		return nil, agent.Config{}, false
-	}
-	prov, err := cfg.NewProvider()
-	if err != nil {
-		log.Printf("[engine] build provider for LLM profile %d failed: %v", id, err)
-		return nil, agent.Config{}, false
-	}
-	// Wrap with recorder, tagged with this profile's name.
-	if p, _ := s.m.pg.ProfileByID(id); p != nil {
+		p, err := s.m.pg.ProfileByIDContext(ctx, id)
+		if err != nil {
+			return nil, agent.Config{}, &suppressionInfrastructureError{err}
+		}
+		if p == nil || p.APIKey == "" {
+			return nil, agent.Config{}, fmt.Errorf("LLM profile #%d is missing or invalid", id)
+		}
+		cfg := profileConfig(p)
+		var raw string
+		err = s.m.pg.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='llm_retry_policy'`).Scan(&raw)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, cfg, &suppressionInfrastructureError{err}
+		}
+		var policy db.LLMRetryPolicy
+		if err == nil {
+			if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+				policy = db.LLMRetryPolicy{}
+			}
+		}
+		cfg.Retry = resolveRetry(p.Retry, policy.Clamped())
+		prov, err := cfg.NewProvider()
+		if err != nil {
+			return nil, cfg, err
+		}
 		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
 		prov = bindSideProvider(prov, cfg, id, p.Name)
-	}
-	s.provCacheMu.Lock()
-	if generation != s.provCacheGen {
+		s.provCacheMu.Lock()
+		if generation != s.provCacheGen {
+			s.provCacheMu.Unlock()
+			continue
+		}
+		if e := s.provByProfile[id]; e != nil {
+			prov, cfg = e.prov, e.cfg
+		} else {
+			if s.provByProfile == nil {
+				s.provByProfile = make(map[int64]*provEntry)
+			}
+			s.provByProfile[id] = &provEntry{prov: prov, cfg: cfg}
+		}
 		s.provCacheMu.Unlock()
-		return s.providerForProfile(id)
+		return prov, cfg, nil
 	}
-	if e := s.provByProfile[id]; e != nil { // lost the race → keep the winner
-		prov, cfg = e.prov, e.cfg
-	} else {
-		s.provByProfile[id] = &provEntry{prov: prov, cfg: cfg}
-		log.Printf("[engine] built provider for LLM profile %d (%s / %s)", id, cfg.Provider(), cfg.Model)
-	}
-	s.provCacheMu.Unlock()
-	return prov, cfg, true
 }
 
 // providerForAgent returns the provider+cfg one agent should run on: its bound/pinned
@@ -873,6 +903,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/retests/active", s.listActiveFindingRetests)
 	mux.HandleFunc("POST /api/exploration/findings/{id}/retests", s.startFindingRetest)
 	mux.HandleFunc("PATCH /api/exploration/findings/{id}", s.patchFinding)
+	mux.HandleFunc("GET /api/tasks/{id}/finding-suppression-rules", s.listFindingSuppression)
+	mux.HandleFunc("POST /api/tasks/{id}/finding-suppression-rules/{rule_id}/revoke", s.revokeFindingSuppression)
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)

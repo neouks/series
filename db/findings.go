@@ -701,6 +701,28 @@ func (d *DB) deleteFinding(id int64, reason *string) (n int64, feedback *Finding
 				return err
 			}
 		}
+		if feedback != nil && feedback.TaskID != nil {
+			var rawIDs []byte
+			if err := tx.QueryRow(`SELECT asset_ids FROM findings WHERE id=$1`, id).Scan(&rawIDs); err != nil {
+				return err
+			}
+			var ids []int64
+			if err := json.Unmarshal(rawIDs, &ids); err != nil {
+				return err
+			}
+			targets, err := findingTargets(context.Background(), tx, ids)
+			if err != nil {
+				return err
+			}
+			rawTargets, err := json.Marshal(targets)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`INSERT INTO finding_suppression_rules(feedback_id,task_id,title,vulnclass,summary,asset_ids,reason,targets)
+ SELECT $2,f.task_id,f.name,f.vulnclass,f.summary,f.asset_ids,$3,$4 FROM findings f WHERE f.id=$1`, id, feedback.ID, feedback.Reason, string(rawTargets)); err != nil {
+				return err
+			}
+		}
 		var nodeID sql.NullInt64
 		if err := tx.QueryRow(`DELETE FROM findings WHERE id=$1 RETURNING node_id`, id).Scan(&nodeID); err != nil {
 			return err

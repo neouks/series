@@ -572,7 +572,8 @@ UNION SELECT anchor.asset_id FROM exploration_anchors anchor
 UNION SELECT value::bigint FROM findings finding
       CROSS JOIN LATERAL jsonb_array_elements_text(
         CASE WHEN jsonb_typeof(finding.asset_ids)='array' THEN finding.asset_ids ELSE '[]'::jsonb END
-      ) value WHERE finding.task_id=$1 AND value ~ '^[0-9]+$'`
+      ) value WHERE finding.task_id=$1 AND value ~ '^[0-9]+$'
+UNION SELECT value::bigint FROM finding_suppression_rules rule CROSS JOIN LATERAL jsonb_array_elements_text(rule.asset_ids) value WHERE rule.task_id=$1 AND value ~ '^[0-9]+$'`
 }
 
 // SnapshotTaskArchive reads one repeatable PostgreSQL snapshot. Task-owned Agent
@@ -632,6 +633,8 @@ func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchi
 		{"task_scope", `SELECT * FROM task_scope WHERE task_id=$1 ORDER BY id`, []any{taskID}},
 		{"main_sessions", `SELECT * FROM main_sessions WHERE exploration_id=$1 ORDER BY seq`, []any{expID}},
 		{"findings", `SELECT * FROM findings WHERE task_id=$1 ORDER BY id`, []any{taskID}},
+		{"finding_deletion_feedback", `SELECT * FROM finding_deletion_feedback WHERE task_id=$1 ORDER BY id`, []any{taskID}},
+		{"finding_suppression_rules", `SELECT * FROM finding_suppression_rules WHERE task_id=$1 ORDER BY id`, []any{taskID}},
 		{"finding_retests", `SELECT r.* FROM finding_retests r JOIN findings f ON f.id=r.finding_id WHERE f.task_id=$1 ORDER BY r.id`, []any{taskID}},
 		{"finding_traffic_bindings", `SELECT b.* FROM finding_traffic_bindings b JOIN findings f ON f.id=b.finding_id WHERE f.task_id=$1 ORDER BY b.finding_id,b.position,b.id`, []any{taskID}},
 		{"traffic_evidence_snapshots", `SELECT s.* FROM traffic_evidence_snapshots s WHERE EXISTS(SELECT 1 FROM finding_traffic_bindings b JOIN findings f ON f.id=b.finding_id WHERE b.snapshot_id=s.id AND f.task_id=$1) ORDER BY s.id`, []any{taskID}},

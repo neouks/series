@@ -74,7 +74,10 @@ export function FindingDeleteDialog({
           <AlertDialogTitle>删除此漏洞？</AlertDialogTitle>
           <AlertDialogDescription>
             将删除“{[finding.name, finding.vulnclass, "此漏洞"].find(Boolean)}
-            ”，删除后无法恢复。填写的原因将提供给所属任务的 Planner，用于后续规划。
+            ”，删除后无法恢复。
+            {finding.task_id
+              ? "删除反馈将同步给所属任务的 Planner、Worker 和主 Agent，并建立禁报规则；填写原因时按原因判断，留空则禁止同一漏洞重复上报。规则仅用户可解除。"
+              : "此漏洞未关联任务，将保留删除反馈，不创建任务禁报规则。"}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <FieldGroup>

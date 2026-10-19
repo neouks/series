@@ -48,10 +48,16 @@ func TestFindingDeletionFeedbackRoleAndPagination(t *testing.T) {
 		}
 	}
 	tool := ts.listFindingDeletionFeedback()
-	for _, ri := range []RunInfo{{TaskID: task.ID, AgentKey: "worker"}, {TaskID: task.ID, AgentKey: "mainagent"}, {TaskID: task.ID + 1, AgentKey: "planner"}} {
+	for _, ri := range []RunInfo{{TaskID: task.ID, AgentKey: "reporter"}, {TaskID: task.ID, AgentKey: "unknown"}, {TaskID: task.ID + 1, AgentKey: "planner"}} {
 		r, _ := tool.Call(WithRunInfo(t.Context(), ri), json.RawMessage(`{}`), nil)
 		if !r.IsError {
 			t.Fatal("role/task bypass")
+		}
+	}
+	for _, role := range []string{"worker", "mainagent", "planner"} {
+		r, _ := tool.Call(WithRunInfo(t.Context(), RunInfo{TaskID: task.ID, AgentKey: role}), json.RawMessage(`{}`), nil)
+		if r.IsError {
+			t.Fatal("role denied", role, r)
 		}
 	}
 	p, err := ts.findingDeletionFeedbackPage(0, 2)

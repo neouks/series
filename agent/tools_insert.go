@@ -799,7 +799,7 @@ func splitLines(s string) []string {
 
 // WorkerTools returns the tool set for a work agent.
 func (t *ToolSet) WorkerTools() []actool.CoreTool {
-	return []actool.CoreTool{t.contextSearch(), t.contextGet(), t.addFinding(), t.recordFact(), t.insertAssets(), t.assetSearch(), t.assetGet()}
+	return []actool.CoreTool{t.listFindingDeletionFeedback(), t.contextSearch(), t.contextGet(), t.addFinding(), t.recordFact(), t.insertAssets(), t.assetSearch(), t.assetGet()}
 }
 
 // MainAgentTools returns the human-interface tool set.
@@ -812,7 +812,7 @@ func (t *ToolSet) MainAgentTools() []actool.CoreTool {
 }
 func (t *ToolSet) mainAgentTools() []actool.CoreTool {
 	return []actool.CoreTool{
-		t.listTaskAssets(), t.checkTargetAccess(), t.dispatchIntents(), t.graphOverview(), t.contextSearch(), t.contextGet(),
+		t.listFindingDeletionFeedback(), t.listTaskAssets(), t.checkTargetAccess(), t.dispatchIntents(), t.graphOverview(), t.contextSearch(), t.contextGet(),
 		t.addHint(), t.addIntent(), t.cancelIntentTool(), t.steerWorkTool(), t.setGoals(), t.setConstraints(),
 		t.insertAssets(), t.addCompanyScope(), t.assetSearch(), t.assetGet(), t.addFinding(), t.recordFact(), t.addTaskScope(),
 	}

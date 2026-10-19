@@ -254,6 +254,20 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if _, err := d.Exec(`INSERT INTO finding_retests(finding_id,status,verdict,snapshot,summary) VALUES($1,'completed','inconclusive','{}','archived retest')`, findingID); err != nil {
 		t.Fatal(err)
 	}
+	deletedID, err := d.AddFinding(task.ID, 0, "IDOR", "deleted fixture", "high", "summary", "private evidence", "worker", []int64{assetID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.DeleteFindingWithFeedback(deletedID, "do not repeat"); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := d.FindingSuppressionRules(t.Context(), task.ID, 0, 20, false)
+	if err != nil || len(rules) != 1 {
+		t.Fatal(rules, err)
+	}
+	if err = d.RevokeFindingSuppression(t.Context(), task.ID, rules[0].ID); err != nil {
+		t.Fatal(err)
+	}
 	archive, err := d.QueueTaskArchive(task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -325,6 +339,14 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	restoredRules, err := d.FindingSuppressionRules(t.Context(), task.ID, 0, 20, false)
+	if err != nil || len(restoredRules) != 1 || restoredRules[0].RevokedAt == nil || restoredRules[0].ID != rules[0].ID {
+		t.Fatal("suppression archive lost", restoredRules, err)
+	}
+	feedback, err := d.Exploration(task.ExplorationID).FindingDeletionFeedback(0, 20)
+	if err != nil || len(feedback) != 1 || feedback[0].RuleStatus != "revoked" {
+		t.Fatal("feedback archive lost", feedback, err)
 	}
 	warningFound := false
 	for _, warning := range warnings {

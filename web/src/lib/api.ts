@@ -16,6 +16,7 @@ import {
   toolCallURL,
 } from "@/lib/tool-calls";
 import type {
+  FindingSuppressionRule,
   ActiveFindingRetest,
   Activity,
   Agent,
@@ -682,6 +683,10 @@ export const api = {
   // 删除漏洞:移除 findings 记录 + 来源探索节点(从发现列表/任务发现 Tab/探索图一并消失)。
   deleteFinding: (id: string, reason?: string) =>
     del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`, reason === undefined ? undefined : { reason }),
+  findingSuppressionRules: (taskId: string, before = 0) =>
+    get<{ items: FindingSuppressionRule[]; has_more: boolean; next_before: number }>(`/tasks/${encodeURIComponent(taskId)}/finding-suppression-rules?before=${before}`),
+  revokeFindingSuppression: (taskId: string, ruleId: string) =>
+    post<{ revoked: boolean }>(`/tasks/${encodeURIComponent(taskId)}/finding-suppression-rules/${encodeURIComponent(ruleId)}/revoke`, {}),
   findingRetests: (id: string) =>
     get<{ retests: FindingRetest[] }>(`/exploration/findings/${encodeURIComponent(id)}/retests`).then((r) =>
       arr(r.retests),

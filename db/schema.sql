@@ -1596,7 +1596,7 @@ FOR EACH ROW EXECUTE FUNCTION bump_worker_queue_version();
 CREATE INDEX IF NOT EXISTS idx_worker_queue_position ON exploration_nodes(exploration_id,queue_position,id)
 WHERE kind='intent' AND state='open';
 
--- Deletion feedback survives its finding and is private to the owning planner.
+-- Deletion feedback survives its finding and is private to the owning task agents.
 CREATE TABLE IF NOT EXISTS finding_deletion_feedback (
  id BIGSERIAL PRIMARY KEY,
  finding_id BIGINT NOT NULL,
@@ -1697,3 +1697,17 @@ END $$;
 DROP TRIGGER IF EXISTS worker_feedback_state ON exploration_nodes;
 CREATE TRIGGER worker_feedback_state AFTER UPDATE OF state OR DELETE ON exploration_nodes
 FOR EACH ROW EXECUTE FUNCTION notify_worker_feedback();
+
+-- User deletion rules are immutable except for explicit revocation. Historical
+-- feedback is deliberately not backfilled into active rules.
+CREATE TABLE IF NOT EXISTS finding_suppression_rules (
+ id BIGSERIAL PRIMARY KEY,
+ feedback_id BIGINT NOT NULL UNIQUE REFERENCES finding_deletion_feedback(id),
+ task_id BIGINT REFERENCES tasks(id) ON DELETE SET NULL,
+ title TEXT NOT NULL DEFAULT '', vulnclass TEXT NOT NULL DEFAULT '',
+ summary TEXT NOT NULL DEFAULT '', asset_ids JSONB NOT NULL DEFAULT '[]', targets JSONB NOT NULL DEFAULT '[]',
+ reason TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_finding_suppression_task ON finding_suppression_rules(task_id,id DESC);
+ALTER TABLE finding_suppression_rules ADD COLUMN IF NOT EXISTS targets JSONB NOT NULL DEFAULT '[]';

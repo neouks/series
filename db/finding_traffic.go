@@ -324,19 +324,26 @@ func (d *DB) EditFindingTraffic(ctx context.Context, findingID, bindingID, versi
 }
 
 type RecordFindingInput struct {
+	// Set only by the trusted task tool adapter, never from model arguments.
+	AccessRole string `json:"-"`
+	// Trusted caller rechecks role/asset permissions after a potentially slow review.
+	Revalidate                                           func(context.Context) error `json:"-"`
+	SuppressionCheck                                     *FindingSuppressionCheck
 	TaskID, ExplorationID, IntentID                      int64
 	VulnClass, Name, Severity, Summary, Evidence, Worker string
 	AssetIDs                                             []int64
+	SuppressionTargets                                   []FindingTarget `json:"-"`
 }
 
 type RecordedFinding struct {
-	FindingID int64           `json:"finding_id,string"`
-	NodeID    int64           `json:"finding_node_id,string"`
-	Traffic   *FindingTraffic `json:"traffic"`
+	SuppressionCheck *FindingSuppressionCheck `json:"suppression_check,omitempty"`
+	FindingID        int64                    `json:"finding_id,string"`
+	NodeID           int64                    `json:"finding_node_id,string"`
+	Traffic          *FindingTraffic          `json:"traffic"`
 }
 
 func RecordFindingTx(tx *sql.Tx, in RecordFindingInput, prepared []PreparedTrafficEvidence) (*RecordedFinding, error) {
-	if err := LockTaskEvidenceTx(tx, in.TaskID); err != nil {
+	if err := LockFindingRecordTx(tx, in); err != nil {
 		return nil, err
 	}
 	if in.TaskID > 0 {
@@ -357,8 +364,14 @@ func RecordFindingTx(tx *sql.Tx, in RecordFindingInput, prepared []PreparedTraff
 			return nil, errors.New("intent_id 必须是本任务的意图（关联任务意图只读）")
 		}
 	}
+	if err := ValidateFindingSuppressionTx(tx, in); err != nil {
+		return nil, err
+	}
+	if err := ValidateFindingAccessTx(tx, in); err != nil {
+		return nil, err
+	}
 	payload, _ := json.Marshal(map[string]any{"vulnclass": in.VulnClass, "name": in.Name, "severity": in.Severity, "summary": in.Summary, "evidence": map[string]any{"by": in.Worker, "poc": in.Evidence}})
-	out := &RecordedFinding{}
+	out := &RecordedFinding{SuppressionCheck: in.SuppressionCheck}
 	if err := tx.QueryRow(`INSERT INTO exploration_nodes(exploration_id,kind,payload,priority,state,origin)
 VALUES($1,'finding',$2,9,'confirmed',$3) RETURNING id`, in.ExplorationID, string(payload), in.Worker).Scan(&out.NodeID); err != nil {
 		return nil, err
@@ -384,6 +397,21 @@ VALUES(NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, in.TaskID, out.NodeI
 	}
 	if err := AddFindingTrafficTx(tx, out.FindingID, prepared); err != nil {
 		return nil, err
+	}
+	if in.SuppressionCheck != nil {
+		summary := "漏洞禁报校验通过"
+		if in.SuppressionCheck.Status == "unchecked" {
+			summary = "禁报校验未完成，按用户策略允许上报"
+		}
+		metadata, err := json.Marshal(map[string]any{"finding_suppression": in.SuppressionCheck, "finding_id": out.FindingID})
+		if err != nil {
+			return nil, err
+		}
+		// The failure-open receipt is committed with the finding, never lost if
+		// the process exits immediately after commit or an audit write fails.
+		if _, err := tx.Exec(`INSERT INTO activity(exploration_id,node_id,worker,kind,summary,detail,metadata) VALUES($1,$2,$3,'status',$4,$5,$6)`, in.ExplorationID, out.NodeID, in.Worker, summary, in.SuppressionCheck.Reason, string(metadata)); err != nil {
+			return nil, err
+		}
 	}
 	var err error
 	out.Traffic, err = FindingTrafficTx(tx, out.FindingID)

@@ -1,0 +1,159 @@
+{
+  "date": "2026-10-19",
+  "scope": "Review and corrections to the uncommitted task finding suppression feature",
+  "fixes": [
+    {
+      "severity": "high",
+      "issue": "Permissions revalidated before transaction could become stale while waiting for record locks; no asset store skipped permission checks.",
+      "fix": "Trusted role passed independently of optional AssetStore; committing transaction serializes asset mutations and rechecks explicit assets, intent lineage, and running Worker state. Evidence copying does not hold the added asset/task locks.",
+      "files": [
+        "agent/tools.go",
+        "db/finding_access.go",
+        "db/assets.go",
+        "db/finding_traffic.go",
+        "evidence/store.go"
+      ]
+    },
+    {
+      "severity": "high",
+      "issue": "A rule query deadline was treated as a model failure and permitted registration; profile resolution conflated database failure and missing configuration.",
+      "fix": "Infrastructure errors fail closed. Profile resolution uses request context and preserves query errors while sharing the provider cache/rate limiter. Pre/post review metadata reads have bounded database waits.",
+      "files": [
+        "server/finding_suppression.go",
+        "server/server.go",
+        "db/config.go"
+      ]
+    },
+    {
+      "severity": "medium",
+      "issue": "Classifier always used streaming, ignoring non-streaming profile configuration.",
+      "fix": "Select Stream/Complete from the resolved profile. Bound collected model text to 32 KiB; invalid/oversized model output is recorded as unchecked under the agreed policy.",
+      "files": [
+        "server/finding_suppression.go"
+      ]
+    },
+    {
+      "severity": "high",
+      "issue": "A missing/mismatched task context removed dynamic system feedback but left historical feedback tool bodies visible.",
+      "fix": "Suppress historical feedback bodies on invalid trusted context, including deferred tool results; preserve original history and tool-call pairing.",
+      "files": [
+        "agent/finding_feedback_context.go"
+      ]
+    },
+    {
+      "severity": "medium",
+      "issue": "Distinct feedback pages accumulated without a historical body budget; database refresh ignored cancellation; empty tasks received redundant instructions.",
+      "fix": "Keep at most 6000 Unicode characters of recent successful feedback read bodies, keep older calls as reread placeholders, refresh only retained IDs, propagate query context, omit empty-task feedback instruction and unnecessary final-page probe.",
+      "files": [
+        "agent/finding_feedback_context.go",
+        "agent/finding_deletion_feedback.go",
+        "db/finding_deletion_feedback.go"
+      ]
+    },
+    {
+      "severity": "low",
+      "issue": "A late revoke response could update a replaced task/drawer state.",
+      "fix": "Scope-token checks discard late revoke completion/errors after task or drawer changes.",
+      "files": [
+        "web/src/components/finding-suppression-rules.tsx"
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "command": "go test -p 1 ./db ./agent ./evidence ./guard -count=1",
+      "result": "passed",
+      "seconds": {
+        "db": 68.466,
+        "agent": 22.453,
+        "evidence": 2.372,
+        "guard": 0.139
+      }
+    },
+    {
+      "command": "go test -p 1 ./server -count=1",
+      "result": "passed",
+      "seconds": 58.546,
+      "environment": "fresh separate disposable database"
+    },
+    {
+      "command": "go test -race -p 1 ./db ./agent ./server ./evidence -run 'Test(Finding|TargetAccess|TaskArchiveDatabaseRoundTrip|MainPending)' -count=1",
+      "result": "passed; evidence package has no matching test names",
+      "seconds": {
+        "db": 3.328,
+        "agent": 3.539,
+        "server": 12.94
+      }
+    },
+    {
+      "command": "go test -p 1 ./agent ./server ./evidence -run 'Test(Finding|Evidence)' -count=1",
+      "result": "passed after final authorization and evidence-lock placement changes",
+      "seconds": {
+        "agent": 0.774,
+        "server": 7.502,
+        "evidence": 1.352
+      }
+    },
+    {
+      "command": "go build ./...",
+      "result": "passed"
+    },
+    {
+      "command": "npx tsc --noEmit",
+      "result": "passed"
+    },
+    {
+      "command": "npm run test:ui",
+      "result": "53/54 first run; existing polling wall-clock assertion completed>=2 failed under parallel load"
+    },
+    {
+      "command": "node -r ./scripts/test-register.cjs --test --test-concurrency=1 src/lib/*.test.ts src/lib/*.test.mjs src/lib/mock/*.test.ts",
+      "result": "54/54 passed; polling implementation and test left unchanged"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "new_regressions": [
+    "Rule SELECT blocked by ACCESS EXCLUSIVE lock: deadline must return infrastructure error, not unchecked permit",
+    "Profile SELECT blocked by table lock: cancellation propagated, infrastructure error preserved",
+    "Both streaming and non-streaming transports, oversized output diagnosed",
+    "Revocation after early revalidation, before commit, for planner/mainagent/worker",
+    "Pending accepted for mainagent/worker and rejected for planner; stopped Worker cannot write",
+    "Absent optional AssetStore cannot bypass final permissions or forge role via tool arguments",
+    "Commit uses transaction-local approval state and holds asset mutation advisory lock across processes",
+    "Empty explicit asset list cannot bypass restricted ancestor",
+    "Historical feedback removed on mismatched task context without modifying original history",
+    "Refresh cancellation, empty-task instruction omission, continuous feedback page budget"
+  ],
+  "measurements": {
+    "feedback_history_fixture": {
+      "pages": 30,
+      "field_body_unicode_chars_per_page": 800,
+      "original_request_json_bytes": 80782,
+      "retained_feedback_body_unicode_chars": 5957,
+      "omitted_page_bodies": 23,
+      "historical_body_budget_unicode_chars": 6000
+    },
+    "review_fixture": {
+      "active_rules": 23,
+      "mock_model_calls": 3,
+      "total_json_input_unicode_chars": 5084,
+      "elapsed_ms_mock_review_and_record": 13
+    },
+    "note": "Synthetic fixture timings only, not production latency or token estimates. The historical body budget is separate from the 6000-character dynamic feedback page and from complete-request token limits."
+  },
+  "limitations": [
+    "Semantic accuracy/false-positive rate of live models was not benchmarked; models were simulated.",
+    "User-selected fail-open on model failure/uncertainty remains, with persisted unchecked receipts. Permission, database and cancellation errors remain fail-closed.",
+    "The drawer stale-response guard was type-checked; no additional live-browser interaction run was performed during this review."
+  ],
+  "environment": {
+    "database": "Disposable PostgreSQL 17, three isolated test databases, temporary traffic/evidence directories",
+    "business_database_accessed": false,
+    "business_services_restarted": false,
+    "git_committed": false,
+    "test_container_cleaned": true
+  }
+}

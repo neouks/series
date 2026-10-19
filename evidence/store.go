@@ -181,7 +181,10 @@ func (s *Store) prepare(ctx context.Context, refs []db.TrafficRef) ([]db.Prepare
 
 func (s *Store) Record(ctx context.Context, in db.RecordFindingInput, refs []db.TrafficRef) (out *db.RecordedFinding, err error) {
 	err = s.DB.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
-		if err := db.LockTaskEvidenceTx(tx, in.TaskID); err != nil {
+		// The evidence lock already serializes rule delete/revoke. Defer the
+		// asset/task locks until RecordFindingTx: copying traffic bodies must not
+		// block unrelated asset discovery or approval while doing filesystem I/O.
+		if err := db.ValidateFindingSuppressionTx(tx, in); err != nil {
 			return err
 		}
 		prepared, err := s.prepare(ctx, refs)

@@ -52,6 +52,10 @@ func (p assetContextProvider) filter(ctx context.Context, req llm.CompletionRequ
 		return out, err
 	}
 	out = boundRetrievalHistory(deduplicateToolHistory(out))
+	out, err = p.refreshFindingFeedback(ctx, out)
+	if err != nil {
+		return out, err
+	}
 	for _, r := range refs {
 		b := &out.Messages[r.m].Content[r.b]
 		if r.c < len(b.Content) && b.Content[r.c].Type == llm.BlockText {

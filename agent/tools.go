@@ -1803,7 +1803,7 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 // --- worker write tools ---
 
 func (t *ToolSet) addFinding() actool.CoreTool {
-	return writeTool("report_finding", "记录确认的漏洞，用 evidence 提供命令输出、日志等可验证证据。任务上下文传当前 intent_id。返回的 finding_id 是独立漏洞记录 ID，finding_node_id 是探索节点 ID（第一行保留该节点编号）。", obj(map[string]any{
+	return writeTool("report_finding", "记录确认的漏洞，用 evidence 提供可验证证据。受当前任务删除禁报规则校验；命中后仅用户可解除，新证据可写事实，勿改名重报。任务上下文传当前 intent_id。返回的 finding_id 是独立漏洞记录 ID，finding_node_id 是探索节点 ID（第一行保留该节点编号）。", obj(map[string]any{
 		"vulnclass": str("漏洞类别"), "name": str("漏洞名称"), "severity": str("critical|high|medium|low"), "summary": str("发现摘要"),
 		"intent_id": idp("当前任务的意图 id"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "受影响资产 ID，JSON 整数数组，如 [1,2]；不要传字符串"},
 		"evidence":         str("证据/PoC 文本"),
@@ -1865,7 +1865,43 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 				return actool.Errorf("intent_id 关联的任务资产未获授权或已被封禁"), nil
 			}
 		}
+		if t.taskID > 0 {
+			input.AccessRole = "planner"
+			if t.mainExecution {
+				input.AccessRole = "mainagent"
+			}
+			if t.workerExecution {
+				input.AccessRole = "worker"
+			}
+		}
 		var recorded *db.RecordedFinding
+		input.Revalidate = func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if t.as != nil && t.taskID > 0 {
+				if err := t.validateResultAssets(input.AssetIDs); err != nil {
+					return fmt.Errorf("漏洞资产未获授权：%w", err)
+				}
+			}
+			if input.IntentID > 0 {
+				node, err := t.ts.GetNode(input.IntentID)
+				if err != nil {
+					return err
+				}
+				if node == nil || node.Kind != db.KindIntent {
+					return fmt.Errorf("intent_id 已不可用")
+				}
+				ok, err := t.nodeAuthorization(node)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("intent_id 关联的任务资产未获授权或已被封禁")
+				}
+			}
+			return nil
+		}
 		if t.findingRecorder != nil {
 			recorded, err = t.findingRecorder.Record(ctx, input, refs)
 		} else if len(refs) > 0 {

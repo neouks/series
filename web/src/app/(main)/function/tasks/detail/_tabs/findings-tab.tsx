@@ -6,6 +6,7 @@ import { DownloadIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { FindingWorkspaceDetail } from "@/components/finding-detail-content";
+import { FindingSuppressionRules } from "@/components/finding-suppression-rules";
 import { FindingPagination } from "@/components/finding-pagination";
 import { FindingLayoutToggle, FindingPresentation, useFindingPresentation } from "@/components/finding-presentation";
 import { FindingSelector } from "@/components/finding-selector";
@@ -150,6 +151,7 @@ function TaskFindings({ taskId }: { taskId: string }) {
         }
         actions={
           <>
+            <FindingSuppressionRules taskId={taskId} readOnly={filters.scope === "inherited"} />
             <Button
               variant="ghost"
               size="icon"
