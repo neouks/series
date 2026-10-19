@@ -4,6 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch as SwitchPrimitive } from "radix-ui";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -59,7 +60,7 @@ export function ExecutionControl({ task, onUpdated }: { task: Task; onUpdated: (
     }
   }
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2">
       <div className="shrink-0">
         <SwitchPrimitive.Root
           id={modeId}
@@ -70,16 +71,18 @@ export function ExecutionControl({ task, onUpdated }: { task: Task; onUpdated: (
           aria-label="自动托管"
           aria-describedby={`${modeId}-description`}
           title={managed ? "托管：按规划自动调度意图" : "手工：停止 Planner 自动规划，由用户或主 Agent 下发"}
-          className="relative grid h-8 w-28 grid-cols-2 items-center rounded-[5px] border bg-muted text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          className="relative grid h-9 w-28 grid-cols-2 items-center rounded-lg border border-border/70 bg-muted/60 p-1 text-xs outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span aria-hidden="true">手工</span>
-          <span aria-hidden="true">托管</span>
           <SwitchPrimitive.Thumb
             aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 left-0 flex w-1/2 items-center justify-center rounded-[5px] bg-primary font-medium text-primary-foreground transition-transform duration-200 ease-out data-[state=checked]:translate-x-full motion-reduce:transition-none"
-          >
-            {managed ? "托管" : "手工"}
-          </SwitchPrimitive.Thumb>
+            className="pointer-events-none absolute inset-y-1 left-1 w-[calc(50%_-_4px)] rounded-md border border-border/60 bg-card shadow-xs transition-transform duration-200 ease-out data-[state=checked]:translate-x-full motion-reduce:transition-none"
+          />
+          <span aria-hidden="true" className={cn("relative font-medium transition-colors", managed ? "text-muted-foreground" : "text-foreground")}>
+            手工
+          </span>
+          <span aria-hidden="true" className={cn("relative font-medium transition-colors", managed ? "text-foreground" : "text-muted-foreground")}>
+            托管
+          </span>
         </SwitchPrimitive.Root>
         <span id={`${modeId}-description`} className="sr-only">
           开启为托管，关闭为手工。手工模式停止 Planner 自动规划，由用户或主 Agent 下发意图；运行中的 Worker 继续执行。
