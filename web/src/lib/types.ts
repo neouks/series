@@ -561,6 +561,13 @@ export interface Finding {
   ts: string;
 }
 
+export interface TaskFindingFilters {
+  query?: string;
+  severity?: "all" | Severity;
+  status?: "all" | FindingStatus;
+  scope?: "all" | "local" | "inherited";
+}
+
 // FindingsPage 是发现列表的服务端分页响应。
 export interface FindingsPage {
   items: Finding[];

@@ -62,7 +62,12 @@ func (s *Server) taskFindingsPage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid direction")
 		return
 	}
-	rows, total, err := s.m.pg.ListTaskFindingsPage(r.Context(), taskID, page, limit, direction == "asc")
+	filter := db.TaskFindingFilter{Query: q.Get("q"), Severity: q.Get("severity"), Status: q.Get("status"), Scope: q.Get("scope")}
+	if err := filter.Validate(); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	rows, total, err := s.m.pg.ListTaskFindingsPage(r.Context(), taskID, page, limit, direction == "asc", filter)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

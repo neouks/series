@@ -50,6 +50,7 @@ import type {
   FindingRetest,
   FindingStats,
   FindingStatus,
+  TaskFindingFilters,
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
@@ -527,9 +528,9 @@ export const api = {
   findings: (task?: string) => get<Finding[]>(`/exploration/findings${tq(task)}`).then(arr),
   taskLegacyFinding: (task: string, node: string) =>
     get<Finding>(`/exploration/findings?${new URLSearchParams({ context_task: task, legacy_node: node })}`),
-  taskFindingsPage: (task: string, page: number, pageSize: number, direction: "asc" | "desc") =>
+  taskFindingsPage: (task: string, page: number, pageSize: number, direction: "asc" | "desc", filters: TaskFindingFilters = {}) =>
     get<FindingsPage>(
-      `/exploration/findings?${new URLSearchParams({ context_task: task, page: String(page), limit: String(pageSize), direction })}`,
+      `/exploration/findings?${new URLSearchParams({ context_task: task, page: String(page), limit: String(pageSize), direction, q: filters.query ?? "", status: filters.status ?? "all", severity: filters.severity ?? "all", scope: filters.scope ?? "all" })}`,
     ),
   findingsPage: (q: FindingQuery) => {
     const p = findingFilterParams(q);

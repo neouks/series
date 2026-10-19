@@ -301,3 +301,70 @@ html {
   .auth-panel { width: 100%; max-width: 420px; border: 1px solid var(--border); border-radius: var(--radius-2xl); padding: 32px; background: var(--card); }
   @media (max-width: 767px) { .workspace-page { padding: 16px; } .auth-panel { padding: 24px; } }
 }
+
+/* Findings workspace: shared canvas, outlined controls and individually selectable rows. */
+.findings-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: calc(100dvh - 96px);
+  gap: 24px;
+  padding: 16px 8px;
+}
+.findings-task-workspace { min-height: calc(100dvh - 220px); }
+.findings-toolbar { display: flex; flex-direction: column; gap: 14px; }
+.findings-heading { font-size: 20px; line-height: 1.4; font-weight: 550; letter-spacing: -.025em; }
+.findings-search-row { display: flex; gap: 8px; margin-top: 10px; }
+[data-findings-control] {
+  border-radius: 12px;
+  border-color: var(--input);
+  background: var(--card);
+  box-shadow: none;
+  font-size: 14px;
+}
+[data-findings-control="search"] { height: 44px; flex: 1; min-width: 0; padding-inline: 4px; }
+[data-findings-control="sort"] { height: 44px; width: 184px; padding-inline: 14px; }
+[data-findings-control="filter"] { height: 40px; gap: 12px; padding-inline: 14px; min-width: 96px; }
+.findings-actions { display: flex; min-height: 36px; align-items: center; gap: 8px; margin-top: 2px; }
+.findings-list-panel { display: flex; flex: 1; min-width: 0; flex-direction: column; min-height: max(320px, calc(100dvh - 370px)); gap: 12px; }
+.findings-task-workspace .findings-list-panel { min-height: max(280px, calc(100dvh - 480px)); }
+.finding-selector { padding: 0; }
+.finding-selector [data-slot="checkbox"] { border-radius: 4px; border-color: var(--muted-foreground); }
+.finding-selector [data-slot="item-group"] { gap: 12px; }
+.finding-list-row {
+  flex-wrap: nowrap;
+  gap: 18px;
+  min-height: 88px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--card);
+  border-color: var(--input);
+}
+.finding-list-row:hover { border-color: var(--ring); }
+.finding-list-row[data-selected="true"] { border-color: var(--foreground); }
+.finding-row-open { display: flex; min-width: 0; width: 100%; flex-direction: column; gap: 5px; text-align: left; border-radius: 4px; cursor: pointer; }
+.finding-row-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.finding-row-title { display: block; max-width: 100%; font-weight: 550; font-size: 14px; }
+.finding-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.finding-severity { display: inline-flex; align-items: center; gap: 5px; }
+.finding-severity svg { width: 12px; height: 12px; color: var(--muted-foreground); }
+.finding-severity[data-severity="critical"] svg,
+.finding-severity[data-severity="high"] svg { color: var(--destructive); }
+.finding-severity[data-severity="medium"] svg { color: var(--finding-warning); }
+:root { --finding-warning: oklch(.69 .16 55); }
+.dark { --finding-warning: oklch(.78 .14 65); }
+.finding-row-assets { display: block; max-width: 100%; color: var(--muted-foreground); font-size: 12px; }
+.findings-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; margin-top: auto; padding-block: 32px 8px; font-size: 13px; }
+.findings-pagination [data-slot="select-trigger"] { height: 36px; border-radius: 8px; background: var(--card); }
+.findings-page-number { display: inline-flex; height: 32px; min-width: 36px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--muted-foreground); }
+@media (max-width: 640px) {
+  .findings-workspace { padding-inline: 0; gap: 18px; }
+  .findings-search-row { flex-wrap: wrap; }
+  [data-findings-control="search"] { flex-basis: 100%; }
+  [data-findings-control="sort"] { width: 100%; }
+  [data-findings-control="filter"] { min-width: 0; padding-inline: 12px; }
+  .finding-list-row { gap: 10px; padding: 12px; }
+  .finding-row-meta time { flex-basis: 100%; }
+  .findings-pagination { align-items: flex-start; flex-direction: column; }
+}

@@ -4,24 +4,15 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import {
-  ArrowUpRightIcon,
-  BugIcon,
-  ChevronRightIcon,
-  ClockIcon,
-  DownloadIcon,
-  InfoIcon,
-  SearchIcon,
-  ShieldAlertIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+import { ArrowUpRightIcon, ChevronRightIcon, DownloadIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { FindingWorkspaceDetail } from "@/components/finding-detail-content";
+import { FindingPagination } from "@/components/finding-pagination";
 import { FindingLayoutToggle, FindingPresentation, useFindingPresentation } from "@/components/finding-presentation";
 import { FindingSelector } from "@/components/finding-selector";
+import { FindingFilterSelect, FindingsToolbar } from "@/components/findings-toolbar";
 import { StatusBadge } from "@/components/status-badge";
-import { TablePagination } from "@/components/table-pagination";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,13 +25,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { api } from "@/lib/api";
 import {
   FINDING_STATUSES,
@@ -52,7 +39,6 @@ import {
   UNASSIGNED_TASK,
 } from "@/lib/findings";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
-import { statusMeta } from "@/lib/status";
 import type { Finding, FindingAssetNode, FindingGroup, FindingStats, FindingStatus, Severity } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -128,13 +114,13 @@ export default function FindingsPage() {
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
   const [vulnclass, setVulnclass] = React.useState<string>("all");
   const [task, setTask] = React.useState<string>("all");
-  const [sort, setSort] = React.useState<"severity" | "time">("severity");
+  const [sort, setSort] = React.useState<"severity" | "time">("time");
   const [search, setSearch] = React.useState("");
   const [query, setQuery] = React.useState("");
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [flat, setFlat] = React.useState<FlatFindingsState>(EMPTY_FLAT_STATE);
   const [flatPage, setFlatPage] = React.useState(1);
-  const [flatPageSize, setFlatPageSize] = React.useState(20);
+  const [flatPageSize, setFlatPageSize] = React.useState(50);
   const [assetTree, setAssetTree] = React.useState<AssetTreeState>(EMPTY_ASSET_TREE);
   const [assetScope, setAssetScope] = React.useState<string | null>(null);
   const [groups, setGroups] = React.useState<FindingGroup[]>([]);
@@ -639,15 +625,6 @@ export default function FindingsPage() {
     }
   }
 
-  const statCards = [
-    { label: "发现总数", value: stats.total, icon: BugIcon },
-    { label: "待处理", value: stats.pending, tone: "text-amber-500", icon: ClockIcon },
-    { label: "严重", value: stats.critical, tone: "text-rose-600", icon: ShieldAlertIcon },
-    { label: "高危", value: stats.high, tone: "text-red-500", icon: TriangleAlertIcon },
-    { label: "中危", value: stats.medium, tone: "text-amber-500", icon: TriangleAlertIcon },
-    { label: "低危", value: stats.low, tone: "text-slate-500", icon: InfoIcon },
-  ];
-
   // 导出弹窗里「当前筛选」的条数:两个视图的筛选一致,只是统计口径来源不同。
   // 平铺与资产视图共用 flat 列表状态,分组视图的口径来自组接口的 finding_total。
   const filteredTotal = view === "grouped" ? total : flat.total;
@@ -687,7 +664,10 @@ export default function FindingsPage() {
     selectedIds,
     onToggleSelected: toggleSelected,
     onToggleSelectedPage: toggleSelectedPage,
-    selectedKey: currentFinding ? findingRowKey(currentFinding) : null,
+    selectedKey:
+      currentFinding && (presentation.layout === "split" || presentation.detailOpen)
+        ? findingRowKey(currentFinding)
+        : null,
     onSelect: (finding: Finding) => {
       setExpanded(findingRowKey(finding));
       presentation.setDetailOpen(true);
@@ -696,8 +676,8 @@ export default function FindingsPage() {
 
   // 平铺视图与资产视图右侧是同一张表 + 同一份分页,只是筛选条件不同。
   const flatListCard = (
-    <Card className="gap-0 py-0">
-      <CardContent className="px-0">
+    <div className="findings-list-panel">
+      <div className="flex min-w-0 flex-1 flex-col">
         {flat.loading && !flat.loaded ? (
           <div className="flex min-h-36 items-center justify-center">
             <Spinner />
@@ -705,7 +685,7 @@ export default function FindingsPage() {
         ) : (
           <>
             <FindingSelector items={flat.items} selectAllLabel="选择当前页全部" {...selectorProps} />
-            <TablePagination
+            <FindingPagination
               page={flatPage}
               pageSize={flatPageSize}
               total={flat.total}
@@ -718,156 +698,97 @@ export default function FindingsPage() {
             />
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 
   return (
-    <div className="flex flex-1 flex-col gap-4 md:gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-semibold text-xl tracking-tight">发现</h1>
-          <p className="text-muted-foreground text-sm">跨任务漏洞汇总</p>
-        </div>
-        <Tabs value={view} onValueChange={(v) => setView(v as FindingView)}>
-          <TabsList>
-            <TabsTrigger value="flat">全部发现</TabsTrigger>
-            <TabsTrigger value="grouped">按任务分组</TabsTrigger>
-            <TabsTrigger value="asset">按资产</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
-      <div className="flex flex-1 flex-col gap-4 md:gap-6">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {statCards.map((stat) => {
-            const StatIcon = stat.icon;
-            return (
-              <Card key={stat.label} className="gap-1 py-4">
-                <CardHeader className="px-4">
-                  <CardDescription>{stat.label}</CardDescription>
-                  <CardTitle className={cn("flex items-center gap-2 text-2xl tabular-nums", stat.tone)}>
-                    <StatIcon className="size-5" aria-hidden="true" />
-                    {stat.value}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-            );
-          })}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <InputGroup className="w-full sm:w-72">
-            <InputGroupInput
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="检索漏洞内容"
-              aria-label="检索漏洞内容"
-            />
-            <InputGroupAddon>
-              <SearchIcon aria-hidden="true" />
-            </InputGroupAddon>
-          </InputGroup>
-
-          <ToggleGroup
-            type="single"
-            value={severity}
-            onValueChange={(value) => value && setSeverity(value as "all" | Severity)}
-            variant="outline"
-            size="sm"
-            spacing={0}
-          >
-            {(
-              [
-                ["all", "全部"],
-                ["critical", "严重"],
-                ["high", "高危"],
-                ["medium", "中危"],
-                ["low", "低危"],
-              ] as const
-            ).map(([val, label]) => (
-              <ToggleGroupItem key={val} value={val} aria-label={`按${label}等级筛选`}>
-                {label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-
-          <Select value={status} onValueChange={(v) => setStatus(v as "all" | FindingStatus)}>
-            <SelectTrigger size="sm" className="w-32">
-              <SelectValue placeholder="状态" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              {FINDING_STATUSES.map((st) => (
-                <SelectItem key={st} value={st}>
-                  {statusMeta("finding", st).label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={vulnclass} onValueChange={setVulnclass}>
-            <SelectTrigger size="sm" className="w-40">
-              <SelectValue placeholder="漏洞类型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部类型</SelectItem>
-              {stats.vulnclasses.map((vc) => (
-                <SelectItem key={vc} value={vc}>
-                  {vc}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={task} onValueChange={setTask}>
-            <SelectTrigger size="sm" className="w-48">
-              <SelectValue placeholder="任务" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部任务</SelectItem>
-              <SelectItem value={UNASSIGNED_TASK}>未关联 / 任务已删除</SelectItem>
-              {(stats.tasks ?? []).map((t) => {
-                const id = String(t.id);
-                const label = t.name || t.description || `任务 #${id}（已删除）`;
-                return (
-                  <SelectItem key={id} value={id}>
-                    <span className="flex w-full items-center gap-2">
-                      <span className="max-w-[14rem] truncate" title={label}>
-                        {label}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-muted-foreground tabular-nums">
-                        <BugIcon className="size-3.5" aria-hidden="true" />
-                        {t.count}
-                      </span>
-                    </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-
-          <Select value={sort} onValueChange={(v) => setSort(v as "severity" | "time")}>
-            <SelectTrigger size="sm" className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="severity">按严重度</SelectItem>
-              <SelectItem value="time">按时间</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <FindingLayoutToggle value={presentation.layout} onChange={presentation.changeLayout} />
-          <div className="ml-auto flex items-center gap-3">
+    <div className="findings-workspace" data-findings-surface>
+      <FindingsToolbar
+        total={(view === "grouped" ? !!groupsSnapshot : flat.loaded) ? filteredTotal : undefined}
+        search={search}
+        onSearch={setSearch}
+        sort={sort}
+        onSort={(value) => setSort(value as "severity" | "time")}
+        sortOptions={[
+          { value: "time", label: "最近发现" },
+          { value: "severity", label: "严重度优先" },
+        ]}
+        view={view}
+        onView={(value) => setView(value as FindingView)}
+        viewOptions={[
+          { value: "flat", label: "全部发现" },
+          { value: "grouped", label: "按任务分组" },
+          { value: "asset", label: "按资产" },
+        ]}
+        status={status}
+        onStatus={(value) => setStatus(value as "all" | FindingStatus)}
+        severity={severity}
+        onSeverity={(value) => setSeverity(value as "all" | Severity)}
+        activeFilters={[severity, status, vulnclass, task].filter((value) => value !== "all").length}
+        onReset={() => {
+          setSeverity("all");
+          setStatus("all");
+          setVulnclass("all");
+          setTask("all");
+          setSearch("");
+        }}
+        filters={
+          <>
+            <Field>
+              <FieldLabel>漏洞类型</FieldLabel>
+              <FindingFilterSelect
+                label="漏洞类型"
+                value={vulnclass}
+                onChange={setVulnclass}
+                options={[
+                  { value: "all", label: "全部类型" },
+                  ...stats.vulnclasses.map((value) => ({ value, label: value })),
+                ]}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>所属任务</FieldLabel>
+              <FindingFilterSelect
+                label="所属任务"
+                value={task}
+                onChange={setTask}
+                options={[
+                  { value: "all", label: "全部任务" },
+                  { value: UNASSIGNED_TASK, label: "未关联 / 任务已删除" },
+                  ...(stats.tasks ?? []).map((item) => ({
+                    value: String(item.id),
+                    label: item.name || item.description || `任务 #${item.id}`,
+                  })),
+                ]}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>详情展示</FieldLabel>
+              <FindingLayoutToggle value={presentation.layout} onChange={presentation.changeLayout} />
+            </Field>
+            <Field>
+              <FieldLabel>全站统计</FieldLabel>
+              <FieldDescription>
+                共 {stats.total} 条 · 待处理 {stats.pending}
+                <br />
+                严重 {stats.critical} · 高危 {stats.high} · 中危 {stats.medium} · 低危 {stats.low}
+              </FieldDescription>
+            </Field>
+          </>
+        }
+        actions={
+          <>
+            <Button size="icon" variant="ghost" onClick={openExport} aria-label="导出发现" title="导出发现">
+              <DownloadIcon />
+            </Button>
             {selectedIds.size > 0 && (
               <span className="text-muted-foreground text-xs tabular-nums">已选 {selectedIds.size} 条</span>
             )}
-            <Button size="sm" variant="outline" onClick={openExport}>
-              <DownloadIcon /> 导出
-            </Button>
-          </div>
-        </div>
-
+          </>
+        }
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-4">
         <FindingPresentation
           {...presentation}
           onOpenChange={presentation.setDetailOpen}
@@ -1052,7 +973,7 @@ export default function FindingsPage() {
                                 selectAllLabel="选择本组当前页全部"
                                 {...selectorProps}
                               />
-                              <TablePagination
+                              <FindingPagination
                                 page={state.page}
                                 pageSize={state.pageSize}
                                 total={state.total}
@@ -1073,7 +994,7 @@ export default function FindingsPage() {
                     </CardContent>
                   </Card>
                 )}
-                <TablePagination
+                <FindingPagination
                   page={page}
                   pageSize={pageSize}
                   total={groupTotal}

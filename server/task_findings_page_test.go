@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +51,11 @@ func TestTaskFindingsPageHTTPProvenanceAndLegacy(t *testing.T) {
 			t.Fatalf("%s: %d %s", q, w.Code, w.Body)
 		}
 	}
+	for _, filter := range []string{"scope=recursive", "severity=info", "status=wrong", "q=" + url.QueryEscape(strings.Repeat("中", 201))} {
+		if w := call("context_task=" + owner.ID + "&" + filter); w.Code != 400 {
+			t.Fatalf("invalid filter %s: %d %s", filter, w.Code, w.Body)
+		}
+	}
 	w := call("context_task=" + owner.ID + "&page=1&limit=20")
 	if w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
@@ -83,6 +90,16 @@ func TestTaskFindingsPageHTTPProvenanceAndLegacy(t *testing.T) {
 	}
 	if legacyCount != 1 {
 		t.Fatal("lost legacy")
+	}
+	for _, filter := range []string{"scope=local&q=TITLE&severity=high&status=pending", "scope=inherited&q=legacy&severity=low&status=pending"} {
+		result.Items = nil // Omitted false/empty fields must not retain the previous response.
+		w = call("context_task=" + owner.ID + "&limit=1&" + filter)
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Total != 1 || len(result.Items) != 1 {
+			t.Fatalf("filtered page: %d %s", w.Code, w.Body)
+		}
+		if result.Items[0].Inherited != strings.Contains(filter, "inherited") || result.Items[0].Evidence != "" {
+			t.Fatalf("filter lost provenance/projection: %+v", result.Items[0])
+		}
 	}
 	w = call(fmt.Sprintf("context_task=%s&legacy_node=%d", owner.ID, nodeID))
 	var detail FindingDTO

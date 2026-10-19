@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -121,5 +122,94 @@ func TestTaskFindingsPageScopeLegacyAndOrdering(t *testing.T) {
 		if _, _, err = d.ListTaskFindingsPage(t.Context(), owner.ID, args[0], args[1], false); err == nil {
 			t.Fatal("invalid pagination accepted")
 		}
+	}
+}
+
+func TestTaskFindingsPageFiltersBeforePaging(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	create := func(sources ...int64) *Task {
+		task, e := d.CreateTaskWithOptions("filter test", "", TaskCreateOptions{SourceTaskIDs: sources})
+		if e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() { d.Exec(`DELETE FROM findings WHERE task_id=$1`, task.ID); d.DeleteTask(task.ID) })
+		return task
+	}
+	source := create()
+	owner := create(source.ID)
+	unrelated := create()
+	for _, task := range []*Task{source, owner, unrelated} {
+		for i := 0; i < 3; i++ {
+			f, e := d.AddFinding(task.ID, 0, "HTTP", "中文 ADMIN %_", "high", "mixed Case", "do not preload evidence", "test", nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if i == 0 {
+				if _, e = d.Exec(`UPDATE findings SET status='confirmed' WHERE id=$1`, f); e != nil {
+					t.Fatal(e)
+				}
+			}
+		}
+	}
+	if _, err = d.Exec(`INSERT INTO exploration_nodes(exploration_id,kind,state,payload) VALUES($1,'finding','confirmed','{"name":"中文 ADMIN %_","severity":"low","summary":"legacy","evidence":"private body"}')`, source.ExplorationID); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		filter TaskFindingFilter
+		want   int
+	}{
+		{"literal case insensitive", TaskFindingFilter{Query: "admin %_"}, 7},
+		{"scope", TaskFindingFilter{Scope: "local"}, 3},
+		{"inherited with legacy", TaskFindingFilter{Scope: "inherited"}, 4},
+		{"combined", TaskFindingFilter{Scope: "inherited", Severity: "high", Status: "confirmed", Query: "中文"}, 1},
+		{"legacy pending", TaskFindingFilter{Scope: "inherited", Severity: "low", Status: "pending"}, 1},
+		{"summary", TaskFindingFilter{Query: "cAsE"}, 6},
+		{"type", TaskFindingFilter{Query: "http"}, 6},
+		{"literal not SQL wildcard", TaskFindingFilter{Query: "admin%"}, 0},
+		{"evidence stays lazy", TaskFindingFilter{Query: "private body"}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seen := map[string]bool{}
+			for page := 1; page <= tt.want+1; page++ {
+				rows, total, e := d.ListTaskFindingsPage(t.Context(), owner.ID, page, 1, false, tt.filter)
+				if e != nil || total != tt.want {
+					t.Fatalf("total=%d want=%d err=%v", total, tt.want, e)
+				}
+				if page > tt.want && len(rows) != 0 {
+					t.Fatal("extra page")
+				}
+				for _, f := range rows {
+					if f.TaskID == nil || *f.TaskID == unrelated.ID || f.Evidence != "" {
+						t.Fatalf("scope or evidence leak %+v", f)
+					}
+					node := int64(0)
+					if f.NodeID != nil {
+						node = *f.NodeID
+					}
+					key := fmt.Sprintf("%d:%d", f.ID, node)
+					if seen[key] {
+						t.Fatal("overlapping pages")
+					}
+					seen[key] = true
+				}
+			}
+			if len(seen) != tt.want {
+				t.Fatalf("seen %d", len(seen))
+			}
+		})
+	}
+	for _, f := range []TaskFindingFilter{{Scope: "recursive"}, {Status: "bogus"}, {Severity: "info"}, {Query: strings.Repeat("中", 201)}} {
+		if _, _, err = d.ListTaskFindingsPage(t.Context(), owner.ID, 1, 20, false, f); err == nil {
+			t.Fatalf("invalid filter accepted %+v", f)
+		}
+	}
+	if err = (TaskFindingFilter{Query: strings.Repeat("中", 200)}).Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
