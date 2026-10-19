@@ -30,7 +30,6 @@ import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
 import type { GlobalProxyProbeResult, Settings } from "@/lib/types";
 
-import { UpdateCard } from "./update-card";
 
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);
@@ -374,7 +373,6 @@ export default function SystemSettingsPage() {
           多列则自动按内容高度平衡填充。卡片间距靠 mb 而非 gap——多列布局下
           column-gap 只管列间距，行间距要由子元素自己给。 */}
       <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
-        <UpdateCard />
         <HTTPAuthCard />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">

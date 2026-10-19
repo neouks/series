@@ -33,7 +33,7 @@ RUN npm install -g @playwright/mcp@latest @zhafron/mcp-web-search@latest chrome-
 WORKDIR /app
 # 预编译好的对应架构二进制（dist/amd64/series 或 dist/arm64/series）
 COPY dist/${TARGETARCH}/series /app/series
-# 守护启动脚本：进程退出后按退出码决定是否重新拉起，页面一键更新靠它完成换装。
+# 守护启动脚本：异常退出后退避重启，并向子进程转发停止信号。
 # 它同时负责把 SIGTERM 转发给 series —— docker stop 只把信号发给 PID 1，
 # 不转发的话 series 收不到、做不了优雅关闭，10 秒后被 SIGKILL 硬杀。
 COPY start.sh /app/start.sh

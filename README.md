@@ -97,7 +97,7 @@ cp config.example.json config.json   # 填好 database 连接
 ./start.sh                           # → http://localhost:8787
 ```
 
-> 请用 `start.sh` / `start.bat` 启动，而不是直接跑 `./series`。它是个守护脚本：程序退出后按退出码决定是否重新拉起，**页面上的[一键更新](#方式一页面一键更新推荐)靠它完成换装**。直接运行 `./series` 时更新完就不会被拉起了。
+> 推荐使用 `start.sh` / `start.bat` 启动：程序异常退出后会退避重启，正常停止后退出。也可由自己的进程管理器直接运行 `series`。
 > 后台常驻：`nohup ./start.sh >series.log 2>&1 &`。
 
 ### 方式四：从源码编译单二进制
@@ -134,20 +134,9 @@ SERIES_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 
 > 升级只换程序、不动数据：Postgres 数据卷 `pgdata`、`./data`（jwt.key / SQLite 等）、`./skills` 都会保留。**数据库迁移无需手动执行**——`series` 每次启动会幂等重跑 `schema.sql`（含 `ADD COLUMN` / `CREATE INDEX IF NOT EXISTS`），即“重启即迁移”。升级前仍建议先备份 `./data` 与数据库。
 
-### 方式一：页面一键更新（推荐）
+系统不提供在线检查、安装或回滚入口；请在服务器上使用以下方式升级。
 
-在 **系统配置** 页（侧边栏「系统配置」→ `/system/settings`）的**版本与更新**卡片里，可以直接检查并安装新版本，无需登录服务器。
-
-点「更新」后：下载当前平台的发布包 → 比对 Release 的 `SHA256SUMS` → 用 `-h` 冒烟测试新二进制 → 暂存为 `series.new` → 程序退出，由 `start.sh` / `start.bat` 重新拉起并完成换装。页面会自动等到新版本上线后刷新。
-
-- **失败不会留下坏程序**：校验或冒烟不通过就丢弃暂存件、继续跑当前版本；换装后的新版若连续 3 次启动失败，会自动回滚到 `series.old`（失败的那个留作 `series.failed` 供排查）。
-- **随时可回退**：上一版本保留为 `series.old`，卡片上有「回滚到上一版本」。注意数据库结构不会回退。
-- **更新会中断正在运行的任务**——更新即重启，请在空闲时进行。
-- **开发构建不给更新**：版本号是 `dev` 或 `git describe` 带后缀时禁用，避免正式版覆盖掉本地调试的二进制。
-- **Docker 下只换程序、不换镜像**：镜像里的 playwright / nmap 等工具链不会跟着升级，且 `docker compose up -d` 重建容器后会退回镜像自带的版本。要连镜像一起升级仍请用 `./build-docker.sh && docker compose up -d --no-build series`。
-- 访问 GitHub 需要代理时，在同一页面配置**全局代理**即可，更新链路会走它。更新只从 GitHub 域名下载并强制 HTTPS。
-
-### 方式二：一键更新脚本
+### 方式一：更新脚本
 
 ```bash
 cd series
@@ -159,7 +148,7 @@ cd series
 - **① Docker**：从当前源码构建本地镜像，停止应用服务后重新启动；数据库连接和数据卷沿用现有配置。
 - **② 本地**：重建前端静态产物 → 重新编译 `./series`（完成后重启进程生效）。
 
-### 方式三：Docker Compose（手动）
+### 方式二：Docker Compose（手动）
 
 ```bash
 cd series
@@ -171,7 +160,7 @@ docker compose up -d --no-build series     # 启动时更新 schema
 docker image prune -f          # 清理旧镜像（可选）
 ```
 
-### 方式四：预编译二进制（Releases）
+### 方式三：预编译二进制（Releases）
 
 有正式版本发布后，到 [Releases](https://github.com/neouks/series/releases) 下载新版本 zip，停掉旧进程后覆盖 `series` 与 `skills/`（保留你的 `config.json` 与 `data/`），重启即可：
 

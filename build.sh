@@ -173,8 +173,7 @@ package_binary() {
   rm -rf "$package_root" "$archive"
   mkdir -p "$package_root"
   cp "$binary" "$package_root/"
-  # 守护启动脚本是正式入口：页面上的一键更新要靠它在进程退出后重新拉起，
-  # 直接跑 series 本体的话更新完就再也起不来了。按目标系统只带对应的那一份。
+  # 打包对应平台的守护脚本，用于崩溃退避重启；Unix 脚本同时转发停止信号。
   if [ "$goos" = "windows" ]; then
     cp start.bat "$package_root/"
   else
