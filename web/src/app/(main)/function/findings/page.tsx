@@ -791,6 +791,8 @@ export default function FindingsPage() {
       <div className="flex min-w-0 flex-1 flex-col gap-4">
         <FindingPresentation
           {...presentation}
+          onToggleList={presentation.toggleList}
+          onToggleDetail={presentation.toggleDetail}
           onOpenChange={presentation.setDetailOpen}
           detail={
             <>

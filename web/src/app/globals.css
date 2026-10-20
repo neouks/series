@@ -329,6 +329,8 @@ html {
 .findings-actions { display: flex; min-height: 36px; align-items: center; gap: 8px; margin-top: 2px; }
 .findings-list-panel { display: flex; flex: 1; min-width: 0; flex-direction: column; min-height: max(320px, calc(100dvh - 370px)); gap: 12px; }
 .findings-task-workspace .findings-list-panel { min-height: max(280px, calc(100dvh - 480px)); }
+.findings-collapsed-rail { min-height: max(320px, calc(100dvh - 370px)); }
+.findings-task-workspace .findings-collapsed-rail { min-height: max(280px, calc(100dvh - 480px)); }
 .finding-selector { padding: 0; }
 .finding-selector [data-slot="checkbox"] { border-radius: 4px; border-color: var(--muted-foreground); }
 .finding-selector [data-slot="item-group"] { gap: 12px; }

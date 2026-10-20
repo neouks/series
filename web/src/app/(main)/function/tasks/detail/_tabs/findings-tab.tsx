@@ -6,10 +6,10 @@ import { DownloadIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { FindingWorkspaceDetail } from "@/components/finding-detail-content";
-import { FindingSuppressionRules } from "@/components/finding-suppression-rules";
 import { FindingPagination } from "@/components/finding-pagination";
 import { FindingLayoutToggle, FindingPresentation, useFindingPresentation } from "@/components/finding-presentation";
 import { FindingSelector } from "@/components/finding-selector";
+import { FindingSuppressionRules } from "@/components/finding-suppression-rules";
 import { FindingsToolbar } from "@/components/findings-toolbar";
 import { useNotificationRead } from "@/components/task-notifications";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -168,6 +168,8 @@ function TaskFindings({ taskId }: { taskId: string }) {
       />
       <FindingPresentation
         {...presentation}
+        onToggleList={presentation.toggleList}
+        onToggleDetail={presentation.toggleDetail}
         onOpenChange={presentation.setDetailOpen}
         detail={
           selected ? (
