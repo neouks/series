@@ -750,10 +750,16 @@ func (t *Traffic) record(f *mproxy.Flow) {
 	url := f.Request.URL.String()
 	reqHead := fmt.Sprintf("%s %s %s\n%s", method, f.Request.URL.RequestURI(), f.Request.Proto, requestHeaderLines(f.Request))
 	respHead := fmt.Sprintf("HTTP %d\n%s", f.Response.StatusCode, headerLines(f.Response.Header))
+	// Store the bytes exactly as captured, but use the decoded view for text
+	// detection, previews and the full-text index. Content-Encoding is often
+	// br/gzip/zstd, and indexing or showing the compressed bytes as text makes
+	// otherwise readable API responses useless.
+	reqIndex := decodeHTTPBody(reqHead, f.Request.Body)
+	respIndex := decodeHTTPBody(respHead, f.Response.Body)
 	// Bodies are spilled before the transaction opens: blob writes are filesystem
 	// work and must not sit inside the SQLite write lock.
-	reqB := t.spill(f.Request.Body, f.Request.Header.Get("Content-Type"))
-	respB := t.spill(f.Response.Body, ct)
+	reqB := t.spillWithIndex(f.Request.Body, f.Request.Header.Get("Content-Type"), reqIndex)
+	respB := t.spillWithIndex(f.Response.Body, ct, respIndex)
 
 	tx, err := t.db.Begin()
 	if err != nil {
@@ -826,15 +832,32 @@ type storedBody struct {
 // independent of where the bytes end up, and both storage forms are compressed
 // (see compress.go) while the index still gets the in-memory plaintext.
 func (t *Traffic) spill(body []byte, contentType string) storedBody {
+	return t.spillWithIndex(body, contentType, body)
+}
+
+// spillWithIndex stores body exactly as captured while using indexBody (the
+// Content-Encoding-decoded view) for text detection, previews and the full-text
+// index. Keeping the raw bytes preserves evidence/replay fidelity; decoding only
+// the index and preview makes compressed JSON searchable and readable.
+func (t *Traffic) spillWithIndex(body []byte, contentType string, indexBody []byte) storedBody {
 	if len(body) == 0 {
 		return storedBody{}
 	}
-	text := !isBinaryBody(contentType, body)
+	if len(indexBody) == 0 {
+		indexBody = body
+	}
+	text := !isBinaryBody(contentType, indexBody)
 	indexText := func() string {
 		if !text {
 			return ""
 		}
-		return string(clipBytes(body, maxIndexBody))
+		return string(clipBytes(indexBody, maxIndexBody))
+	}
+	preview := func() []byte {
+		if text {
+			return []byte(truncateUTF8(indexBody, blobPreview))
+		}
+		return clipBytes(body, blobPreview)
 	}
 	if len(body) <= maxInlineBody {
 		return storedBody{inline: compressInline(body), index: indexText()}
@@ -849,7 +872,7 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 	blobDir := filepath.Join(t.dir, "_blobs", "sha256", h[:2])
 	if err := os.MkdirAll(blobDir, 0o755); err != nil {
 		log.Printf("[traffic] 创建 blob 目录失败：%v", err)
-		return storedBody{inline: compressInline(clipBytes(body, blobPreview)), index: indexText()}
+		return storedBody{inline: compressInline(preview()), index: indexText()}
 	}
 	packed, compressed := encodeBlob(body)
 	ext := ".bin"
@@ -865,13 +888,13 @@ func (t *Traffic) spill(body []byte, contentType string) storedBody {
 		if _, altErr := os.Stat(filepath.Join(blobDir, h+other)); altErr != nil {
 			if err := os.WriteFile(blobPath, packed, 0o644); err != nil {
 				log.Printf("[traffic] 写 blob %s 失败：%v", h, err)
-				return storedBody{inline: compressInline(clipBytes(body, blobPreview)), index: indexText()}
+				return storedBody{inline: compressInline(preview()), index: indexText()}
 			}
 		}
 	}
 	sb := storedBody{hash: h, index: indexText()}
 	if text {
-		sb.inline = compressInline([]byte(truncateUTF8(body, blobPreview)))
+		sb.inline = compressInline(preview())
 	} else {
 		sb.inline = []byte(binaryTag(contentType, body))
 	}
@@ -1351,6 +1374,16 @@ FROM exchange_bodies b JOIN exchanges e ON e.id=b.id WHERE b.id=?`, id).
 		Scan(&reqHead, &reqBody, &reqBlob, &respHead, &respBody, &respBlob, &reqLen, &respLen)
 	if err == nil {
 		reqBody, respBody = decompressInline(reqBody), decompressInline(respBody)
+		// Inline bodies are stored exactly as captured, so apply HTTP
+		// Content-Encoding here as well as at index time. A spilled body's
+		// inline column is already a decoded preview; its blob pointer is left
+		// untouched.
+		if !reqBlob.Valid || reqBlob.String == "" {
+			reqBody = decodeHTTPBody(reqHead, reqBody)
+		}
+		if !respBlob.Valid || respBlob.String == "" {
+			respBody = decodeHTTPBody(respHead, respBody)
+		}
 		return assembleRaw(reqHead, reqBody, reqBlob, reqLen), assembleRaw(respHead, respBody, respBlob, respLen), nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {

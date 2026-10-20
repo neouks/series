@@ -224,9 +224,12 @@ VALUES(?,?,?,?,?,?,?)`, item.ID, item.ReqHead, item.ReqBody, nullIfEmpty(item.Re
 			if err := tx.QueryRow(`SELECT rowid FROM exchanges WHERE id=?`, item.ID).Scan(&rowID); err != nil {
 				return imported, err
 			}
-			// Archived inline bodies may be compressed; the index needs plaintext.
+			// Archived inline bodies may be compressed; the index needs plaintext, and
+			// Content-Encoding (br/gzip/...) must be decoded too or search sees bytes.
+			reqIndex := decodeHTTPBody(item.ReqHead, decompressInline(item.ReqBody))
+			respIndex := decodeHTTPBody(item.RespHead, decompressInline(item.RespBody))
 			content := strings.Join([]string{item.URL, item.ReqHead,
-				string(decompressInline(item.ReqBody)), item.RespHead, string(decompressInline(item.RespBody))}, "\n")
+				string(reqIndex), item.RespHead, string(respIndex)}, "\n")
 			if _, err := tx.Exec(`INSERT INTO ex_fts(rowid,content) VALUES(?,?)`, rowID, content); err != nil {
 				return imported, err
 			}

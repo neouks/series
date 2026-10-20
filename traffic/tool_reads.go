@@ -310,7 +310,7 @@ func (t *Traffic) readTrafficPart(ctx context.Context, id, part string, offset, 
 	if strings.HasSuffix(part, "headers") {
 		e = t.db.QueryRowContext(ctx, `SELECT `+side+`_head FROM exchange_bodies WHERE id=?`, id).Scan(&head)
 	} else {
-		e = t.db.QueryRowContext(ctx, `SELECT `+side+`_body,`+side+`_blob FROM exchange_bodies WHERE id=?`, id).Scan(&body, &blob)
+		e = t.db.QueryRowContext(ctx, `SELECT `+side+`_body,`+side+`_blob,`+side+`_head FROM exchange_bodies WHERE id=?`, id).Scan(&body, &blob, &head)
 	}
 	if errors.Is(e, sql.ErrNoRows) {
 		return t.readLegacyTrafficPart(ctx, id, part, offset, limit)
@@ -325,13 +325,37 @@ func (t *Traffic) readTrafficPart(ctx context.Context, id, part string, offset, 
 	if strings.HasSuffix(part, "headers") {
 		data = []byte(head)
 	} else if blob.Valid && blob.String != "" {
+		// Small/typical bodies are persisted raw, so decoding is a matter of
+		// applying Content-Encoding after the storage layer's zstd. Large bodies
+		// are streamed when possible, but a compressed stream cannot be windowed
+		// before decoding: read it bounded, decode, then apply the caller's offset.
+		if len(contentEncodings(head)) > 0 {
+			f, _, err := t.Blob(blob.String)
+			if err != nil {
+				return nil, 0, err
+			}
+			defer f.Close()
+			raw, err := io.ReadAll(io.LimitReader(f, maxBlobBody+1))
+			if err != nil {
+				return nil, 0, err
+			}
+			if len(raw) > maxBlobBody {
+				return nil, 0, fmt.Errorf("blob exceeds %d bytes", maxBlobBody)
+			}
+			data = decodeHTTPBody(head, raw)
+			total = int64(len(data))
+			if offset >= total {
+				return []byte{}, total, nil
+			}
+			return utf8ByteWindow(data[offset:], limit), total, ctx.Err()
+		}
 		data, total, e = t.BlobRange(blob.String, offset, limit+4)
 		if e != nil {
 			return nil, 0, e
 		}
 		return utf8ByteWindow(data, limit), total, ctx.Err()
 	} else {
-		data = body
+		data = decodeHTTPBody(head, body)
 	}
 	total = int64(len(data))
 	if offset >= total {
