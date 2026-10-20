@@ -12,6 +12,7 @@ import {
   ListChecksIcon,
   Loader2Icon,
   RadioTowerIcon,
+  RefreshCwIcon,
   SearchIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -149,6 +150,7 @@ export default function TrafficPage() {
   const [deleteMode, setDeleteMode] = React.useState<"filter" | "selected" | "all" | null>(null); // null = dialog closed
   const [deleting, setDeleting] = React.useState(false);
   const [reloadTick, setReloadTick] = React.useState(0); // manual refetch trigger
+  const [refreshing, setRefreshing] = React.useState(false);
 
   // Debounce both filters so we don't refetch on every keystroke.
   React.useEffect(() => {
@@ -201,7 +203,7 @@ export default function TrafficPage() {
   React.useEffect(() => {
     let alive = true;
     const load = () => {
-      api
+      const trafficReq = api
         .traffic(page, size, hostQ, method, queryQ, {
           body: bodyQ,
           path: pathQ,
@@ -217,7 +219,7 @@ export default function TrafficPage() {
         .catch(() => {
           // Keep the last successful snapshot during transient refresh failures.
         });
-      api
+      const hostsReq = api
         .trafficHosts()
         .then((r) => {
           if (alive) setHosts(r.hosts ?? []);
@@ -225,11 +227,16 @@ export default function TrafficPage() {
         .catch(() => {
           // Keep the last successful host list during transient refresh failures.
         });
+      // The manual button owns the spinner; wait for both requests so it does not
+      // flash off while the host picker is still catching up.
+      return Promise.allSettled([trafficReq, hostsReq]).then(() => {
+        if (alive) setRefreshing(false);
+      });
     };
-    load();
+    void load();
     const t = setInterval(() => {
       if (page !== 0) return; // only auto-refresh the newest page
-      load();
+      void load();
     }, 5000);
     return () => {
       alive = false;
@@ -539,6 +546,20 @@ export default function TrafficPage() {
             onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
           >
             <ChevronRightIcon />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8"
+            disabled={refreshing}
+            onClick={() => {
+              setRefreshing(true);
+              setReloadTick((t) => t + 1);
+            }}
+            aria-label="刷新流量记录"
+            title={refreshing ? "正在刷新…" : "刷新流量记录"}
+          >
+            {refreshing ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
           </Button>
         </div>
       </div>

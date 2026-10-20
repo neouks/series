@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, SearchIcon, TerminalIcon } from "lucide-react";
+import { BarChart3Icon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, RefreshCwIcon, SearchIcon, TerminalIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ export default function CommandsPage() {
   const [commands, setCommands] = React.useState<CommandRecord[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
+  const [reloadTick, setReloadTick] = React.useState(0); // manual refetch trigger
 
   // 各工具调用次数。弹窗打开时才拉取（多一次聚合查询，不必每次翻页都付）。
   const [statsOpen, setStatsOpen] = React.useState(false);
@@ -81,6 +82,7 @@ export default function CommandsPage() {
   }, [queryQ, taskFilter, size]);
 
   // Load data.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an explicit manual-refetch trigger.
   React.useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -100,7 +102,7 @@ export default function CommandsPage() {
     return () => {
       alive = false;
     };
-  }, [page, size, queryQ, taskFilter]);
+  }, [page, size, queryQ, taskFilter, reloadTick]);
 
   // 统计跟随筛选条件走，和表格描述的是同一批记录（但不分页）。
   React.useEffect(() => {
@@ -194,6 +196,17 @@ export default function CommandsPage() {
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
           >
             <ChevronRightIcon />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8"
+            disabled={loading}
+            onClick={() => setReloadTick((t) => t + 1)}
+            aria-label="刷新工具执行记录"
+            title={loading ? "正在刷新…" : "刷新工具执行记录"}
+          >
+            {loading ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
           </Button>
         </div>
       </div>

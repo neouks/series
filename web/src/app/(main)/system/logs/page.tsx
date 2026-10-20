@@ -2,6 +2,7 @@
 
 import { entryAwareFetch } from "@/lib/http-auth";
 import * as React from "react";
+import { Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { sseUrl } from "@/lib/api";
@@ -43,6 +44,7 @@ export default function LogsPage() {
   const [level, setLevel] = React.useState<"all" | LogLine["level"]>("all");
   const [paused, setPaused] = React.useState(false);
   const [loadingHistory, setLoadingHistory] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [hasMore, setHasMore] = React.useState(false);
   const bottom = React.useRef<HTMLDivElement>(null);
   const stick = React.useRef(true);
@@ -117,6 +119,33 @@ export default function LogsPage() {
     }
   }
 
+  // Manual refresh: pull the newest ring snapshot. Merge by seq so a live SSE
+  // frame that arrives during the request is not lost.
+  async function refreshLogs() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      if (MOCK) {
+        setLines(MOCK_LOGS);
+        return;
+      }
+      const res = await entryAwareFetch("/api/logs?limit=3000");
+      if (!res.ok) return;
+      const data = (await res.json()) as { items?: LogLine[] };
+      if (!Array.isArray(data.items)) return;
+      setLines((prev) => {
+        const bySeq = new Map<number, LogLine>();
+        for (const line of prev) bySeq.set(line.seq, line);
+        for (const line of data.items ?? []) bySeq.set(line.seq, line);
+        return [...bySeq.values()].sort((a, b) => a.seq - b.seq).slice(-5000);
+      });
+    } catch {
+      // Keep the current buffer on transient failures.
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase();
     return lines.filter(
@@ -174,6 +203,22 @@ export default function LogsPage() {
             onClick={() => setPaused((p) => !p)}
           >
             {paused ? "已暂停" : "暂停"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8"
+            disabled={refreshing}
+            onClick={() => void refreshLogs()}
+            aria-label="刷新日志"
+            title={refreshing ? "正在刷新…" : "刷新日志"}
+          >
+            {refreshing ? (
+              <Loader2Icon className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCwIcon className="size-3.5" />
+            )}
+            刷新
           </Button>
           <Button size="sm" variant="outline" className="h-8" onClick={() => setLines([])}>
             清空

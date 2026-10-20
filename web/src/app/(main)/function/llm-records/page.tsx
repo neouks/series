@@ -7,6 +7,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Loader2Icon,
+  RefreshCwIcon,
   XIcon,
   Trash2Icon,
   CopyIcon,
@@ -369,6 +370,17 @@ export default function LLMRecordsPage() {
             onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
           >
             <ChevronRightIcon />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8"
+            disabled={loading}
+            onClick={() => setReloadTick((t) => t + 1)}
+            aria-label="刷新 LLM 录制记录"
+            title={loading ? "正在刷新…" : "刷新 LLM 录制记录"}
+          >
+            {loading ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
           </Button>
         </div>
       </div>
