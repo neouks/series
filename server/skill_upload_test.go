@@ -53,6 +53,7 @@ func TestSkillRelPath(t *testing.T) {
 	}
 	bad := []string{
 		"", "../etc/passwd", "a/../../b", "/abs/path", "a//b", `..\..\x`,
+		`scripts\run.sh`, `\\server\share\x`, "C:/abs/x", "C:\\abs\\x",
 		"%2e%2e/x", "a\x00b", "中文 名.md", "中‮文.md", "a#b.md", "a?b.md",
 		"a:b.md", string([]byte{0xd6, 0xd0}) + ".md", // 裸 GBK 字节：非法 UTF-8
 		strings.Repeat("a", maxSkillPathLen+1),
@@ -60,6 +61,125 @@ func TestSkillRelPath(t *testing.T) {
 	for _, in := range bad {
 		if got, msg := skillRelPath(in); msg == "" {
 			t.Errorf("skillRelPath(%q) = (%q, \"\"), want rejection", in, got)
+		}
+	}
+}
+
+// TestWalkSkillFilesSlashPaths is the Windows regression guard: filepath.Rel returns
+// "scripts\run.sh" there, the client echoes that back, and skillRelPath refuses
+// backslashes — so files in subdirectories were listed but could not be read or saved.
+func TestWalkSkillFilesSlashPaths(t *testing.T) {
+	root := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %q: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %q: %v", rel, err)
+		}
+	}
+	mustWrite("SKILL.md", "---\nname: demo\n---\n")
+	mustWrite("scripts/run.sh", "#!/bin/sh\necho hi\n")
+	mustWrite("参考/中文说明.md", "x")
+
+	entries, err := walkSkillFiles(root)
+	if err != nil {
+		t.Fatalf("walkSkillFiles: %v", err)
+	}
+	got := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if strings.Contains(e, `\`) {
+			t.Errorf("entry %q uses a backslash; skill paths must be / separated", e)
+		}
+		got[e] = true
+	}
+	for _, want := range []string{"SKILL.md", "scripts/", "scripts/run.sh", "参考/", "参考/中文说明.md"} {
+		if !got[want] {
+			t.Errorf("walkSkillFiles missing %q (got %v)", want, entries)
+		}
+	}
+	// Whatever the list endpoint returns must pass the check the read/write
+	// endpoints apply — that round trip is exactly what broke on Windows.
+	for _, e := range entries {
+		if strings.HasSuffix(e, "/") {
+			continue
+		}
+		if _, msg := skillRelPath(e); msg != "" {
+			t.Errorf("skillRelPath(%q) rejected a path the server itself listed: %s", e, msg)
+		}
+	}
+}
+
+// TestSkillFileRoundTripNested drives list → save → read for a nested file through
+// the real handlers, using the path the list returned.
+func TestSkillFileRoundTripNested(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "demo", "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "demo", "SKILL.md"), []byte("---\nname: demo\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "demo", "scripts", "run.sh"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{skillDir: dir}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/skills/demo/files", nil)
+	listReq.SetPathValue("name", "demo")
+	listRR := httptest.NewRecorder()
+	s.fsListFiles(listRR, listReq)
+	if listRR.Code != 200 {
+		t.Fatalf("list status = %d, body = %s", listRR.Code, listRR.Body)
+	}
+	var listed struct{ Files []string }
+	if err := json.Unmarshal(listRR.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	// The list is the only path source the UI has, so the rest of the test uses
+	// exactly what it returned.
+	rel := ""
+	for _, f := range listed.Files {
+		if strings.Contains(f, `\`) {
+			t.Fatalf("listed file %q uses a backslash; must be / separated", f)
+		}
+		if f == "scripts/run.sh" {
+			rel = f
+		}
+	}
+	if rel == "" {
+		t.Fatalf("list did not report scripts/run.sh (got %v)", listed.Files)
+	}
+	writeReq := httptest.NewRequest(http.MethodPut, "/api/skills/demo/files/"+rel, strings.NewReader(`{"content":"echo hi"}`))
+	writeReq.SetPathValue("name", "demo")
+	writeReq.SetPathValue("file", rel)
+	writeRR := httptest.NewRecorder()
+	s.fsWriteFile(writeRR, writeReq)
+	if writeRR.Code != 200 {
+		t.Fatalf("save status = %d, body = %s", writeRR.Code, writeRR.Body)
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/api/skills/demo/files/"+rel, nil)
+	readReq.SetPathValue("name", "demo")
+	readReq.SetPathValue("file", rel)
+	readRR := httptest.NewRecorder()
+	s.fsReadFile(readRR, readReq)
+	if readRR.Code != 200 {
+		t.Fatalf("read status = %d, body = %s", readRR.Code, readRR.Body)
+	}
+	var out struct{ Content, File string }
+	if err := json.Unmarshal(readRR.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode read: %v", err)
+	}
+	if out.Content != "echo hi" {
+		t.Errorf("content = %q, want %q", out.Content, "echo hi")
+	}
+	// The path echoed back must be the slash form the client already holds.
+	for _, f := range listed.Files {
+		if strings.Contains(f, `\`) {
+			t.Errorf("listed file %q uses a backslash", f)
 		}
 	}
 }

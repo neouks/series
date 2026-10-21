@@ -39,6 +39,12 @@
 
 - **移除「工作空间」文件管理器**：删除 `/function/workspace` 页面与 `/api/workspace/*` 七个接口（浏览/编辑/上传/下载/删除 workDir 文件树）。任务产物仍完整保留在数据目录中，聊天附件上传（`/api/chat/upload`）与任务文件归档不受影响；需要直接操作文件时通过服务器文件系统访问数据目录即可。
 
+### 技能
+
+#### 修复的问题
+
+- **修复 Windows 上技能子目录里的文件无法打开和保存**：文件列表接口用 `filepath.Rel` 生成相对路径，在 Windows 上返回 `scripts\run.sh`；前端把该路径原样回传，路径校验第一道字符检查就把它判成非法字符（`invalid path: illegal character '\\'`），于是技能根目录的 `SKILL.md` 能看能改、`scripts/`、`references/`、`assets/` 里的文件全部打不开。现在列表统一输出 `/` 分隔（`filepath.ToSlash`），校验与规范化改用只认 `/` 的 `path` 包而不是 `filepath`，落盘时才由 `filepath.Join` 转成系统分隔符。反斜杠仍然被拒绝（避免 Windows 上的路径穿越与转义歧义），Linux/macOS 行为不变，无需数据迁移。
+
 ### 拦截
 
 #### 新增的功能
