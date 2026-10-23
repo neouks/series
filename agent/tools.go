@@ -131,11 +131,14 @@ type ToolSet struct {
 	// notify, if set, wakes the task's planner after a graph change that should be
 	// re-planned promptly (currently: a new hint). nil = no wake (the hint is still
 	// stored and read on the next round triggered by other events). debounced.
-	notify func()
+	notify            func()
+	plannerSearches   *plannerSearchLedger
+	plannerReadAccess *ContextAccess
+	notifyNodes       func(string, []int64)
 	// notifyFinding, if set, wakes the task's planner when this run reports a finding,
 	// carrying (intentID, summary) so the round can spell out which intent found what.
 	// Wired for workers; nil elsewhere → falls back to notify (bare wake).
-	notifyFinding func(intentID int64, summary string)
+	notifyFinding func(intentID int64, summary string, nodeIDs ...int64)
 	// resumeTask, if set, revives the task after a graph change that should make a
 	// stopped task run again (currently: set_goals adds a goal). It flips a terminal/
 	// paused task back to running and (re)starts the engine loops — a plain notify()
@@ -157,8 +160,11 @@ type ToolSet struct {
 	notifyHint func(texts []string)
 }
 
-// SetNotifyGoal wires the goal-add trigger callback (see ToolSet.notifyGoal). Set only
-// by the main-agent chat, so runtime-added goals are announced to the planner by name.
+// SetNotifyNodes carries persisted node references for permission-checked Planner
+// context selection. When set, it takes precedence over legacy text callbacks.
+func (t *ToolSet) SetNotifyNodes(fn func(string, []int64)) { t.notifyNodes = fn }
+
+// SetNotifyGoal wires the legacy goal-add trigger callback (see ToolSet.notifyGoal).
 func (t *ToolSet) SetNotifyGoal(fn func([]string)) { t.notifyGoal = fn }
 
 // SetNotifyHint wires the hint-add trigger callback (see ToolSet.notifyHint). Set by
@@ -175,7 +181,7 @@ func (t *ToolSet) SetResumeTask(fn func()) { t.resumeTask = fn }
 func (t *ToolSet) SetNotify(fn func()) { t.notify = fn }
 
 // SetNotifyFinding wires the finding-wake callback (see ToolSet.notifyFinding).
-func (t *ToolSet) SetNotifyFinding(fn func(int64, string)) { t.notifyFinding = fn }
+func (t *ToolSet) SetNotifyFinding(fn func(int64, string, ...int64)) { t.notifyFinding = fn }
 
 // EnrichTrigger is the enrichment engine seen from the tool layer (see package
 // enrich). Kept as an interface here to avoid coupling agent → enrich.
@@ -1566,7 +1572,7 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 		payload["asset_ids"] = anchors
 	}
 	if requireManaged {
-		id, created, err = t.ts.AddPlannerIntentDeduplicated(ctx, payload, priority, anchors, "planner")
+		id, created, err = t.ts.AddPlannerIntentDeduplicated(ctx, payload, priority, anchors, "planner", func() error { return t.checkPlannerSearch(ctx, it.Summary, anchors) })
 	} else {
 		id, created, err = t.ts.AddIntentDeduplicated(payload, priority, anchors, "planner")
 	}
@@ -1614,10 +1620,15 @@ func intentInputSchema() map[string]any {
 
 func (t *ToolSet) addIntent() actool.CoreTool {
 	return submissionTool{writeTool("add_intent", "生成【探索方向】写入 frontier，并连入探索链路。意图是开放的探索方向，不是固定类型——用 summary 一句话自由描述要探索/验证/利用什么。\n"+
-		"主 Agent 成功下发后结束本轮，Worker 自动回传总结，不轮询等待。Planner 对未审批候选本轮跳过；主 Agent 可明确下发待审批资产方向，但封禁和撤回仍拒绝。未知候选先批量 check_target_access。★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（最多 4 条，比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors；已存在的活跃同方向见 duplicates）。单条则省略 intents 直接给顶层 summary。",
+		"主 Agent 成功下发后结束本轮，Worker 自动回传总结，不轮询等待。Planner 新增前必须先用 context_search 查询已有意图，不限定 state/intent_id；按资产或方向关键词完成查询分页。Planner 对未审批候选本轮跳过；主 Agent 可明确下发待审批资产方向，但封禁和撤回仍拒绝。未知候选先批量 check_target_access。★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（最多 4 条，比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors；已存在的活跃同方向见 duplicates）。单条则省略 intents 直接给顶层 summary。",
 		intentInputSchema(),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			t := t
+			if t != nil && (RunInfoFrom(ctx).AgentKey == "planner" || t.worker == "planner") {
+				copy := *t
+				copy.plannerSearches = t.plannerSearches.snapshot()
+				t = &copy
+			}
 			if locked, _ := ctx.Value(intentSubmissionLockedKey{}).(bool); locked && RunInfoFrom(ctx).AgentKey == "mainagent" && RunInfoFrom(ctx).TaskID == t.taskID && RunInfoFrom(ctx).IntentID == 0 {
 				copied := *t
 				copied.directDispatch = true
@@ -1649,6 +1660,7 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			ids := make([]int64, len(items))
 			errs := map[string]string{}
 			accessErrors := map[string]targetAccessView{}
+			searchErrors := map[string]*plannerSearchRequired{}
 			duplicates := map[string]int64{}
 			createdAny := false
 			var newlyCreated []int64
@@ -1657,9 +1669,13 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 					errs[strconv.Itoa(i)] = err.Error()
 					continue
 				}
-				id, created, err := t.addOneIntentResultWithMode(ctx, it, RunInfoFrom(ctx).AgentKey == "planner")
+				id, created, err := t.addOneIntentResultWithMode(ctx, it, RunInfoFrom(ctx).AgentKey == "planner" || t.worker == "planner")
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()
+					var required *plannerSearchRequired
+					if errors.As(err, &required) {
+						searchErrors[strconv.Itoa(i)] = required
+					}
 					var denied *targetAccessError
 					if errors.As(err, &denied) {
 						accessErrors[strconv.Itoa(i)] = denied.Access
@@ -1707,6 +1723,11 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 					if access, ok := accessErrors["0"]; ok {
 						return accessErrorResult(errors.New(e), access)
 					}
+					if required := searchErrors["0"]; required != nil {
+						r, _ := contextJSON(ctx, map[string]any{"ids": ids, "errors": errs, "search_required": searchErrors})
+						r.IsError = true
+						return r, nil
+					}
 					return actool.Errorf(e), nil
 				}
 				if existingID, duplicate := duplicates["0"]; duplicate {
@@ -1721,6 +1742,9 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 				return actool.Text(fmt.Sprintf("intent created: %d", ids[0])), nil
 			}
 			out := map[string]any{"ids": ids}
+			if len(searchErrors) > 0 {
+				out["search_required"] = searchErrors
+			}
 			if len(dispatchResults) > 0 {
 				out["dispatch_results"] = dispatchResults
 			}
@@ -1922,7 +1946,7 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 			if iid <= 0 {
 				iid = t.ownerNode
 			}
-			t.notifyFinding(iid, a.Summary)
+			t.notifyFinding(iid, a.Summary, recorded.NodeID)
 		} else if t.notify != nil {
 			t.notify()
 		}
@@ -2224,6 +2248,8 @@ func (t *ToolSet) setGoals() actool.CoreTool {
 				// N 个目标:…」触发,不逐条刷屏;拆解器/worker 无此回调 → 退回纯 notify(拆解器
 				// round-0 连 notify 也没接,即无操作,因为此时 planner 尚未启动)。
 				switch {
+				case t.notifyNodes != nil:
+					t.notifyNodes("goal", ids)
 				case t.notifyGoal != nil:
 					t.notifyGoal(addedTexts)
 				case t.notify != nil:
@@ -2366,6 +2392,8 @@ func (t *ToolSet) addHint() actool.CoreTool {
 				// N 条战略提示：…」触发，让 planner 明确"本轮由新增 hint 触发"并看到提示内容；
 				// 未接该回调时退回纯 notify（bare wake，hint 仍折在图里供其自行读取）。
 				switch {
+				case t.notifyNodes != nil:
+					t.notifyNodes("hint", ids)
 				case t.notifyHint != nil:
 					t.notifyHint(addedTexts)
 				case t.notify != nil:

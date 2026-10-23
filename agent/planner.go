@@ -156,7 +156,8 @@ func renderPlannerTodos(items []actool.Todo) string {
 //	"cancelled" — the human deleted intent IntentID (Detail = 删除原因). The intent is
 //	            stopped (not deleted) and the reason is attached to it as a fact.
 type TriggerEvent struct {
-	FeedbackID int64 // finding_deleted: persisted task-local feedback identity only
+	NodeIDs    []int64 // Exact successfully persisted nodes, never resolved by summary text.
+	FeedbackID int64   // finding_deleted: persisted task-local feedback identity only
 	Kind       string
 	IntentID   int64
 	Detail     string
@@ -164,133 +165,6 @@ type TriggerEvent struct {
 	OldGoal    string   // Kind=="goal_edited" 专用：修改前的目标文本
 	NewGoal    string   // Kind=="goal_edited" 专用：修改后的目标文本
 	Hints      []string // Kind=="hint" 专用：本次 add_hint 新增的提示文本（1 条或多条）
-}
-
-// renderTriggers spells out the change(s) that fired this round: for a finished
-// worker — which intent + its output conclusion; for a finding — which intent +
-// what was found. Empty for time/heartbeat wakes. Reads the store (best-effort;
-// a blank field never blocks the round).
-func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
-	if len(evs) == 0 || ts == nil {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("\n\n【本次触发本轮的实际变动（先看这里，再决定是否补方向）】：")
-	for _, ev := range evs {
-		switch ev.Kind {
-		case "finding_deleted":
-			fmt.Fprintf(&b, "\n用户删除了漏洞，反馈 #%d；参考本任务删除反馈，较早记录可用 list_finding_deletion_feedback 分页读取。", ev.FeedbackID)
-		case "goal":
-			if len(ev.Goals) == 1 {
-				b.WriteString(fmt.Sprintf("\n- 人（主 agent）新增了一个目标：%s —— 新的待达成目标，请据此补充探索方向（若尚无对应意图）。", ev.Goals[0]))
-			} else {
-				b.WriteString(fmt.Sprintf("\n- 人（主 agent）新增了 %d 个目标：%s —— 均为新的待达成目标，请逐一为尚无对应意图的目标补充探索方向。", len(ev.Goals), strings.Join(ev.Goals, "；")))
-			}
-		case "hint":
-			if len(ev.Hints) == 1 {
-				b.WriteString(fmt.Sprintf("\n- 人（主 agent）新增了一条战略提示：%s —— 已挂到探索图上，请据此调整/补充探索方向（若尚无对应意图）。", ev.Hints[0]))
-			} else {
-				b.WriteString(fmt.Sprintf("\n- 人（主 agent）新增了 %d 条战略提示：%s —— 均已挂到探索图上，请逐一据此调整/补充探索方向。", len(ev.Hints), strings.Join(ev.Hints, "；")))
-			}
-		case "goal_deleted":
-			b.WriteString(fmt.Sprintf("\n- 人删除了该目标：%s —— 该目标已移除，请据此重判剩余目标/方向（不必再为它派意图）。", ev.Detail))
-		case "goal_edited":
-			b.WriteString(fmt.Sprintf("\n- 人修改了目标，由「%s」变为「%s」—— 请据新目标调整探索方向（原方向若已不适用请停派）。", ev.OldGoal, ev.NewGoal))
-		case "finding":
-			b.WriteString(fmt.Sprintf("\n- 意图 #%d（%s）的 worker 报告了一个 finding：%s", ev.IntentID, intentSummary(ts, ev.IntentID), ev.Detail))
-		case "cancelled":
-			if node, err := ts.GetNode(ev.IntentID); err == nil && node != nil && !node.UserCancelled() {
-				fmt.Fprintf(&b, "\n- Worker #%d 曾由用户取消，现已由用户重新开启；原取消通知仅供历史参考。", ev.IntentID)
-				continue
-			}
-			b.WriteString(fmt.Sprintf("\n- 意图 #%d 由用户取消，意图内容是：%s、取消原因是：%s。仅用户手动重新开启后可执行；不得主动重开，也不要创建同方向替代工作。", ev.IntentID, intentSummary(ts, ev.IntentID), ev.Detail))
-		default: // "done"
-			b.WriteString(fmt.Sprintf("\n- 意图 #%d（%s）的 worker 结束，输出结论：%s", ev.IntentID, intentSummary(ts, ev.IntentID), workerOutput(ts, ev.IntentID)))
-			if fids := factIDsYielded(ts, ev.IntentID); fids != "" {
-				b.WriteString(fmt.Sprintf("；本意图新产生的事实 id：%s ", fids))
-			}
-		}
-	}
-	b.WriteString("\n（完整细节可 context_get（正文或 view=output） / context_search 再查。）")
-	return b.String()
-}
-
-// factIDsYielded lists the fact ids an intent produced this run as "#12、#15", so the
-// planner can jump straight to the round's incremental facts. Empty (best-effort) when
-// the intent yielded no facts or the lookup fails.
-func factIDsYielded(ts *db.ExplorationStore, id int64) string {
-	ids, err := ts.FactsYielded(id)
-	if err != nil || len(ids) == 0 {
-		return ""
-	}
-	parts := make([]string, len(ids))
-	for i, fid := range ids {
-		parts[i] = fmt.Sprintf("#%d", fid)
-	}
-	return strings.Join(parts, "、")
-}
-
-// intentSummary reads an intent node's one-line summary (best-effort, "?" on miss).
-func intentSummary(ts *db.ExplorationStore, id int64) string {
-	n, err := ts.GetNode(id)
-	if err != nil || n == nil {
-		return "?"
-	}
-	var p map[string]any
-	if json.Unmarshal(n.Payload, &p) == nil {
-		if s, ok := p["summary"].(string); ok && s != "" {
-			return s
-		}
-	}
-	return "?"
-}
-
-// workerOutput returns the finished worker's conclusion for an intent — the last
-// 'result' (else 'text') activity's full detail, truncated. Same source context_get（items 内设置 output 视图） uses.
-func workerOutput(ts *db.ExplorationStore, id int64) string {
-	acts, _, err := ts.ActivityList(&id, 0, 1000)
-	if err != nil {
-		return "(取输出失败)"
-	}
-	var pick *db.Activity
-	for i := range acts {
-		if acts[i].Kind == "result" {
-			pick = &acts[i]
-		} else if acts[i].Kind == "text" && pick == nil {
-			pick = &acts[i]
-		}
-	}
-	if pick == nil {
-		return "(该 work 尚无输出记录)"
-	}
-	out, _ := ts.ActivityDetail(pick.ID)
-	if out == "" {
-		out = pick.Summary
-	}
-	return truncOutput(out, 800)
-}
-
-// truncOutput caps a worker-output blob so the trigger context doesn't bloat the
-// system prompt every round; full text is one context_get（items 内设置 output 视图） call away.
-func truncOutput(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + " …（已截断，完整见 context_get（items 内设置 output 视图））"
-}
-
-// renderGraphOverview folds the pre-computed graph_overview snapshot into the
-// wake-up prompt so the planner starts each round with a bounded situation in
-// hand, saving the round-trip it would otherwise spend fetching an overview. The
-// lightweight tagged projection is bounded; full persisted detail remains one
-// tool call away (context_get / context_search / …).
-func renderGraphOverview(data map[string]any) string {
-	const prefix = "\n\n【本轮态势：有界窗口，未展示不代表不存在；sections 提供遗漏状态和读取入口】：\n<graph_overview>\n"
-	const suffix = "\n</graph_overview>"
-	view := boundedGraphOverview(data, plannerOverviewRunes-len([]rune(prefix+suffix)), 0)
-	body, _ := json.Marshal(view)
-	return prefix + string(body) + suffix
 }
 
 // plannerDefaultTmpl is the built-in EDITABLE body (段 [A]) of the planner prompt,
@@ -301,29 +175,29 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 任务目标：{{.Goal}}
 
 **本轮该产出几个意图（先想清楚这条）**：
-- **在已授权范围内推进**：仅在托管模式、存在满足审批及操作约束的可执行方向时，若【目标未达成】且【当前没有任何 open 或 running 意图】（frontier_open=0 且 running_intents 为空），本轮就【必须】产出至少一个向目标推进的意图——没有在跑的 work 可等、也没有在排队的方向时，产出 0 意图=任务停摆；可据下面 done/exhausted/blocked 的判断另开或续派；全部候选不可用时结束本轮，不为凑意图绕过审批。手工模式下 Planner 停用。
+- **在已授权范围内推进**：仅在托管模式、存在满足审批及操作约束的可执行方向时，若【目标未达成】且【当前没有任何 open 或 running 意图】（意图分类计数中 open=0 且 running=0），本轮就【必须】产出至少一个向目标推进的意图——没有在跑的 work 可等、也没有在排队的方向时，产出 0 意图=任务停摆；可据下面 done/exhausted/blocked 的判断另开或续派；全部候选不可用时结束本轮，不为凑意图绕过审批。手工模式下 Planner 停用。
 - 上述条件之外，**产出 0 个意图是正常结果，但要有正当理由**（不是"少派更稳"的默认）：①**已覆盖**——你想到的方向都已被仍在 open/running 的意图处理（换措辞重复生成已存在的意图是严重错误）；②**等待依赖**——下一步依赖当前在跑 work 的产出、而它还没出来（此时硬派会让下游拿不到前置而空转，应等下次唤醒图更新后再派）。
 - 反过来：确有【未覆盖、且不依赖在跑 work】的新方向，或目标未达成且范围内仍有未测面，就该派——别把 0 意图当偷懒的默认。
 
 **每次唤醒的决策流程**：
 
-1. **有界态势已附在本提示下方**（就是 graph_overview 的返回，无需再调它）：task（原始标题+目标/根节点）、资产计数、goals+状态、open/running/recent_done 意图、sites_without_endpoints（无端点的站点，提示可能待探的方向）、facts（探索事实数，与漏洞是两类）、recent_facts（{id,summary,confidence?}）。
-   - **范围**：仅使用本任务及直接关联任务的授权可见内容；继承记录带 source_task_id/inherited 且只读。列表和计数可能受窗口限制，以返回的截断/计数说明为准，不能把概览当作全量。
-   - **血缘**：每个意图带 parents（上游：派生自哪些事实/意图）和 yields（下游：产生了哪些事实/发现），recent_facts 每条带 from_intent；据此理解"哪些事实来自哪个方向、能否综合出新方向"。
-   - **否定/存疑观察**（recent_facts 里"端口关闭/不可注入"等）是 worker 的观察、不是定论：采信前用 context_get 读取 node:ID 的 /evidence——evidence 扎实、confidence=observed 且手段已穷尽的才视为该方向暂时封住；evidence 缺失、只是"看起来像/只探一次"、或 confidence=inferred 的，按【尚未探明】处理，若在范围内且无其它意图覆盖，默认派一条复核意图去证实或推翻（**同一否定方向至多复核一次**；复核后仍为否定、且证据合理，就尊重该结论、不再派）。
-   - **要更深细节才按需调**：context_search（摘要和正文检索，默认10条，用next_cursor续页）、context_get（用node:ID/activity:ID引用读取正文）、asset_search（DSL检索）和asset_get（按ID读取）。不要默认拉全量。
+1. **轻量图引导已附在本轮输入**：任务身份、授权可见的分类/状态计数、本轮事件及少量相关记录，不自动提供完整图列表。
+   - 优先按目标和事件检索相关 goal/hint/fact/finding/digest/intent；context_search 搜索摘要和正文，context_get 从命中位置读字段。缺少展示不等于不存在；不要默认读取全量。
+   - 仅使用本任务及直接关联任务的授权可见内容；来源记录只读，source_task_id 不是额外跨任务权限。
+   - 对负面或存疑事实，读取 /evidence 核实手段及 confidence；必要时只派一次复核，避免反复验证已确认的否定结论。
+   - 新增方向前，先按资产和方向关键词查询已有 intent（不限定 state），完成该查询分页或收窄查询，比较排队、运行及历史方向后再提交。工具会强制检查本轮查询，不能用预载摘要替代。
 
-2. **判目标（核心职责）**：goals 字段已含目标与状态；对已被某发现/事实证明的未达成目标，调 prove_goal(goal_id, evidence_id, reason) 标 met。**当你标记的恰是最后一个未完成目标时，系统自动判定整个任务完成**——收官只由逐个 prove_goal 驱动，没有别的"一键完成"手段。
-   - ⚠️ **量化验收核对（严禁提前盖章）**：目标含可量化条件（覆盖度达 X%、拿 N 个 flag、获得某权限）时，prove_goal 前【必须】核对上方 graph_overview 的实测值（coverage.pct、findings_total 计数等）：未达标就【禁止】prove_goal，改派意图补差；不得以"大体达成/核心已拿下"为由提前标 met。例：要求覆盖度 100% 而实测 coverage.pct=40% → 未达成，继续派补测意图。
+2. **判目标（核心职责）**：先检索相关 goal 并读取目标正文和证据；对已被某发现/事实证明的未达成目标，调 prove_goal(goal_id, evidence_id, reason) 标 met。**当你标记的恰是最后一个未完成目标时，系统自动判定整个任务完成**——收官只由逐个 prove_goal 驱动，没有别的"一键完成"手段。
+   - ⚠️ **量化验收核对（严禁提前盖章）**：目标含可量化条件（覆盖度达 X%、拿 N 个 flag、获得某权限）时，prove_goal 前【必须】按需读取核对实测证据（覆盖度需要时可显式调用 graph_overview）：未达标就【禁止】prove_goal，改派意图补差；不得以"大体达成/核心已拿下"为由提前标 met。例：要求覆盖度 100% 而实测 coverage.pct=40% → 未达成，继续派补测意图。
 
-3. **（可选，仅开局、极轻量）探测理解**：仅当图里几乎还没有 fact（recent_facts 基本为空、任务刚开始）、仅凭态势无法把初始意图说具体时，才用 Bash 等对目标做极少量、只读的探测（如 1–2 次 curl 看首页/指纹）。**唯一合法产物是一句更精准的意图描述**——绝不是漏洞的发现/验证/利用，也不是端点/目录/参数的枚举结果（那些是 worker 的活，写成意图派下去）。三条硬边界：
-   - 图里已有 worker 产出的 fact（facts>0 / recent_facts 非空）→【禁止】再自己探测，一切判断基于已有 fact，本轮产物只能是"派新意图"或"结束"；想深挖某线索 → 派意图让 worker 去查，不是自己 curl。
+3. **（可选，仅开局、极轻量）探测理解**：仅当图里几乎还没有 fact（事实计数接近零、任务刚开始）、仅凭态势无法把初始意图说具体时，才用 Bash 等对目标做极少量、只读的探测（如 1–2 次 curl 看首页/指纹）。**唯一合法产物是一句更精准的意图描述**——绝不是漏洞的发现/验证/利用，也不是端点/目录/参数的枚举结果（那些是 worker 的活，写成意图派下去）。三条硬边界：
+   - 图里已有 worker 产出的 fact（事实计数大于零）→【禁止】再自己探测，一切判断基于已有 fact，本轮产物只能是"派新意图"或"结束"；想深挖某线索 → 派意图让 worker 去查，不是自己 curl。
    - 即使开局也最多探 ≤3 次就收手，只为把初始意图说清；一旦发现自己在"深入查证"而非"快速定方向"（逐个枚举端点/目录、逐个试 id、解码链、反复探同一接口、任何注入/越权/漏洞的测试验证——全是 worker 的重活），立刻停手写成意图。
    - 能从现有事实/态势判断的，根本不必探测。
 
-4. **决定补哪些新方向**：**这里的"克制"只指【不重复已存在的意图】，不是"能少派就少派"**——目标未达成时，默认追问是"为逼近目标，还有哪些更深、更狠、尚未覆盖的打法"，而不是"是否可以收尾"。意图是【开放的探索方向】（不是固定类型/菜单），结合已知事实、资产、目标自判方向，逐一与 open + running + recent_done 比对：
+4. **决定补哪些新方向**：**这里的"克制"只指【不重复已存在的意图】，不是"能少派就少派"**——目标未达成时，默认追问是"为逼近目标，还有哪些更深、更狠、尚未覆盖的打法"，而不是"是否可以收尾"。意图是【开放的探索方向】（不是固定类型/菜单），结合已知事实、资产、目标自判方向，逐一与按需查出的已有意图比对：
    - 已有 open/running 覆盖 → 不再生成（正在处理）。
-   - 在 recent_done 里出现过 → **先看该意图的 state（每条都带）分辨怎么停的，再决定**：
+   - 在历史已结束意图里出现过 → **先看该意图的 state（每条都带）分辨怎么停的，再决定**：
      · **done（正常跑完）**：已覆盖 → 不原样重派；是否死路看它 yields 出的 fact 结论、而非 state；仅出现【材料性新机理】（新事实/资产/参数/明显不同的打法）才重派，且 summary 写清与上次的不同；换措辞、"再试一次说不定行"不算，禁止重试。
      · **exhausted（预算耗尽、探到一半被掐断，只写回部分）/ blocked（模型或网络失败、基本没探成）**：都是中途没善终、信息不全——先用 context_search / context_get（items 内设置 output 视图） 看它实际做到哪、卡在哪，再从下列里选：接近突破被预算掐 → 派"接上次进度继续"；纯外部故障没跑成（blocked 常是）→ 直接重派同方向；每次卡同一处 → 换打法/方向。依据永远是 trace 里的真实进度，不是 state 本身。
    - 完全无任何意图覆盖的全新方向 → 生成。
@@ -342,6 +216,11 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 func plannerSystem(goal, dataDir, workDir string) string {
 	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, DataDir: dataDir, Now: nowStr()})
+	// The old overview also carried the mission. Do not lose it when an edited
+	// template omits {{.Goal}} now that the overview is no longer preloaded.
+	if goal != "" && !strings.Contains(body, goal) {
+		body += "\n【原始任务目标】\n" + goal
+	}
 	body += "\n方向错误、重复或已无价值的本任务意图，可用 kill_work(intent_id, reason) 终止，适用于等待中或运行中；保留已有产出，成功返回后为 stopped。已暂停意图由用户控制；用户已取消的意图不得重开或创建同方向替代工作。只有工具成功返回 stopped 才能确认终止，错误或超时不能宣称成功。"
 	return body + artifactSpec(workDir)
 }
@@ -353,7 +232,7 @@ func plannerSystem(goal, dataDir, workDir string) string {
 // triggers carries the concrete change(s) that fired this round — worker(s) done
 // and/or finding(s) reported (may be several — the engine debounces a burst; empty
 // for time/heartbeat wakes). They are spelled out at the top of the prompt so the
-// planner looks first at the actual change (which intent, its output/finding).
+// planner receives checked event references rather than trusting event text.
 func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *guard.Guard, ts *db.ExplorationStore, goal string, triggers []TriggerEvent, emit func(db.Activity)) (met bool, reason string, err error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
@@ -371,6 +250,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	// runs in a detached goroutine so it never adds latency to this round.
 	p.compactor.OnPlannerRound(ctx, ts)
 	tsx := NewToolSet(ts, "planner")
+	tsx.plannerSearches = &plannerSearchLedger{}
 	tsx.SetFindingRecorder(p.findingRecorder)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())
@@ -408,11 +288,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	if err != nil {
 		return false, "", fmt.Errorf("读取用户取消约束: %w", err)
 	}
-	queue, err := ts.WorkerQueue()
+	manualQueue, err := ts.PlannerQueueManual(ctx)
 	if err != nil {
 		return false, "", fmt.Errorf("读取用户队列: %w", err)
 	}
-	if queue.Manual {
+	if manualQueue {
 		cancelled += "\n【用户等待队列】用户已手动排序，按保存的队列顺序执行。新建或重新进入等待的 Worker 追加队尾；不要通过修改数值优先级绕过用户顺序。"
 	}
 	deleted, err := ts.DeletedWorkers()
@@ -430,7 +310,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 			cancelled += fmt.Sprintf("此前用户取消原因：%s；不要创建同方向替代工作。", p.Reason)
 		}
 	}
-	situational := cancelled + renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+	situational := cancelled + tsx.plannerBootstrap(ctx, triggers)
 	// 任务级 deadline / 终局模式(经 ctx 注入,见 taskclock.go)。终局那一轮把任务超时
 	// planner 收尾词作为【本轮操作指令】拼进本轮 user 输入(随 situational),让它只做最后
 	// 目标判定、不产新意图。
@@ -440,9 +320,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	}
 	// 本任务的工作目录 <workDir>/tasks/<taskID>，先建好。
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
-	sysBody := plannerSystem(goal, p.workDir, taskDir)
+	sysBody := plannerSystem(goal, p.workDir, taskDir) + plannerRetrievalRule
 	sysBody += "\n仅未知候选按需批量调用 check_target_access；已知不可用项本轮跳过，继续已授权方向。"
-	sysBody += "\n审批态势只附计数，需要管理详情时才按需分页调用 list_task_assets。管理可见不等于允许测试：只有 can_schedule=true 的当前已授权资产可下发；pending/blocked/revoked 仅供解释，不要每轮查询全部状态。"
+	sysBody += "\n资产审批管理不自动预载，需要管理详情时才按需分页调用 list_task_assets。管理可见不等于允许测试：只有 can_schedule=true 的当前已授权资产可下发；pending/blocked/revoked 仅供解释，不要每轮查询全部状态。"
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,框定探索边界
 	}
@@ -504,21 +384,12 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	// 实验功能:开启后由 noa 接管上下文压缩(归档集中在 <workDir>/noa/<SessionID> 下,持久)。
 	noaSession := fmt.Sprintf("exp%d-planner", ts.ID())
 	enableNoa(&opts, p.noaEnabledFn, p.workDir, noaSession, noaWarn(noaSession))
-	// 态势（刚完成的意图 + 完整图）现在拼进本轮 user 输入（见下方 input）。user 里还有
-	// 指令 + 跨唤醒待办（todo 是模型自己的规划便签，可再生，放 user 即可）。
-	// 开场白按「本轮有无具体变动」分两种：有变动 → 指向下方【实际变动】块；无变动
-	// (心跳定时巡检 / hint / 恢复等) → 别谎称"图发生了变化",转而提示顺带复查在跑意图。
-	lead := "刚有具体变动（见下面的【本次触发本轮的实际变动】），据此规划下一步："
+	lead := "本轮有变动；先按图引导中的事件与相关记录缩小检索范围，再决定下一步。"
 	if len(triggers) == 0 {
-		lead = "本轮是**定时巡检（心跳到点）/无具体变动信号**的唤醒——图不一定有新变动。顺带复查在跑意图：长时间无进展或跑偏的用 steer_work 纠偏、方向整个错的用 kill_work 止损；再判定目标、决定是否补方向："
-		// 心跳/无变动唤醒时,若全图已无任何 open 或 running 意图 → 探索已停摆(没 worker 在跑、
-		// 也没排队方向)。明确告知 planner 并强制其本轮补出新方向,别只复查在跑意图后空转一轮。
-		if active, err := ts.HasActiveIntent(); err == nil && !active {
-			lead = "本轮是**定时巡检（心跳到点）**的唤醒,且当前**已没有任何 open 或 running 的意图**——没有 worker 在跑、也没有排队中的方向,探索已停摆。你**必须**在本轮产出一个或多个向目标推进、且与图中既有意图**互不重复**的新意图(不得产出 0 意图);先据下面的态势判定目标是否已达成,未达成则立即补方向："
-		}
+		lead = "本轮没有具体节点变动信号。按需读取目标与提示；心跳提供的少量运行中意图可用于监督，未展示不代表不存在。"
 	}
-	input := lead + situational + "\n\n据上面的态势，判定目标。目标已【真正达成】（已拿到目标成果/已确认目标漏洞）时用 prove_goal 逐个标记。**硬底线：只要目标尚未达成、且当前没有任何 open 或 running 意图（frontier_open=0 且 running_intents 为空），本轮就必须产出至少一个向目标推进的意图——此时没有在跑的 work 可等、也没有在排队的方向，产出 0 意图=任务停摆。仅当已有 open/running 意图在推进、或目标已达成时，本轮才可以不产出新意图。**" +
-		renderPlannerTodos(opts.Todos.List())
+
+	input := lead + situational + "\n\n按需读取相关目标、提示与证据；先查询已有方向再新增意图。候选均不可用、缺少查询能力或等待依赖时可以结束本轮；不要为了凑意图绕过约束。" + renderPlannerTodos(opts.Todos.List())
 	// MaxDuration 现在会在墙钟到点打断在跑工具并就地进收尾(在活 ctx 上),单轮卡死不再
 	// 绕过收尾,无需外部硬 ctx 兜底。ctx 只承载 pause / kill / shutdown。
 	if err := ctx.Err(); err != nil {

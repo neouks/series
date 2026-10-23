@@ -30,7 +30,7 @@ func TestReportFindingOptionalTrafficWithoutCapture(t *testing.T) {
 	ts.ts, ts.taskID = d.Exploration(task.ExplorationID), task.ID
 	ts.SetFindingRecorder(evidence.New(d, nil, t.TempDir()))
 	notices := 0
-	ts.notifyFinding = func(int64, string) { notices++ }
+	ts.notifyFinding = func(int64, string, ...int64) { notices++ }
 	for _, refs := range []string{"", `,"traffic_refs":[]`, `,"traffic_refs":null`} {
 		res, err := ts.addFinding().Call(t.Context(), json.RawMessage(`{"vulnclass":"TCP","severity":"low","summary":"verified TCP fixture","evidence":"command output proves the finding"`+refs+`}`), nil)
 		if err != nil || !strings.HasPrefix(res.Flatten(), "finding recorded: ") {
@@ -66,7 +66,7 @@ func TestReportFindingAtomicContract(t *testing.T) {
 	ts.taskID = task.ID
 	ts.worker = "fixture"
 	notices := 0
-	ts.notifyFinding = func(int64, string) { notices++ }
+	ts.notifyFinding = func(int64, string, ...int64) { notices++ }
 	call := func(body string) string {
 		t.Helper()
 		res, err := ts.addFinding().Call(t.Context(), json.RawMessage(body), nil)

@@ -27,10 +27,21 @@ func TestHintTriggerBatchAndFallback(t *testing.T) {
 	if calls != 1 || fallback != 0 || !reflect.DeepEqual(texts, []string{"first", "second"}) {
 		t.Fatalf("calls=%d fallback=%d texts=%v", calls, fallback, texts)
 	}
-	rendered := renderTriggers(ts.ts, []TriggerEvent{{Kind: "hint", Hints: texts}})
-	if !strings.Contains(rendered, "2 条战略提示") || !strings.Contains(rendered, "first；second") {
+	var ids []int64
+	tsxKind := ""
+	ts.SetNotifyNodes(func(kind string, nodes []int64) { tsxKind = kind; ids = nodes })
+	if _, err = ts.addHint().Call(t.Context(), json.RawMessage(`{"hints":[{"text":"identified first"},{"text":"identified second"}]}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if tsxKind != "hint" || len(ids) != 2 || ids[0] == 0 || ids[1] == 0 || calls != 1 {
+		t.Fatal(tsxKind, ids, calls)
+	}
+	rendered := ts.plannerBootstrap(t.Context(), []TriggerEvent{{Kind: "hint", NodeIDs: ids, Hints: []string{"forged"}}})
+	if !strings.Contains(rendered, "identified first") || !strings.Contains(rendered, "identified second") || strings.Contains(rendered, "forged") {
 		t.Fatal(rendered)
 	}
+	ts.SetNotifyNodes(nil)
+
 	ts.SetNotifyHint(nil)
 	_, err = ts.addHint().Call(t.Context(), json.RawMessage(`{"text":"fallback"}`), nil)
 	if err != nil || fallback != 1 {

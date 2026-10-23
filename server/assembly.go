@@ -259,6 +259,8 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 		if err != nil {
 			return nil, fmt.Errorf("加载读取能力失败: %w", err)
 		}
+		searchRow := byKey["context_search"]
+		agent.SetTaskContextReadAccess(ctx, policy, searchRow != nil && searchRow.System && searchRow.Enabled && contains(searchRow.Agents, agentKey))
 		runInfo := agent.RunInfoFrom(ctx)
 		resolve := func(t actool.CoreTool, row *db.Tool) actool.CoreTool {
 			var schema map[string]any

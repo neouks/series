@@ -98,6 +98,11 @@ func TestTargetAccessApprovalLifecycle(t *testing.T) {
 	if reason := (guard.TaskAssetPolicy{Store: as, TaskID: task.ID}).Check("add_intent", []byte(batch)); reason != "" {
 		t.Fatal("whole batch blocked", reason)
 	}
+	ts.plannerSearches = &plannerSearchLedger{}
+	searched, searchErr := ts.contextSearch().Call(ctx, json.RawMessage(fmt.Sprintf(`{"types":["intent"],"asset_id":%d}`, approved)), nil)
+	if searchErr != nil || searched.IsError {
+		t.Fatal(searched.Flatten(), searchErr)
+	}
 	r, e := ts.addIntent().Call(ctx, json.RawMessage(batch), nil)
 	if e != nil {
 		t.Fatal(e)

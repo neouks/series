@@ -1,0 +1,102 @@
+=== RUN   TestPlannerStopCancelsOnlyThatWorkWithNamedCause
+--- PASS: TestPlannerStopCancelsOnlyThatWorkWithNamedCause (0.00s)
+=== RUN   TestManualModeCancelsOnlyPlannerAndSuppressesWakeups
+2026/10/23 13:48:32 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:32 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestManualModeCancelsOnlyPlannerAndSuppressesWakeups (0.18s)
+=== RUN   TestManualModeSkipsTerminalPlannerOnTimeout
+2026/10/23 13:48:32 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:32 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/23 13:48:32 [deadline] task 294 到达超时上限,进入收尾时序
+2026/10/23 13:48:32 [deadline] task 294 收尾完成,终态=timeout
+--- PASS: TestManualModeSkipsTerminalPlannerOnTimeout (0.20s)
+=== RUN   TestManualModeStartsTimeoutWithoutPlanner
+2026/10/23 13:48:32 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:33 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/23 13:48:33 [deadline] task 295 首次运行,截止于 2026-10-23 13:49:33
+--- PASS: TestManualModeStartsTimeoutWithoutPlanner (0.17s)
+=== RUN   TestManualModeResumeStartsTimeout
+2026/10/23 13:48:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:33 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/23 13:48:33 [deadline] task 296 首次运行,截止于 2026-10-23 13:49:33
+--- PASS: TestManualModeResumeStartsTimeout (0.19s)
+=== RUN   TestManualDispatchAndFinish
+2026/10/23 13:48:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:33 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestManualDispatchAndFinish (0.18s)
+=== RUN   TestManualDispatchRequiresLocalOpenIntent
+2026/10/23 13:48:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:33 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/23 13:48:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:33 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestManualDispatchRequiresLocalOpenIntent (0.35s)
+=== RUN   TestManualMainAgentRuntimeDispatchAndRollback
+2026/10/23 13:48:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:33 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestManualMainAgentRuntimeDispatchAndRollback (0.24s)
+=== RUN   TestManualDispatchAssetRevocationAndPartialSuccess
+2026/10/23 13:48:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:34 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestManualDispatchAssetRevocationAndPartialSuccess (0.56s)
+=== RUN   TestManualExplicitResumeAndBatchRerun
+2026/10/23 13:48:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:34 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/23 13:48:34 [task] #302 批量重开 1 条 blocked 意图
+--- PASS: TestManualExplicitResumeAndBatchRerun (0.21s)
+=== RUN   TestTaskNotifyHint
+--- PASS: TestTaskNotifyHint (0.00s)
+=== RUN   TestPlannerStopQueuedIntentAndBoundaries
+2026/10/23 13:48:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:34 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestPlannerStopQueuedIntentAndBoundaries (0.25s)
+=== RUN   TestPlannerStopWaitsForClaimRegistrationAndSettlement
+2026/10/23 13:48:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:35 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestPlannerStopWaitsForClaimRegistrationAndSettlement (0.21s)
+=== RUN   TestPlannerStopTimeoutDoesNotReportSuccess
+2026/10/23 13:48:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:35 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestPlannerStopTimeoutDoesNotReportSuccess (0.20s)
+=== RUN   TestPlannerStopThroughPlan
+2026/10/23 13:48:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:35 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestPlannerStopThroughPlan (0.20s)
+=== RUN   TestMainPendingDispatchAndAdmissionRollback
+2026/10/23 13:48:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:35 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestMainPendingDispatchAndAdmissionRollback (0.31s)
+=== RUN   TestPlannerAssetSearchMigratedCallAndScope
+--- PASS: TestPlannerAssetSearchMigratedCallAndScope (0.53s)
+=== RUN   TestPlannerIntentSearchThroughPlan
+2026/10/23 13:48:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:36 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestPlannerIntentSearchThroughPlan/traffic_binding=true
+=== RUN   TestPlannerIntentSearchThroughPlan/traffic_binding=false
+--- PASS: TestPlannerIntentSearchThroughPlan (0.67s)
+    --- PASS: TestPlannerIntentSearchThroughPlan/traffic_binding=true (0.07s)
+    --- PASS: TestPlannerIntentSearchThroughPlan/traffic_binding=false (0.08s)
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa
+2026/10/23 13:48:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:37 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=false
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=true
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=false
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=true
+--- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa (0.52s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=false (0.10s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=true (0.07s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=false (0.06s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=true (0.05s)
+=== RUN   TestPlannerNodeEventsCopyIdentities
+--- PASS: TestPlannerNodeEventsCopyIdentities (0.00s)
+=== RUN   TestMainDispatchFeedbackPublishDoesNotRunMainOrPlanner
+2026/10/23 13:48:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:37 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestMainDispatchFeedbackPublishDoesNotRunMainOrPlanner (0.18s)
+=== RUN   TestWorkerFeedbackReplayAfterNewerActivityCursor
+2026/10/23 13:48:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/23 13:48:37 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/23 13:48:37 [activity/stream] task=315 replay since=167: context canceled
+--- PASS: TestWorkerFeedbackReplayAfterNewerActivityCursor (0.16s)
+PASS
+ok  	github.com/neouks/series/server	5.570s

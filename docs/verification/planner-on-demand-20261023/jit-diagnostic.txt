@@ -1,0 +1,10 @@
+=== RUN   TestPlannerOnDemandContextMetrics
+=== RUN   TestPlannerOnDemandContextMetrics/1000
+    planner_context_metrics_test.go:103: nodes=1000 mode=previous_overview chars=11829 bytes=12031 sql=18.0 elapsed_avg=1.825685847s allocated_avg=1296866B
+    planner_context_metrics_test.go:103: nodes=1000 mode=bootstrap_startup chars=1120 bytes=1270 sql=2.0 elapsed_avg=1.029370208s allocated_avg=41920B
+    planner_context_metrics_test.go:111: bootstrap explain execution_ms=867.571 jit=map[Functions:280 Options:map[Deforming:true Expressions:true Inlining:true Optimization:true] Timing:map[Emission:380.098 Generation:map[Deform:2.824 Total:6.098] Inlining:16.559 Optimization:430.657 Total:833.412]]
+    planner_context_metrics_test.go:103: nodes=1000 mode=bootstrap_event chars=2051 bytes=2201 sql=2.0 elapsed_avg=946.712639ms allocated_avg=100384B
+--- PASS: TestPlannerOnDemandContextMetrics (13.58s)
+    --- PASS: TestPlannerOnDemandContextMetrics/1000 (13.49s)
+PASS
+ok  	github.com/neouks/series/agent	13.626s

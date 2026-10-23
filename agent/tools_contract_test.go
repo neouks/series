@@ -10,14 +10,14 @@ import (
 	"github.com/neouks/series/db"
 )
 
-func TestPlannerToolContractMatchesPrefetchedPrompt(t *testing.T) {
+func TestPlannerToolContractMatchesOnDemandPrompt(t *testing.T) {
 	tools := (&ToolSet{}).PlannerTools()
 	names := make(map[string]bool, len(tools))
 	for _, tool := range tools {
 		names[tool.Name()] = true
 	}
 	if !names["asset_search"] {
-		t.Fatal("planner prompt advertises list_assets but PlannerTools omitted it")
+		t.Fatal("planner prompt advertises asset_search but PlannerTools omitted it")
 	}
 	for _, required := range []string{"graph_overview", "context_search", "context_get", "asset_get", "prove_goal"} {
 		if !names[required] {

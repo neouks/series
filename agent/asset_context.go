@@ -217,6 +217,10 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 	worker := ri.AgentKey == "worker" && ri.TaskID == p.taskID && ri.IntentID > 0
 	req = redactUnverifiableStructuredHistory(req)
 	var refreshErr error
+	req, refreshErr = p.refreshPlannerBootstrap(ctx, req)
+	if refreshErr != nil {
+		return req, refreshErr
+	}
 	var accessSnapshot *targetAccessSnapshot
 	req, accessSnapshot, refreshErr = p.refreshTargetAccess(ctx, req)
 	if refreshErr != nil {

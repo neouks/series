@@ -38,5 +38,9 @@ func (t *ToolSet) searchMixedContext(ctx context.Context, a contextSearchInput, 
 		}
 		out["next_cursor"] = base64.RawURLEncoding.EncodeToString(b)
 	}
-	return contextJSON(ctx, out)
+	result, err := contextJSON(ctx, out)
+	if err == nil && !result.IsError && ctx.Err() == nil {
+		t.recordPlannerSearch(ctx, a, signature, out)
+	}
+	return result, err
 }

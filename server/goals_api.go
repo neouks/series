@@ -68,8 +68,8 @@ func (s *Server) addGoal(w http.ResponseWriter, r *http.Request) {
 	if of, _ := t.Store.OriginFactID(); of > 0 && id > 0 {
 		_ = t.Store.Link(of, db.RelSpawns, id) // goal descends from the task root (origin fact)
 	}
-	t.NotifyGoal([]string{text}) // 记「人新增了目标:…」触发并唤醒 planner
-	s.reviveTask(t)              // 把已完成/暂停的任务拉回运行态继续跑
+	t.NotifyNodes("goal", []int64{id}) // 记「人新增了目标:…」触发并唤醒 planner
+	s.reviveTask(t)                    // 把已完成/暂停的任务拉回运行态继续跑
 	node, _ := t.Store.GetNode(id)
 	if node == nil {
 		writeErr(w, 500, "目标写入后读取失败")
@@ -119,13 +119,12 @@ func (s *Server) editGoal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "目标不存在")
 		return
 	}
-	oldText := goalDTO(node).Text
 	if err := t.Store.UpdateGoalPayload(gid, text, strings.TrimSpace(body.VulnClass)); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	t.NotifyGoalEdited(oldText, text) // 记「人修改了目标由 old 变为 new」触发并唤醒 planner
-	s.reviveTask(t)                   // 与新增一致:复活任务据新目标重判
+	t.NotifyNodes("goal_edited", []int64{gid}) // 记「人修改了目标由 old 变为 new」触发并唤醒 planner
+	s.reviveTask(t)                            // 与新增一致:复活任务据新目标重判
 	updated, _ := t.Store.GetNode(gid)
 	if updated == nil {
 		writeErr(w, 500, "目标更新后读取失败")

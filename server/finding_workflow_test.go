@@ -90,7 +90,7 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 	ts.SetTaskID(*f.TaskID)
 	ts.SetFindingRecorder(s.evidenceStore())
 	notices := 0
-	ts.SetNotifyFinding(func(int64, string) { notices++ })
+	ts.SetNotifyFinding(func(int64, string, ...int64) { notices++ })
 	tools, def, cleanup := augmentToolsForTest(t, ctx, "planner", ts.PlannerTools())
 	defer cleanup()
 	if !strings.Contains(def.FindingGuidance, "evidence_hint_id") || !strings.Contains(def.FindingGuidance, "取消 Worker") {

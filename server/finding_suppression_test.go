@@ -319,7 +319,7 @@ func TestFindingSuppressionDirectDeferredTools(t *testing.T) {
 		ts.SetTaskID(in.TaskID)
 		ts.SetFindingRecorder(r)
 		notified := false
-		ts.SetNotifyFinding(func(int64, string) { notified = true })
+		ts.SetNotifyFinding(func(int64, string, ...int64) { notified = true })
 		var tools []actool.CoreTool
 		switch role {
 		case "planner":

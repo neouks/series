@@ -3906,7 +3906,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
 			s.engine.BeginLLMCall(t.ID)
 			dispatchCtx := s.intentDispatchContext(ctx, t)
-			_, err := ma.Chat(dispatchCtx, maTaskID, mainSeg, s.m.Assets(), t.Guard, t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
+			_, err := ma.Chat(dispatchCtx, maTaskID, mainSeg, s.m.Assets(), t.Guard, t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint, t.NotifyNodes)
 			s.engine.EndLLMCall(t.ID)
 			if err != nil && ctx.Err() == nil {
 				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "（主 Agent 出错：" + err.Error() + "）", MainSeg: segPtr})

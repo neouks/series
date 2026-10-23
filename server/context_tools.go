@@ -159,12 +159,21 @@ func migrateContextCatalog(pg *db.DB) error {
 	if e := pg.MigratePlannerAssetSearch(); e != nil {
 		return e
 	}
+	if e := pg.MigratePlannerIntentSearch(); e != nil {
+		return e
+	}
+	if e := pg.MigratePlannerGraphReads(); e != nil {
+		return e
+	}
 	defaults := agent.BuiltinPromptSeeds()
 	defaults["reporter"] = agent.ReporterDefaultPrompt
 	if err := pg.MigrateContextPrompts(defaults, agent.PreviousContextPromptHashes); err != nil {
 		return err
 	}
 	if err := pg.MigrateBuiltinPromptContracts(defaults, agent.PreviousToolContractPromptHashes); err != nil {
+		return err
+	}
+	if err := pg.MigratePlannerOnDemandPrompt(defaults["planner"], agent.PreviousToolContractPromptHashes["planner"]); err != nil {
 		return err
 	}
 	if report, ok, err := pg.GetSetting("tool_prompt_contracts_report_v2"); err != nil {

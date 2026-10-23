@@ -264,11 +264,11 @@ func (s *ExplorationStore) AddIntentDeduplicated(payload map[string]any, priorit
 // AddPlannerIntentDeduplicated checks execution mode while holding the same
 // exploration queue lock as SetExecutionMode. A Planner write committed before
 // the switch remains queued; one reaching the lock afterwards is rejected.
-func (s *ExplorationStore) AddPlannerIntentDeduplicated(ctx context.Context, payload map[string]any, priority int, anchors []int64, origin string) (id int64, created bool, err error) {
-	return s.addIntentDeduplicated(ctx, payload, priority, anchors, origin, true)
+func (s *ExplorationStore) AddPlannerIntentDeduplicated(ctx context.Context, payload map[string]any, priority int, anchors []int64, origin string, beforeCreate ...func() error) (id int64, created bool, err error) {
+	return s.addIntentDeduplicated(ctx, payload, priority, anchors, origin, true, beforeCreate...)
 }
 
-func (s *ExplorationStore) addIntentDeduplicated(ctx context.Context, payload map[string]any, priority int, anchors []int64, origin string, requireManaged bool) (id int64, created bool, err error) {
+func (s *ExplorationStore) addIntentDeduplicated(ctx context.Context, payload map[string]any, priority int, anchors []int64, origin string, requireManaged bool, beforeCreate ...func() error) (id int64, created bool, err error) {
 	if origin == "" {
 		origin = "planner"
 	}
@@ -346,6 +346,11 @@ ORDER BY n.id`, s.expID)
 		return 0, false, err
 	}
 
+	for _, check := range beforeCreate {
+		if err := check(); err != nil {
+			return 0, false, err
+		}
+	}
 	stored := make(map[string]any, len(payload)+2)
 	for key, value := range payload {
 		stored[key] = value

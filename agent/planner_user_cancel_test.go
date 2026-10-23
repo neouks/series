@@ -29,16 +29,13 @@ func TestPlannerCancellationSurvivesTriggerDrain(t *testing.T) {
 			}
 		}
 	}
-	trigger := renderTriggers(s, []TriggerEvent{{Kind: "cancelled", IntentID: id, Detail: "user reason"}})
-	if !strings.Contains(trigger, "不得主动重开") {
-		t.Fatal(trigger)
-	}
+
 	if ok, err := s.ReopenIntentByUser(id, "stopped"); err != nil || !ok {
 		t.Fatal(err)
 	}
-	stale := renderTriggers(s, []TriggerEvent{{Kind: "cancelled", IntentID: id, Detail: "user reason"}})
-	if !strings.Contains(stale, "已由用户重新开启") {
-		t.Fatal("stale trigger still blocks reopened work", stale)
+	stale := NewToolSet(s, "planner").plannerBootstrap(t.Context(), []TriggerEvent{{Kind: "cancelled", IntentID: id, Detail: "stale user reason"}})
+	if !strings.Contains(stale, `"state":"open"`) || strings.Contains(stale, "stale user reason") {
+		t.Fatal("stale event text overrides persisted state", stale)
 	}
 
 	if text, err := renderUserCancelledIntents(s); err != nil || text != "" {

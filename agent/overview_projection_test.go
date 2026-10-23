@@ -80,3 +80,12 @@ func TestOverviewReadScopeUsesRequestedTask(t *testing.T) {
 		t.Fatal("scope metadata exceeds budget")
 	}
 }
+
+// Previous automatic overview format, retained only as a regression/metrics baseline.
+func renderGraphOverview(data map[string]any) string {
+	const prefix = "\n\n【本轮态势：有界窗口，未展示不代表不存在；sections 提供遗漏状态和读取入口】：\n<graph_overview>\n"
+	const suffix = "\n</graph_overview>"
+	view := boundedGraphOverview(data, plannerOverviewRunes-len([]rune(prefix+suffix)), 0)
+	body, _ := json.Marshal(view)
+	return prefix + string(body) + suffix
+}

@@ -1,0 +1,169 @@
+{
+  "date": "2026-10-23",
+  "baseline_commit": "78ab23f",
+  "implementation": "uncommitted working tree",
+  "scope": "Planner 全图按需检索与本轮先查后建；保留原工作区意图检索权限修复",
+  "changes": [
+    "独立权限过滤和聚合计数 SQL；启动无默认类别列表，图引导最多 8000 Unicode 字符、相关记录总计最多 8 条。",
+    "事件节点、直接父节点、产出及同资产活跃意图按层级选择；纯心跳最多两个按实际最近活动时间排序的运行中意图，无最新 300 条限制。",
+    "主 Agent 和目标 API 事件传递精确节点 ID；事件文本不作为引导内容来源，关联任务仅直接只读并共用预算。",
+    "Planner 每轮私有查询记录，成功检索 intent 且完成实际分页链才能新增；逐资产（含父节点继承）或无资产方向关键词校验，拒绝返回可执行查询参数。",
+    "提交入口冻结查询记录，排队中的写操作不能被并发尚未完成的查询追认；精确重复继续复用，批量部分成功。",
+    "图引导摘要在模型请求前复核授权，只修改请求投影；查询失败不伪装为空，原始目标和专用约束仍保留。",
+    "权限与默认提示词独立一次性迁移，保留禁用/未绑定工具、跨任务限制与自定义提示词；不新增业务表或列。",
+    "去掉 Planner 的整队列读取和旧事件正文预载代码；引导只读事务 SET LOCAL jit=off，避免 LLVM 编译开销且不影响连接池其他请求。"
+  ],
+  "validation": {
+    "db": "full suite passed, including new bootstrap, approval/source visibility, state, priority, heartbeat and migrations",
+    "agent": "full suite passed; final targeted race tests passed after ledger, recovery and authorization projection changes",
+    "server": "full suite passed; final real Planner direct/deferred/noa/round isolation and lifecycle focused runs passed",
+    "guard": "full suite passed",
+    "all_packages": "go test ./... -run ^$ passed",
+    "vet": "go vet ./agent ./db ./server passed",
+    "test_environment": "disposable PostgreSQL 17 container, separate package databases; all data/migration/runtime tests used explicit isolated DSNs. Final compile check also used the isolated DSN. Earlier compile-only runs had no database environment or package-local config and ran no migrations or tests.",
+    "baseline_method": "git archive 78ab23f into isolated temporary directory; same planning scenario test copied there and run with its previous valid add-only sequence",
+    "tokens": "No real model usage; characters and bytes are not Token measurements."
+  },
+  "overview_measurements": [
+    {
+      "nodes": 10,
+      "mode": "previous_overview",
+      "unicode_chars": 3081,
+      "utf8_bytes": 3289,
+      "sql_statements": 18.0,
+      "elapsed_avg": "214.364541ms",
+      "allocated_bytes_avg": 221917
+    },
+    {
+      "nodes": 10,
+      "mode": "bootstrap_startup",
+      "unicode_chars": 1135,
+      "utf8_bytes": 1285,
+      "sql_statements": 4.0,
+      "elapsed_avg": "7.797222ms",
+      "allocated_bytes_avg": 44698
+    },
+    {
+      "nodes": 10,
+      "mode": "bootstrap_event",
+      "unicode_chars": 1843,
+      "utf8_bytes": 2011,
+      "sql_statements": 4.0,
+      "elapsed_avg": "6.193347ms",
+      "allocated_bytes_avg": 81037
+    },
+    {
+      "nodes": 1000,
+      "mode": "previous_overview",
+      "unicode_chars": 11829,
+      "utf8_bytes": 12031,
+      "sql_statements": 18.0,
+      "elapsed_avg": "2.172161555s",
+      "allocated_bytes_avg": 1268218
+    },
+    {
+      "nodes": 1000,
+      "mode": "bootstrap_startup",
+      "unicode_chars": 1145,
+      "utf8_bytes": 1295,
+      "sql_statements": 4.0,
+      "elapsed_avg": "42.005138ms",
+      "allocated_bytes_avg": 35085
+    },
+    {
+      "nodes": 1000,
+      "mode": "bootstrap_event",
+      "unicode_chars": 2118,
+      "utf8_bytes": 2268,
+      "sql_statements": 4.0,
+      "elapsed_avg": "41.952736ms",
+      "allocated_bytes_avg": 99274
+    },
+    {
+      "nodes": 10000,
+      "mode": "previous_overview",
+      "unicode_chars": 11862,
+      "utf8_bytes": 12064,
+      "sql_statements": 18.0,
+      "elapsed_avg": "4.013290041s",
+      "allocated_bytes_avg": 1373136
+    },
+    {
+      "nodes": 10000,
+      "mode": "bootstrap_startup",
+      "unicode_chars": 1150,
+      "utf8_bytes": 1300,
+      "sql_statements": 4.0,
+      "elapsed_avg": "192.125472ms",
+      "allocated_bytes_avg": 35645
+    },
+    {
+      "nodes": 10000,
+      "mode": "bootstrap_event",
+      "unicode_chars": 2123,
+      "utf8_bytes": 2273,
+      "sql_statements": 4.0,
+      "elapsed_avg": "191.111333ms",
+      "allocated_bytes_avg": 102096
+    }
+  ],
+  "planning_scenarios": [
+    {
+      "nodes": 10,
+      "baseline": true,
+      "first_request_text_unicode_chars": 9530,
+      "first_request_text_utf8_bytes": 18040,
+      "sql_statements": 46,
+      "tool_calls": 1,
+      "mock_model_requests": 2,
+      "elapsed": "161.093542ms",
+      "allocated_bytes": 669712
+    },
+    {
+      "nodes": 1000,
+      "baseline": true,
+      "first_request_text_unicode_chars": 10816,
+      "first_request_text_utf8_bytes": 19308,
+      "sql_statements": 46,
+      "tool_calls": 1,
+      "mock_model_requests": 2,
+      "elapsed": "637.513333ms",
+      "allocated_bytes": 969064
+    },
+    {
+      "nodes": 10,
+      "baseline": false,
+      "first_request_text_unicode_chars": 7073,
+      "first_request_text_utf8_bytes": 15543,
+      "sql_statements": 32,
+      "tool_calls": 2,
+      "mock_model_requests": 3,
+      "elapsed": "50.738417ms",
+      "allocated_bytes": 620752
+    },
+    {
+      "nodes": 1000,
+      "baseline": false,
+      "first_request_text_unicode_chars": 7077,
+      "first_request_text_utf8_bytes": 15547,
+      "sql_statements": 32,
+      "tool_calls": 2,
+      "mock_model_requests": 3,
+      "elapsed": "199.874625ms",
+      "allocated_bytes": 457672
+    }
+  ],
+  "measurement_notes": [
+    "Graph-only measurements use 3 iterations; SQL statement counts include transaction control. The previous bounded overview remains a test-only baseline.",
+    "Planning scenario measures one successful new direction with a mock model. First-request text excludes tool schemas, JSON framing and other protocol overhead.",
+    "New normal scenario uses search + add (2 tools, 3 mock requests), versus previous add-only (1 tool, 2 mock requests). Extra retrieval turn is an intentional safety/correctness tradeoff.",
+    "Elapsed times and allocations are local synthetic-fixture measurements, not production latency or real model network latency. Graph count queries still scale with graph/lineage complexity and have a 5s timeout.",
+    "Graph guide is bounded; original mission, constraints, dynamic suppression feedback and SDK-managed conversation history are outside this graph budget. No whole-request Token hard cap is claimed."
+  ],
+  "limitations": [
+    "The query gate proves an eligible successful query was made; it does not guarantee semantic deduplication across paraphrases.",
+    "Only current-run successful query receipts count, including after in-run compression; new runs/restarts require fresh queries.",
+    "User-facing/frontend behavior, SDK, persisted original conversations and audits are unchanged.",
+    "No Git commit, business service restart, release or remote push performed."
+  ]
+}

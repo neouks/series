@@ -178,7 +178,7 @@ func DefaultContextGrants(role string) ContextToolGrants {
 	p := ContextToolGrants{Local: []string{"assets"}}
 	switch role {
 	case "planner":
-		p.Local = append(p.Local, "fact", "finding", "goal", "activity", "activity_all", "activity_detail", "detail", "output", "members", "overview", "untested")
+		p.Local = append(p.Local, "fact", "finding", "intent", "goal", "hint", "digest", "activity", "activity_all", "activity_detail", "detail", "output", "members", "overview", "untested")
 	case "mainagent":
 		p.Local = append(p.Local, "fact", "finding", "intent", "goal", "hint", "digest", "activity", "activity_all", "activity_detail", "detail", "output", "members", "overview", "untested")
 	case "worker":
@@ -195,8 +195,8 @@ func DefaultContextGrants(role string) ContextToolGrants {
 }
 
 // An explicit new binding grants the new tool's local capabilities. Unchanged
-// bindings keep their migrated subset, except Planner's bound asset_search must
-// support normal DSL searches as well as any retained untested capability.
+// bindings keep their migrated subset, except Planner's bound readers need local
+// intent search and normal asset search to inspect and manage its frontier.
 func updateContextBindingGrants(tx *sql.Tx, key string, agents json.RawMessage, enabled bool) error {
 	caps := map[string][]string{
 		"context_search": {"fact", "finding", "intent", "goal", "hint", "digest", "activity", "activity_all"},
@@ -239,13 +239,14 @@ func updateContextBindingGrants(tx *sql.Tx, key string, agents json.RawMessage, 
 		return err
 	}
 	changed := false
+	required := map[string]string{"asset_search": "assets", "context_search": "intent"}[key]
 	for _, role := range next {
 		p, exists := policies[role]
 		if !exists {
 			p = DefaultContextGrants(role)
 		}
-		if key == "asset_search" && role == "planner" && !slices.Contains(p.Local, "assets") {
-			p.Local = append(p.Local, "assets")
+		if role == "planner" && required != "" && !slices.Contains(p.Local, required) {
+			p.Local = append(p.Local, required)
 			policies[role] = p
 			changed = true
 		}
@@ -278,11 +279,24 @@ func updateContextBindingGrants(tx *sql.Tx, key string, agents json.RawMessage, 
 }
 
 const plannerAssetSearchMigration = "tool_planner_asset_search_v1"
+const plannerIntentSearchMigration = "tool_planner_intent_search_v1"
 
 // MigratePlannerAssetSearch repairs the legacy untested-only Planner binding.
 // It grants only local asset reads, never enables or binds a disabled tool, and
 // leaves all other roles and cross-task grants intact. No asset approval changes.
 func (d *DB) MigratePlannerAssetSearch() error {
+	return d.migratePlannerContextRead(plannerAssetSearchMigration, "asset_search")
+}
+
+// MigratePlannerIntentSearch restores local intent reads for an enabled Planner
+// context_search binding. Legacy list readers did not grant this capability even
+// though Planner must inspect queued/running intents before steering/stopping them.
+// Other roles, cross-task grants, disabled tools and custom tools are preserved.
+func (d *DB) MigratePlannerIntentSearch() error {
+	return d.migratePlannerContextRead(plannerIntentSearchMigration, "context_search")
+}
+
+func (d *DB) migratePlannerContextRead(flag, toolKey string) error {
 	tx, err := d.Begin()
 	if err != nil {
 		return err
@@ -292,23 +306,23 @@ func (d *DB) MigratePlannerAssetSearch() error {
 		return err
 	}
 	var done bool
-	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM settings WHERE key=$1 AND value='true')`, plannerAssetSearchMigration).Scan(&done); err != nil {
+	if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM settings WHERE key=$1 AND value='true')`, flag).Scan(&done); err != nil {
 		return err
 	}
 	if done {
 		return tx.Commit()
 	}
 	var agents json.RawMessage
-	err = tx.QueryRow(`SELECT agents FROM tools WHERE key='asset_search' AND system AND enabled AND agents ? 'planner' FOR UPDATE`).Scan(&agents)
+	err = tx.QueryRow(`SELECT agents FROM tools WHERE key=$1 AND system AND enabled AND agents ? 'planner' FOR UPDATE`, toolKey).Scan(&agents)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
 	if err == nil {
-		if err = updateContextBindingGrants(tx, "asset_search", agents, true); err != nil {
+		if err = updateContextBindingGrants(tx, toolKey, agents, true); err != nil {
 			return err
 		}
 	}
-	if _, err = tx.Exec(`INSERT INTO settings(key,value) VALUES($1,'true') ON CONFLICT(key) DO UPDATE SET value='true'`, plannerAssetSearchMigration); err != nil {
+	if _, err = tx.Exec(`INSERT INTO settings(key,value) VALUES($1,'true') ON CONFLICT(key) DO UPDATE SET value='true'`, flag); err != nil {
 		return err
 	}
 	return tx.Commit()

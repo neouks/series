@@ -1995,9 +1995,9 @@ func (t *Task) NotifyDone(intentID int64) {
 
 // NotifyFinding records that a worker reported a finding on intentID (summary),
 // then wakes the planner — so the round spells out which intent found what.
-func (t *Task) NotifyFinding(intentID int64, summary string) {
+func (t *Task) NotifyFinding(intentID int64, summary string, nodeIDs ...int64) {
 	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "finding", IntentID: intentID, Detail: summary})
+	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "finding", IntentID: intentID, Detail: summary, NodeIDs: append([]int64(nil), nodeIDs...)})
 	t.trigMu.Unlock()
 	t.Notify()
 }
@@ -2104,4 +2104,21 @@ func (t *Task) NotifyFindingDeleted(feedbackID int64) {
 	case t.notify <- struct{}{}:
 	default:
 	}
+}
+
+// NotifyNodes carries identities from the successful write, never guesses IDs by text.
+func (t *Task) NotifyNodes(kind string, ids []int64) {
+	clean := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			clean = append(clean, id)
+		}
+	}
+	if len(clean) == 0 {
+		return
+	}
+	t.trigMu.Lock()
+	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: kind, NodeIDs: clean})
+	t.trigMu.Unlock()
+	t.Notify()
 }
