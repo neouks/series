@@ -8,6 +8,9 @@
 
 #### 新增的功能
 
+- **报告撰写 Agent 改为固定 SRC 报告模板**：`ReporterDefaultPrompt` 不再要求“资产发现思路/漏洞发现思路”五段式长文，改为漏洞名称、等级、类型、URL、详细描述、复现步骤（完整请求包/响应包）、影响范围、修复方案；报告正文不单独写证据段，中文表单参数要求 URL 编码并备注解码值。`update_finding_report` 增加结构校验，缺少必填段落或仍写独立证据段时拒绝保存；老库只升级仍为旧默认的 reporter 提示词，用户自定义提示词保留。
+- **报告提交版与技术明细拆分**：`findings` 新增 `report_detail`，reporter 的一次输出可包含 `SERIES:TECHNICAL` 内部附录；保存时自动拆成人类提交版 `report` 和完整技术明细 `report_detail`，旧报告启动时原样回填。`context_search`/`context_get` 的 `/report` 读取完整技术明细，`/report_human` 读取提交版；导出增加 `md-report`/`md-report-zip`，只输出提交版，不混入证据、汇总和任务描述。
+- **所有导出格式统一只输出提交版报告**：`md-single`/`md-zip` 旧格式不再输出“汇总 + 证据 + 任务描述”，与 `md-report`/`md-report-zip` 一样只导出 `findings.report`；CSV 改为“漏洞名称（取报告标题）+ 提交报告全文”，不再导出概述/证据列；JSON 清空技术明细 `report_detail`，不返回给下载方。任务详情页的“导出选中发现”也改用提交版 ZIP。
 - **Agent 发起的 curl/wget 默认携带浏览器 User-Agent**：此前 LLM 调用 curl 测试目标时 UA 是 `curl/x.x`，容易被最简单的指纹规则识别。现在 `<数据目录>/tool-http/` 下自动生成 `.curlrc` 与 `wgetrc`（默认为固定的桌面 Chrome UA），并通过 `CURL_HOME`/`WGETRC` 注入所有 Agent 的 Bash 会话——与是否开启流量捕获无关；模型显式传 `-A/--user-agent` 时仍以命令行为准。配置文件已存在则不覆盖，可手工修改自定义 UA；交互式 shell 会话同样生效。Python requests 等其它客户端不在本次范围。
 
 ### 任务

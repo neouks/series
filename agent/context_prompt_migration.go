@@ -1,5 +1,11 @@
 package agent
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"slices"
+)
+
 // SHA-256 of the previous code defaults; only exact matches are upgraded.
 var PreviousContextPromptHashes = map[string]string{
 	"mainagent": "12bb69ee0886c4fb9beb936d882021a91104860f1da69a5e3eda3d9e345cd399",
@@ -8,6 +14,18 @@ var PreviousContextPromptHashes = map[string]string{
 	"auto":      "b2a71b82243607337b19f0642317fed88c144d536412d80eaaf90807f2905a1d",
 	"pentest":   "2444f4e8157ef93a7c6b900b062caf79bd2a90d49fda2566c10b8b3fb24fd43f",
 	"reporter":  "8803227805c947bef6bdb761ed5d60539645940f8af2a91348902ad476f944a1",
+}
+
+// IsLegacyReporterPrompt reports whether text is one of the known old reporter
+// defaults. A user-edited prompt is intentionally left alone; only exact old
+// defaults are safe to migrate to the fixed SRC report template.
+func IsLegacyReporterPrompt(text string) bool {
+	sum := sha256.Sum256([]byte(text))
+	h := hex.EncodeToString(sum[:])
+	if h == PreviousContextPromptHashes["reporter"] {
+		return true
+	}
+	return slices.Contains(PreviousToolContractPromptHashes["reporter"], h)
 }
 
 // Code defaults immediately before the tool documentation audit. Never derive
