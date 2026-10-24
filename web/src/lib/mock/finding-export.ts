@@ -65,23 +65,58 @@ export function mockFindingExport(items: Finding[], format: string) {
     if (f.name) return f.name;
     return f.vulnclass;
   };
-  const markdown = (f: Finding) =>
-    `# ${title(f)}\n\n${f.summary}\n\n## 证据 / PoC\n\n${f.evidence}\n\n${f.report ?? ""}\n`;
-  if (format === "md-zip")
+  const reportTitle = (f: Finding) => {
+    for (const line of (f.report ?? "").split("\n")) {
+      const trimmed = line.trim();
+      const prefix = "**漏洞名称：**";
+      if (trimmed.startsWith(prefix)) {
+        const value = trimmed.slice(prefix.length).trim();
+        if (value) return value;
+      }
+    }
+    return title(f);
+  };
+  const reportOnly = (f: Finding) => f.report ?? "";
+  if (format === "md-report-zip" || format === "md-zip")
     return {
-      filename: "findings-demo.zip",
-      bytes: zip(items.map((f) => ({ name: `finding-${f.id}.md`, text: markdown(f) }))),
+      filename: "findings-report-demo.zip",
+      bytes: zip(
+        items.filter((f) => reportOnly(f).trim()).map((f) => ({ name: `finding-${f.id}.md`, text: reportOnly(f) })),
+      ),
     };
   let text: string, extension: string;
   if (format === "json") {
-    text = JSON.stringify(items, null, 2);
+    const clean = items.map((f) => {
+      const copy = { ...f };
+      delete copy.report_detail;
+      return copy;
+    });
+    text = JSON.stringify(clean, null, 2);
     extension = "json";
   } else if (format === "csv") {
     const field = (value: string) => `"${value.replaceAll('"', '""')}"`;
-    text = `\uFEFF${[["ID", "名称", "等级", "状态", "摘要", "证据"], ...items.map((f) => [f.id, f.name || f.vulnclass, f.severity, f.status, f.summary, f.evidence])].map((row) => row.map(field).join(",")).join("\r\n")}`;
+    const header = ["ID", "漏洞名称", "漏洞等级", "漏洞类型", "状态", "所属任务", "发现时间", "提交报告"];
+    text = `\uFEFF${[
+      header,
+      ...items.map((f) => [
+        f.id,
+        reportTitle(f),
+        f.severity,
+        f.vulnclass,
+        f.status,
+        f.task_description ?? "",
+        f.ts,
+        reportOnly(f),
+      ]),
+    ]
+      .map((row) => row.map((value) => field(String(value))).join(","))
+      .join("\r\n")}`;
     extension = "csv";
-  } else if (format === "md-single") {
-    text = items.map(markdown).join("\n---\n\n");
+  } else if (format === "md-report" || format === "md-single") {
+    text = items
+      .map(reportOnly)
+      .filter((s) => s.trim())
+      .join("\n---\n\n");
     extension = "md";
   } else throw new Error("invalid export format");
   return { filename: `findings-demo.${extension}`, bytes: new TextEncoder().encode(text) };

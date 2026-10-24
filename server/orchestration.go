@@ -431,10 +431,10 @@ func (s *Server) toolGetTaskNodeDetail() actool.CoreTool {
 // task-agnostic, so this host tool needs no task_id / exploration store.
 func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 	return wrTool("update_finding_report",
-		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_node_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。",
+		"为已登记的漏洞写入/更新【提交报告】(Markdown 全文,整段覆盖旧内容)。finding_node_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告必须按固定模板包含:漏洞名称、漏洞等级、漏洞类型、漏洞URL、详细描述、复现步骤(完整请求包/响应包)、影响范围(可选)、修复方案；不要单独写证据段。正文末尾可用 <!-- SERIES:TECHNICAL:BEGIN --> ... <!-- SERIES:TECHNICAL:END --> 包住仅供内部检索的技术附录；该块不会导出给审核员。",
 		objSchema(map[string]any{
 			"finding_node_id":  positiveIDParam("report_finding 返回的 finding_node_id（探索节点），正整数或数字字符串"),
-			"report":           strParam("详细报告全文,Markdown 格式"),
+			"report":           strParam("提交报告全文,Markdown 格式；技术附录用 SERIES:TECHNICAL 注释块包住"),
 			"evidence_version": map[string]any{"type": "integer", "description": "get_finding_traffic 返回的证据 version；用于防止报告覆盖新的证据变更"},
 		}, "finding_node_id", "report"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
@@ -457,14 +457,18 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 			if err := s.agentFindingTrafficAccess(ctx, findingID, true); err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
-			n, err := s.m.pg.SetFindingReportVersionByNodeID(ctx, nodeID, a.Report, a.EvidenceVersion)
+			if err := validateFindingReport(a.Report); err != nil {
+				return actool.Errorf("报告格式不符合固定模板: " + err.Error()), nil
+			}
+			human, detail := splitFindingReport(a.Report)
+			n, err := s.m.pg.SetFindingReportVersionByNodeID(ctx, nodeID, human, detail, a.EvidenceVersion)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			if n == 0 {
 				return actool.Errorf(fmt.Sprintf("未找到 finding_node_id=%d 对应的漏洞记录(先用 report_finding 登记)", nodeID)), nil
 			}
-			return actool.Text(fmt.Sprintf("finding %d report updated (%d chars)", nodeID, len(a.Report))), nil
+			return actool.Text(fmt.Sprintf("finding %d report updated (submission %d chars, technical %d chars)", nodeID, len([]rune(human)), len([]rune(detail)))), nil
 		})
 }
 
@@ -505,6 +509,7 @@ func (s *Server) seedOrchestrationTools() {
 	// Context catalog migration preserves the currently configured bindings and
 	// only replaces exact code-default prompts; superseded reseeds must not run.
 	s.seedReporterAgent()             // 预置「报告撰写」agent + 工具绑定 + finding 触发器(一次性)
+	s.reseedReporterPrompt()          // 老库把旧默认提示词刷成固定 SRC 报告模板(保留用户自定义)
 	s.upgradeReporterTriggerMessage() // 老库补迁移:让 reporter 回传 evidence_version(一次性)
 	s.seedFindingTrafficTools()       // 增加可选证据参数及只读证据工具，保留用户配置
 	s.seedFindingWorkflowTools()
@@ -819,6 +824,39 @@ func (s *Server) seedReporterAgent() {
 		log.Printf("[reporter] 创建触发器失败: %v", err)
 	}
 	log.Printf("[reporter] 已预置「报告撰写」agent + finding 触发器")
+}
+
+// reseedReporterPrompt upgrades only the known old reporter defaults to the
+// fixed SRC report template. A prompt the user edited is left untouched; the
+// version history keeps the old prompt available from the UI.
+func (s *Server) reseedReporterPrompt() {
+	const flag = "reporter_prompt_src_template_v1"
+	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
+		return
+	}
+	defer func() { _ = s.m.pg.SetSetting(flag, "true") }()
+	a, err := s.m.pg.GetAgentByKey("reporter")
+	if err != nil || a == nil {
+		return
+	}
+	tmpl := agent.ReporterDefaultPrompt
+	cur, err := s.m.pg.CurrentPrompt(a.ID)
+	if err != nil {
+		log.Printf("[reporter] 读取当前提示词失败: %v", err)
+		return
+	}
+	if cur == tmpl {
+		return
+	}
+	if !agent.IsLegacyReporterPrompt(cur) {
+		log.Printf("[reporter] 当前提示词已被用户修改，保留自定义内容，不自动覆盖")
+		return
+	}
+	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
+		log.Printf("[reporter] 提示词升级为固定报告模板失败: %v", err)
+		return
+	}
+	log.Printf("[reporter] 提示词已升级为固定 SRC 报告模板(旧版本保留)")
 }
 
 // seedAutoReportFindingBinding adds "auto" to report_finding's binding ONCE so

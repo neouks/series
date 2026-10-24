@@ -121,14 +121,14 @@ func TestEvidenceBindingLifecycle(t *testing.T) {
 		}
 	}
 	v := again.Version
-	if _, err = s.DB.SetFindingReportVersionByNodeID(ctx, r.NodeID, "report", &v); err != nil {
+	if _, err = s.DB.SetFindingReportVersionByNodeID(ctx, r.NodeID, "report", "report", &v); err != nil {
 		t.Fatal(err)
 	}
 	note := "updated"
 	if err = s.DB.EditFindingTraffic(ctx, r.FindingID, again.Bindings[0].ID, v, nil, &note, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.DB.SetFindingReportVersionByNodeID(ctx, r.NodeID, "stale report", &v); !errors.Is(err, db.ErrEvidenceConflict) {
+	if _, err = s.DB.SetFindingReportVersionByNodeID(ctx, r.NodeID, "stale report", "stale report", &v); !errors.Is(err, db.ErrEvidenceConflict) {
 		t.Fatalf("stale report: %v", err)
 	}
 	f, err := s.DB.GetFinding(r.FindingID)

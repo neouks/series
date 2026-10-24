@@ -436,7 +436,7 @@ func (s *ExplorationStore) PopulateFindingTrafficIDs(nodes []*Node) error {
 	return rows.Err()
 }
 
-func (d *DB) SetFindingReportVersionByNodeID(ctx context.Context, nodeID int64, report string, version *int64) (n int64, err error) {
+func (d *DB) SetFindingReportVersionByNodeID(ctx context.Context, nodeID int64, report, detail string, version *int64) (n int64, err error) {
 	err = d.WithEvidenceTx(ctx, func(tx *sql.Tx) error {
 		var id int64
 		if err := tx.QueryRow(`SELECT id FROM findings WHERE node_id=$1`, nodeID).Scan(&id); err != nil {
@@ -448,7 +448,7 @@ func (d *DB) SetFindingReportVersionByNodeID(ctx context.Context, nodeID int64, 
 		if err := LockFindingEvidenceTx(tx, id, version); err != nil {
 			return err
 		}
-		res, err := tx.Exec(`UPDATE findings SET report=$2,report_evidence_version=COALESCE($3::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, version)
+		res, err := tx.Exec(`UPDATE findings SET report=$2,report_detail=$3,report_evidence_version=COALESCE($4::bigint,CASE WHEN evidence_version=0 THEN 0 ELSE -1 END) WHERE id=$1`, id, report, detail, version)
 		if err != nil {
 			return err
 		}

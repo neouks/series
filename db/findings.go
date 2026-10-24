@@ -31,7 +31,8 @@ type DBFinding struct {
 	Worker          string
 	AssetIDs        []int64
 	Status          string
-	Report          string // 详细报告(Markdown);仅 GetFinding 填充,列表查询不带
+	Report          string // 人类提交版(Markdown);仅详情/导出填充,列表查询不带
+	ReportDetail    string // 完整技术明细(Markdown);供 context_search 与内部复盘,不导出
 	CreatedAt       time.Time
 	TaskDescription string // populated via LEFT JOIN on tasks
 }
@@ -476,7 +477,7 @@ RETURNING id, created_at`, s.expID, audit.NodeID, utf8Clean(audit.Worker), utf8C
 // 再按时间倒序,与「导出汇总报告」的分组顺序一致。
 func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, error) {
 	const order = `ORDER BY CASE f.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, f.created_at DESC`
-	cols := findingSelectCols + `, COALESCE(f.report, '')`
+	cols := findingSelectCols + `, COALESCE(f.report, ''), COALESCE(f.report_detail, '')`
 
 	var q string
 	var args []any
@@ -516,7 +517,7 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 		var aidsJSON string
 		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
 			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
-			&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report); err != nil {
+			&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report, &f.ReportDetail); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
@@ -638,13 +639,13 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 	f := &DBFinding{}
 	var aidsJSON string
-	err := d.QueryRow(`SELECT `+findingSelectCols+`, COALESCE(f.report, '')
+	err := d.QueryRow(`SELECT `+findingSelectCols+`, COALESCE(f.report, ''), COALESCE(f.report_detail, '')
 		FROM findings f
 		LEFT JOIN tasks t ON f.task_id = t.id
 		WHERE f.id = $1`, id).Scan(
 		&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
 		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.CreatedAt,
-		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report)
+		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.TrafficCount, &f.Report, &f.ReportDetail)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -734,9 +735,10 @@ func (d *DB) SetFindingStatus(id int64, status string) (int64, error) {
 
 // SetFindingReportByNodeID sets the Markdown report on the standalone finding row
 // whose node_id matches — report_finding returns that node id, so an agent tool
-// can address the finding it just created. Returns rows affected (0 when no row).
+// can address the finding it just created. The legacy helper mirrors the report
+// into both the human submission and the technical-detail field.
 func (d *DB) SetFindingReportByNodeID(nodeID int64, report string) (int64, error) {
-	return d.SetFindingReportVersionByNodeID(context.Background(), nodeID, report, nil)
+	return d.SetFindingReportVersionByNodeID(context.Background(), nodeID, report, report, nil)
 }
 
 // FindingPatch distinguishes omitted fields from explicit empty values.

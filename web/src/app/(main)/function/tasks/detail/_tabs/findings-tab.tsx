@@ -101,7 +101,7 @@ function TaskFindings({ taskId }: { taskId: string }) {
     if (exporting || !selectedIds.size) return;
     setExporting(true);
     try {
-      await api.exportFindings({ format: "md-single", scope: "selected", ids: [...selectedIds] });
+      await api.exportFindings({ format: "md-report-zip", scope: "selected", ids: [...selectedIds] });
       toast.success("已开始下载导出文件");
     } catch (e) {
       toast.error(`导出失败：${(e as Error).message}`);
