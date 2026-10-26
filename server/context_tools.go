@@ -45,6 +45,7 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 	_ = json.Unmarshal(b, &schema)
 	props, _ := schema["properties"].(map[string]any)
 	desc := t.Description()
+	var example map[string]any
 	if len(p.Cross) == 0 {
 		delete(props, "task_id")
 	}
@@ -65,26 +66,49 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 			}
 			prop["description"] = "可选类型：" + strings.Join(allowed, "/") + "；省略时按所选任务权限从 " + strings.Join(defaults, "/") + " 中选择；activity须显式指定"
 		}
+		if len(allowed) > 0 {
+			kind := allowed[0]
+			for _, candidate := range allowed {
+				if slices.Contains(p.Local, candidate) || (candidate == "activity" && slices.Contains(p.Local, "activity_all")) {
+					kind = candidate
+					break
+				}
+			}
+			if slices.Contains(p.Local, "intent") {
+				kind = "intent"
+			}
+			example = map[string]any{"types": []string{kind}, "q": "认证"}
+			if kind == "activity" && !slices.Contains(p.Local, "activity_all") {
+				example["intent_id"] = 123
+			}
+			if !slices.Contains(p.Local, kind) && !(kind == "activity" && slices.Contains(p.Local, "activity_all")) {
+				// A cross-only grant cannot support a task-local example.
+				example = nil
+			}
+		}
 	}
 	if t.Name() == "asset_search" {
 		assets, untested := slices.Contains(p.Local, "assets"), slices.Contains(p.Local, "untested")
 		switch {
 		case assets && untested:
 			desc = "检索当前角色授权可见的资产摘要；普通搜索提供非空dsl，untested=true仅查询任务覆盖范围内未测试资产。"
+			example = map[string]any{"dsl": "ip==192.0.2.1", "type": "ip"}
 		case assets:
 			delete(props, "untested")
 			schema["required"] = []string{"dsl"}
 			desc = "检索当前角色授权可见的资产摘要，必须提供非空dsl。当前未授予未测试资产筛选能力。"
+			example = map[string]any{"dsl": "ip==192.0.2.1", "type": "ip"}
 		case untested:
 			// Other roles keep their migrated subset; show its actual contract.
 			props["untested"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "必须显式传true；当前仅允许查询未测试资产"}
 			schema["required"] = []string{"untested"}
 			desc = "仅查询当前任务覆盖范围内授权可见的未测试资产，必须显式传untested=true；dsl可选。不提供普通资产搜索。"
+			example = map[string]any{"untested": true}
 		default:
 			desc = "当前未授予资产搜索能力，请检查工具绑定和读取权限，不要重复调用。"
 		}
 		if dsl, ok := props["dsl"].(map[string]any); ok {
-			dsl["description"] = "筛选表达式，如 ip==192.0.2.1；支持domain/ip/url/port/technology、AND/OR、=模糊、==精确"
+			dsl["description"] = "筛选表达式，如 ip==192.0.2.1；支持domain/ip/url/port/technology、AND/OR、=模糊、==精确；type是独立参数，不写入dsl"
 		}
 		desc += " 默认页长见limit.default，最多50条；保持筛选条件用next_offset续页。任务范围及资产审批过滤仍生效，不能指定其他任务。"
 	}
@@ -112,8 +136,31 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 		} else {
 			item["required"] = []any{"ref", "view"}
 		}
+		if len(views) > 0 {
+			view, ref := views[0], "node:123"
+			for _, candidate := range views {
+				if slices.Contains(p.Local, candidate) || (candidate == "detail" && slices.Contains(p.Local, "activity_detail")) {
+					view = candidate
+					break
+				}
+			}
+			cap := view
+			if cap == "detail" && !slices.Contains(p.Local, cap) && slices.Contains(p.Local, "activity_detail") {
+				ref, cap = "activity:123", "activity_detail"
+			}
+			if slices.Contains(p.Local, cap) {
+				example = map[string]any{"items": []any{map[string]any{"ref": ref, "view": view}}}
+			}
+		}
 		delete(view, "default") // Nested defaults are not injected; do not advertise one.
 		desc = "批量读取1..5个引用，按view枚举选择当前角色获准的视图。每项独立返回错误及next续读参数；顶层max_chars为总预算（缺省值见default、最多24000），每项均分，每项max_chars只能收紧，工具输出上限仍有效。"
+	}
+	if t.Name() == "asset_get" && slices.Contains(p.Local, "assets") {
+		example = map[string]any{"ids": []int{123}}
+	}
+	if example != nil {
+		encoded, _ := json.Marshal(example)
+		desc += "\n调用示例（ID/关键词按当前上下文替换）：" + string(encoded)
 	}
 	return &contextPolicyTool{CoreTool: t, policy: p, schema: schema, desc: desc}
 }
@@ -175,6 +222,14 @@ func migrateContextCatalog(pg *db.DB) error {
 	}
 	if err := pg.MigratePlannerOnDemandPrompt(defaults["planner"], agent.PreviousToolContractPromptHashes["planner"]); err != nil {
 		return err
+	}
+	if err := pg.MigratePlannerProactivePrompt(defaults["planner"], agent.PreviousPlannerProactivePromptHashes); err != nil {
+		return err
+	}
+	if report, ok, err := pg.GetSetting("planner_proactive_prompt_report_v1"); err != nil {
+		return err
+	} else if ok && report != "{}" {
+		log.Printf("[tools] Planner 主动检索提示词升级记录（自定义原文保留）: %s", report)
 	}
 	if report, ok, err := pg.GetSetting("tool_prompt_contracts_report_v2"); err != nil {
 		return err

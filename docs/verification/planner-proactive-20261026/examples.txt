@@ -1,0 +1,32 @@
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred
+2026/10/26 09:40:05 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 09:40:06 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_get
+--- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred (0.22s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_search (0.00s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_get (0.00s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_search (0.00s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_get (0.01s)
+=== RUN   TestRetrievalExamplesFollowNarrowGrants
+--- PASS: TestRetrievalExamplesFollowNarrowGrants (0.00s)
+PASS
+ok  	github.com/neouks/series/server	0.287s

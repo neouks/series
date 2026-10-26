@@ -1,0 +1,26 @@
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa
+2026/10/26 09:41:12 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 09:41:12 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=false
+    planner_on_demand_test.go:133: round=0 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=1 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=2 mock_model_requests=3 tools=2
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=true
+    planner_on_demand_test.go:133: round=0 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=1 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=2 mock_model_requests=3 tools=2
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=false
+    planner_on_demand_test.go:133: round=0 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=1 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=2 mock_model_requests=3 tools=2
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=true
+    planner_on_demand_test.go:133: round=0 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=1 mock_model_requests=4 tools=3
+    planner_on_demand_test.go:133: round=2 mock_model_requests=3 tools=2
+--- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa (0.39s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=false (0.08s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=true (0.10s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=false (0.06s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=true (0.05s)
+PASS
+ok  	github.com/neouks/series/server	0.446s

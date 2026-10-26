@@ -18,3 +18,8 @@ var PreviousToolContractPromptHashes = map[string][]string{
 	"auto":      {"8eec58f253f03172b8e48db159ec8a1cb5b001ee0e6f929f56782b239f3fa5d8"},
 	"reporter":  {"d95a892584a10ac8afb2434714601caa346e158f839785ff132d5424028fd628"},
 }
+
+// Default shipped with 05c8e90, which enforced an in-run query receipt.
+var PreviousPlannerProactivePromptHashes = []string{
+	"ab074edd2c859623145f25ca9f5d7ca24d09f3e3eee9e20cf981f702971d7acf",
+}

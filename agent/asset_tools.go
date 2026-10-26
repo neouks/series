@@ -10,7 +10,7 @@ import (
 )
 
 func (t *ToolSet) assetSearch() actool.CoreTool {
-	return readTool("asset_search", "检索当前角色可见资产摘要；详情用asset_get。通常必须提供非空dsl，不能只传type/limit；有untested权限时可用untested=true查询任务覆盖范围内未测试资产。默认10条、最多50条；保留筛选条件，以next_offset作为offset续页。", obj(map[string]any{"dsl": str("非空筛选表达式，如 port==443 AND technology=nginx；支持domain/ip/url/port/technology、AND/OR、=模糊、==精确；untested=true时可省略"), "type": str("资产类型，不能单独代替dsl"), "untested": map[string]any{"type": "boolean"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "offset": intp("next_offset 续页")}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	return readTool("asset_search", "检索当前角色可见资产摘要；详情用asset_get。通常必须提供非空dsl，不能只传type/limit；有untested权限时可用untested=true查询任务覆盖范围内未测试资产。默认10条、最多50条；保留筛选条件，以next_offset作为offset续页。", obj(map[string]any{"dsl": str("非空筛选表达式，如 port==443 AND technology=nginx；支持domain/ip/url/port/technology、AND/OR、=模糊、==精确；untested=true时可省略"), "type": str("独立资产类型参数，如ip/subdomain；不要写成dsl中的type=...，不能单独代替dsl"), "untested": map[string]any{"type": "boolean"}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "offset": intp("next_offset 续页")}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			DSL      string `json:"dsl"`
 			Type     string `json:"type"`

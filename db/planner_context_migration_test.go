@@ -162,3 +162,73 @@ func TestPlannerOnDemandPromptUpgradeAfterPriorMigration(t *testing.T) {
 		}
 	}
 }
+
+func TestPlannerProactivePromptUpgradeAfterPriorMigrations(t *testing.T) {
+	d, e := Open(testDSN(t))
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { d.Close() })
+	a, e := d.GetAgentByKey("planner")
+	if e != nil || a == nil {
+		t.Fatal(e)
+	}
+	var original *int64
+	var maxID int64
+	if e = d.QueryRow(`SELECT current_prompt_id FROM agents WHERE id=$1`, a.ID).Scan(&original); e != nil {
+		t.Fatal(e)
+	}
+	if e = d.QueryRow(`SELECT COALESCE(max(id),0) FROM agent_prompts WHERE agent_id=$1`, a.ID).Scan(&maxID); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		d.Exec(`UPDATE agents SET current_prompt_id=$1 WHERE id=$2`, original, a.ID)
+		d.Exec(`DELETE FROM agent_prompts WHERE agent_id=$1 AND id>$2`, a.ID, maxID)
+	})
+	for _, key := range []string{"tool_prompt_contracts_v2", "planner_on_demand_prompt_v1", "planner_proactive_prompt_v1", "planner_proactive_prompt_report_v1"} {
+		v, found, e := d.GetSetting(key)
+		if e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() {
+			if found {
+				d.SetSetting(key, v)
+			} else {
+				d.Exec(`DELETE FROM settings WHERE key=$1`, key)
+			}
+		})
+	}
+	d.SetSetting("tool_prompt_contracts_v2", "true")
+	d.SetSetting("planner_on_demand_prompt_v1", "true")
+	old := "known default with forced query gate"
+	for _, custom := range []bool{false, true} {
+		d.Exec(`DELETE FROM settings WHERE key='planner_proactive_prompt_v1'`)
+		text := old
+		if custom {
+			text = "custom " + old
+		}
+		if _, e = d.SavePrompt(a.ID, text, "fixture", "test"); e != nil {
+			t.Fatal(e)
+		}
+		if e = d.MigratePlannerProactivePrompt("proactive default", []string{fmt.Sprintf("%x", sha256.Sum256([]byte(old)))}); e != nil {
+			t.Fatal(e)
+		}
+		got, e := d.CurrentPrompt(a.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		want := "proactive default"
+		if custom {
+			want = text
+		}
+		if got != want {
+			t.Fatal(got)
+		}
+		if e = d.MigratePlannerProactivePrompt("must not run twice", []string{fmt.Sprintf("%x", sha256.Sum256([]byte(got)))}); e != nil {
+			t.Fatal(e)
+		}
+		if repeated, _ := d.CurrentPrompt(a.ID); repeated != want {
+			t.Fatal("not idempotent", repeated)
+		}
+	}
+}

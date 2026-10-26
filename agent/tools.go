@@ -132,7 +132,6 @@ type ToolSet struct {
 	// re-planned promptly (currently: a new hint). nil = no wake (the hint is still
 	// stored and read on the next round triggered by other events). debounced.
 	notify            func()
-	plannerSearches   *plannerSearchLedger
 	plannerReadAccess *ContextAccess
 	notifyNodes       func(string, []int64)
 	// notifyFinding, if set, wakes the task's planner when this run reports a finding,
@@ -1477,6 +1476,14 @@ func (t *ToolSet) addOneIntentResult(it intentItem) (id int64, created bool, err
 }
 
 func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem, requireManaged bool) (id int64, created bool, err error) {
+	// The removed query ledger also checked run identity. Keep that security
+	// boundary independently of whether the Planner searched any context.
+	if requireManaged {
+		ri := RunInfoFrom(ctx)
+		if ri.AgentKey != "planner" || t.taskID <= 0 || ri.TaskID != t.taskID {
+			return 0, false, fmt.Errorf("Planner 运行上下文缺失或与当前任务不匹配")
+		}
+	}
 	if strings.TrimSpace(it.Summary) == "" {
 		return 0, false, fmt.Errorf("summary 不能为空")
 	}
@@ -1572,7 +1579,7 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 		payload["asset_ids"] = anchors
 	}
 	if requireManaged {
-		id, created, err = t.ts.AddPlannerIntentDeduplicated(ctx, payload, priority, anchors, "planner", func() error { return t.checkPlannerSearch(ctx, it.Summary, anchors) })
+		id, created, err = t.ts.AddPlannerIntentDeduplicated(ctx, payload, priority, anchors, "planner")
 	} else {
 		id, created, err = t.ts.AddIntentDeduplicated(payload, priority, anchors, "planner")
 	}
@@ -1603,7 +1610,7 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 func intentInputSchema() map[string]any {
 	fields := map[string]any{
 		"summary":    str("一句话描述这个探索方向：做什么+为什么。已写清方向即可，不依赖资产 id。"),
-		"asset_ids":  map[string]any{"type": "array", "description": "目标资产ID（来自asset_search），不能传探索节点ID；具体目标务必填写，纯全局侦察无具体资产时留空。"},
+		"asset_ids":  map[string]any{"type": "array", "description": "目标资产ID（复用当前授权上下文中的明确ID，未知时用asset_search查找），不能传探索节点ID；具体目标务必填写，纯全局侦察无具体资产时留空。"},
 		"parent_ids": map[string]any{"type": "array", "description": "上游fact/finding探索节点ID，不是独立finding_id；禁止意图/目标/提示节点。顶层新方向留空，系统挂到任务起点。"},
 		"priority":   intp("优先级建议1-10；省略或0按5处理"),
 	}
@@ -1620,15 +1627,10 @@ func intentInputSchema() map[string]any {
 
 func (t *ToolSet) addIntent() actool.CoreTool {
 	return submissionTool{writeTool("add_intent", "生成【探索方向】写入 frontier，并连入探索链路。意图是开放的探索方向，不是固定类型——用 summary 一句话自由描述要探索/验证/利用什么。\n"+
-		"主 Agent 成功下发后结束本轮，Worker 自动回传总结，不轮询等待。Planner 新增前必须先用 context_search 查询已有意图，不限定 state/intent_id；按资产或方向关键词完成查询分页。Planner 对未审批候选本轮跳过；主 Agent 可明确下发待审批资产方向，但封禁和撤回仍拒绝。未知候选先批量 check_target_access。★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（最多 4 条，比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors；已存在的活跃同方向见 duplicates）。单条则省略 intents 直接给顶层 summary。",
+		"主 Agent 成功下发后结束本轮，Worker 自动回传总结，不轮询等待。Planner 准备新方向时主动用 context_search 查询相关意图并比较已有方向；信息足够即可提交，查询记录和分页完成度不是准入条件。Planner 对未审批候选本轮跳过；主 Agent 可明确下发待审批资产方向，但封禁和撤回仍拒绝。未知候选先批量 check_target_access。★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（最多 4 条，比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors；已存在的活跃同方向见 duplicates）。单条则省略 intents 直接给顶层 summary。",
 		intentInputSchema(),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			t := t
-			if t != nil && (RunInfoFrom(ctx).AgentKey == "planner" || t.worker == "planner") {
-				copy := *t
-				copy.plannerSearches = t.plannerSearches.snapshot()
-				t = &copy
-			}
 			if locked, _ := ctx.Value(intentSubmissionLockedKey{}).(bool); locked && RunInfoFrom(ctx).AgentKey == "mainagent" && RunInfoFrom(ctx).TaskID == t.taskID && RunInfoFrom(ctx).IntentID == 0 {
 				copied := *t
 				copied.directDispatch = true
@@ -1660,7 +1662,6 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			ids := make([]int64, len(items))
 			errs := map[string]string{}
 			accessErrors := map[string]targetAccessView{}
-			searchErrors := map[string]*plannerSearchRequired{}
 			duplicates := map[string]int64{}
 			createdAny := false
 			var newlyCreated []int64
@@ -1672,10 +1673,6 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 				id, created, err := t.addOneIntentResultWithMode(ctx, it, RunInfoFrom(ctx).AgentKey == "planner" || t.worker == "planner")
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()
-					var required *plannerSearchRequired
-					if errors.As(err, &required) {
-						searchErrors[strconv.Itoa(i)] = required
-					}
 					var denied *targetAccessError
 					if errors.As(err, &denied) {
 						accessErrors[strconv.Itoa(i)] = denied.Access
@@ -1723,11 +1720,6 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 					if access, ok := accessErrors["0"]; ok {
 						return accessErrorResult(errors.New(e), access)
 					}
-					if required := searchErrors["0"]; required != nil {
-						r, _ := contextJSON(ctx, map[string]any{"ids": ids, "errors": errs, "search_required": searchErrors})
-						r.IsError = true
-						return r, nil
-					}
 					return actool.Errorf(e), nil
 				}
 				if existingID, duplicate := duplicates["0"]; duplicate {
@@ -1742,9 +1734,6 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 				return actool.Text(fmt.Sprintf("intent created: %d", ids[0])), nil
 			}
 			out := map[string]any{"ids": ids}
-			if len(searchErrors) > 0 {
-				out["search_required"] = searchErrors
-			}
 			if len(dispatchResults) > 0 {
 				out["dispatch_results"] = dispatchResults
 			}

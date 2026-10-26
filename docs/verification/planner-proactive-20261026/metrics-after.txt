@@ -1,0 +1,6 @@
+=== RUN   TestPlannerPlanningScenarioMetrics
+    planner_scenario_metrics_test.go:107: nodes=10 baseline=false text_chars=7578 text_bytes=16622 sql=32 tools=2 mock_model_requests=3 elapsed=122.100625ms allocated=627456B
+    planner_scenario_metrics_test.go:107: nodes=1000 baseline=false text_chars=7582 text_bytes=16626 sql=32 tools=2 mock_model_requests=3 elapsed=129.952708ms allocated=533920B
+--- PASS: TestPlannerPlanningScenarioMetrics (0.80s)
+PASS
+ok  	github.com/neouks/series/agent	0.823s

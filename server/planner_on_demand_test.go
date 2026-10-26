@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
@@ -57,56 +58,48 @@ func TestPlannerOnDemandRealRunDirectDeferredAndNoa(t *testing.T) {
 					}
 					return nil, info, func() {}
 				}
-				calls := 0
-				round := 0
+				calls, round := 0, 0
 				prefix := fmt.Sprintf("direction-%v-%v", deferred, noa)
 				var firstInput string
 				provider := retestProvider{complete: func(_ context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 					calls++
 					if calls == 1 {
+						firstInput = strings.Join(req.System, "")
 						for _, m := range req.Messages {
 							for _, b := range m.Content {
 								firstInput += b.Text
 							}
 						}
+						if !strings.Contains(firstInput, "准备新增方向时") || !strings.Contains(firstInput, "仅监督或等待结果") || strings.Contains(firstInput, "工具会强制检查") {
+							t.Fatal("first input lacks proactive workflow")
+						}
 					}
-					if calls > 1 {
-						var result *llm.ContentBlock
-						for _, m := range req.Messages {
-							for i := range m.Content {
-								b := &m.Content[i]
-								if b.Type == llm.BlockToolResult {
-									result = b
-								}
+					for _, m := range req.Messages {
+						for _, b := range m.Content {
+							if b.Type == llm.BlockToolResult && b.IsError {
+								t.Fatalf("unexpected tool error: %+v", b)
 							}
 						}
-						if result == nil {
-							t.Fatal("missing tool result")
-						}
-						text := ""
-						for _, b := range result.Content {
-							text += b.Text
-						}
-						if calls == 2 && round < 2 {
-							if !result.IsError || !strings.Contains(text, "search_required") {
-								t.Fatalf("round %d bypassed before-query gate: %s", round, text)
-							}
-						} else if result.IsError {
-							t.Fatalf("step %d: %s", calls, text)
-						}
+					}
+					queryFirst := round != 1 && round != 4
+					addTurn := 1
+					if queryFirst {
+						addTurn = 2
+					}
+					if round == 4 || calls > addTurn {
+						return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("等待已有工作推进")}}, "end_turn", llm.Usage{}, nil
 					}
 					name := "add_intent"
 					params := map[string]any{"summary": fmt.Sprintf("%s round %d", prefix, round)}
-					step := calls
-					if round == 2 {
-						step++
-					}
-					switch step {
-					case 2:
+					if queryFirst && calls == 1 {
 						name = "context_search"
 						params = map[string]any{"types": []string{"intent"}, "q": prefix}
-					case 4:
-						return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("完成")}}, "end_turn", llm.Usage{}, nil
+						if round == 2 {
+							params["state"] = "running"
+						}
+						if round == 3 {
+							params["limit"] = 1
+						}
 					}
 					if deferred {
 						params = map[string]any{"tool_name": name, "params": params}
@@ -118,20 +111,30 @@ func TestPlannerOnDemandRealRunDirectDeferredAndNoa(t *testing.T) {
 				planner := agent.NewPlanner(provider, "test", t.TempDir(), nil, 100000, 8)
 				planner.SetNonStreaming(func() bool { return true })
 				planner.SetNoaEnabled(func() bool { return noa })
-				for round = 0; round < 3; round++ {
+				for round = 0; round < 5; round++ {
 					calls = 0
-					if _, _, err := planner.Plan(t.Context(), taskID, nil, nil, task.Store, "original-goal", nil, nil); err != nil {
+					var commands []string
+					_, _, err := planner.Plan(t.Context(), taskID, nil, nil, task.Store, "original-goal", nil, func(a db.Activity) {
+						if a.Kind == "command" {
+							commands = append(commands, a.Summary)
+						}
+					})
+					if err != nil {
 						t.Fatal(err)
 					}
-					wantCalls := 4
-					if round == 2 {
-						wantCalls = 3
+					wantCalls := 3
+					if round == 1 {
+						wantCalls = 2
+					}
+					if round == 4 {
+						wantCalls = 1
 					}
 					if calls != wantCalls {
-						t.Fatal("unexpected model calls", calls)
+						t.Fatal("unexpected requests", calls, commands)
 					}
-					t.Logf("round=%d mock_model_requests=%d tools=%d", round, calls, calls-1)
+					t.Logf("round=%d mock_model_requests=%d tools=%d failed_retries=0 first_input_chars=%d first_input_bytes=%d", round, calls, calls-1, utf8.RuneCountInString(firstInput), len(firstInput))
 				}
+
 				if !strings.Contains(firstInput, "<planner_context>") || strings.Contains(firstInput, "<graph_overview>") || strings.Contains(firstInput, `"reason":"event"`) {
 					t.Fatal("startup graph preloaded", firstInput)
 				}

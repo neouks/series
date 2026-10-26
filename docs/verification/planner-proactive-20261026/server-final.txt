@@ -1,0 +1,80 @@
+=== RUN   TestContextPolicySchemaAndRuntimeBoundaries
+--- PASS: TestContextPolicySchemaAndRuntimeBoundaries (0.00s)
+=== RUN   TestMainPendingDispatchAndAdmissionRollback
+2026/10/26 09:44:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 09:44:35 [mcp] playwright MCP 已移除捕获代理配置
+--- PASS: TestMainPendingDispatchAndAdmissionRollback (0.28s)
+=== RUN   TestPlannerAssetSearchMigratedCallAndScope
+--- PASS: TestPlannerAssetSearchMigratedCallAndScope (0.26s)
+=== RUN   TestPlannerIntentSearchThroughPlan
+2026/10/26 09:44:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 09:44:35 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestPlannerIntentSearchThroughPlan/traffic_binding=true
+=== RUN   TestPlannerIntentSearchThroughPlan/traffic_binding=false
+--- PASS: TestPlannerIntentSearchThroughPlan (0.32s)
+    --- PASS: TestPlannerIntentSearchThroughPlan/traffic_binding=true (0.07s)
+    --- PASS: TestPlannerIntentSearchThroughPlan/traffic_binding=false (0.06s)
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa
+2026/10/26 09:44:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 09:44:36 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=false
+    planner_on_demand_test.go:135: round=0 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=7082 first_input_bytes=15524
+    planner_on_demand_test.go:135: round=1 mock_model_requests=2 tools=1 failed_retries=0 first_input_chars=7143 first_input_bytes=15585
+    planner_on_demand_test.go:135: round=2 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=7143 first_input_bytes=15585
+    planner_on_demand_test.go:135: round=3 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=7143 first_input_bytes=15585
+    planner_on_demand_test.go:135: round=4 mock_model_requests=1 tools=0 failed_retries=0 first_input_chars=7143 first_input_bytes=15585
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=true
+    planner_on_demand_test.go:135: round=0 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=10137 first_input_bytes=18593
+    planner_on_demand_test.go:135: round=1 mock_model_requests=2 tools=1 failed_retries=0 first_input_chars=10137 first_input_bytes=18593
+    planner_on_demand_test.go:135: round=2 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=10137 first_input_bytes=18593
+    planner_on_demand_test.go:135: round=3 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=10137 first_input_bytes=18593
+    planner_on_demand_test.go:135: round=4 mock_model_requests=1 tools=0 failed_retries=0 first_input_chars=10137 first_input_bytes=18593
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=false
+    planner_on_demand_test.go:135: round=0 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=7570 first_input_bytes=16014
+    planner_on_demand_test.go:135: round=1 mock_model_requests=2 tools=1 failed_retries=0 first_input_chars=7570 first_input_bytes=16014
+    planner_on_demand_test.go:135: round=2 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=7571 first_input_bytes=16015
+    planner_on_demand_test.go:135: round=3 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=7571 first_input_bytes=16015
+    planner_on_demand_test.go:135: round=4 mock_model_requests=1 tools=0 failed_retries=0 first_input_chars=7571 first_input_bytes=16015
+=== RUN   TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=true
+    planner_on_demand_test.go:135: round=0 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=10564 first_input_bytes=19022
+    planner_on_demand_test.go:135: round=1 mock_model_requests=2 tools=1 failed_retries=0 first_input_chars=10564 first_input_bytes=19022
+    planner_on_demand_test.go:135: round=2 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=10564 first_input_bytes=19022
+    planner_on_demand_test.go:135: round=3 mock_model_requests=3 tools=2 failed_retries=0 first_input_chars=10564 first_input_bytes=19022
+    planner_on_demand_test.go:135: round=4 mock_model_requests=1 tools=0 failed_retries=0 first_input_chars=10564 first_input_bytes=19022
+--- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa (0.49s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=false (0.10s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=false/noa=true (0.09s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=false (0.09s)
+    --- PASS: TestPlannerOnDemandRealRunDirectDeferredAndNoa/deferred=true/noa=true (0.09s)
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred
+2026/10/26 09:44:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 09:44:36 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_get
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_search
+=== RUN   TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_get
+--- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred (0.21s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/context_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/planner/asset_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/context_get (0.00s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/worker/asset_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/context_get (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_search (0.01s)
+    --- PASS: TestRoleRetrievalExamplesExecuteDirectAndDeferred/mainagent/asset_get (0.01s)
+=== RUN   TestRetrievalExamplesFollowNarrowGrants
+--- PASS: TestRetrievalExamplesFollowNarrowGrants (0.00s)
+PASS
+ok  	github.com/neouks/series/server	1.623s

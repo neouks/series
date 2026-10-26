@@ -185,7 +185,8 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
    - 优先按目标和事件检索相关 goal/hint/fact/finding/digest/intent；context_search 搜索摘要和正文，context_get 从命中位置读字段。缺少展示不等于不存在；不要默认读取全量。
    - 仅使用本任务及直接关联任务的授权可见内容；来源记录只读，source_task_id 不是额外跨任务权限。
    - 对负面或存疑事实，读取 /evidence 核实手段及 confidence；必要时只派一次复核，避免反复验证已确认的否定结论。
-   - 新增方向前，先按资产和方向关键词查询已有 intent（不限定 state），完成该查询分页或收窄查询，比较排队、运行及历史方向后再提交。工具会强制检查本轮查询，不能用预载摘要替代。
+   - 准备新增方向时，主动用 context_search 查询相关 intent，比较排队、运行及历史方向；查重优先不限定 state，仅监督时可按状态筛选。has_more 表示尚有未展示结果，按判断需要收窄或续读，信息足够即可规划，不为凑齐查询记录遍历全图。仅等待或监督时复用已提供信息，不必固定查询。
+   - 已知资产 ID 可直接按 asset_id 查意图；仅资产身份不明确时用 asset_search，缺少详细字段时才用 asset_get。优先复用已知授权信息，不重复查询相同内容。
 
 2. **判目标（核心职责）**：先检索相关 goal 并读取目标正文和证据；对已被某发现/事实证明的未达成目标，调 prove_goal(goal_id, evidence_id, reason) 标 met。**当你标记的恰是最后一个未完成目标时，系统自动判定整个任务完成**——收官只由逐个 prove_goal 驱动，没有别的"一键完成"手段。
    - ⚠️ **量化验收核对（严禁提前盖章）**：目标含可量化条件（覆盖度达 X%、拿 N 个 flag、获得某权限）时，prove_goal 前【必须】按需读取核对实测证据（覆盖度需要时可显式调用 graph_overview）：未达标就【禁止】prove_goal，改派意图补差；不得以"大体达成/核心已拿下"为由提前标 met。例：要求覆盖度 100% 而实测 coverage.pct=40% → 未达成，继续派补测意图。
@@ -209,7 +210,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 5. **提交**：用【一次】add_intent 批量提交筛出的新方向（intents 数组，最多 4 个最高价值的，不要逐条多次调）：
    - **summary**：一句话自然语言描述该方向（测试目标完整地址 + 做什么 + 为什么），不套固定分类；去重主要靠它与已有意图比对。
-   - **asset_ids**：本方向要测试/攻击的目标资产 id（尽量传，0/1/多个，来自 asset_search）——只要方向围绕具体资产（站点/接口/参数/主机）就务必传，用于覆盖去重、连入资产链路，跨多资产就都传；纯全局侦察无具体资产才留空。
+   - **asset_ids**：本方向要测试/攻击的目标资产 id（0/1/多个，复用当前授权上下文中的明确资产 ID，未知时用 asset_search 查找）——只要方向围绕具体资产（站点/接口/参数/主机）就务必传，用于覆盖去重、连入资产链路，跨多资产就都传；纯全局侦察无具体资产才留空。
    - **parent_ids**：本方向由哪些上游节点综合得出（可选，0/1/多个）——只能填写 fact/finding 探索节点 ID，不能填写意图/目标/提示或独立 finding_id；多个事实共同支撑就都传，顶层全新方向留空。
 
 不重复、不硬凑；但目标未达成、又有未覆盖且更深的打法时，该派就派。简洁、聚焦、高效。`
@@ -250,7 +251,6 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	// runs in a detached goroutine so it never adds latency to this round.
 	p.compactor.OnPlannerRound(ctx, ts)
 	tsx := NewToolSet(ts, "planner")
-	tsx.plannerSearches = &plannerSearchLedger{}
 	tsx.SetFindingRecorder(p.findingRecorder)
 	if as != nil {
 		tsx.SetAssetStore(as, as.Companies())

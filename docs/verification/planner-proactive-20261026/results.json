@@ -1,0 +1,118 @@
+{
+  "date": "2026-10-26",
+  "baseline_commit": "05c8e90",
+  "implementation": "uncommitted working tree",
+  "changes": [
+    "移除 Planner 本轮查询账本、查询快照、关键词/逐资产/完整分页校验和 search_required 返回；真实成功查询不再是提交准入条件。",
+    "独立保留 Planner 运行角色与任务匹配检查、资产审批、任务范围、队列模式锁及数据库精确去重。",
+    "准备新方向主动查相关 intent；监督/等待按需读取；已知资产 ID 直接复用，缺少身份或字段时才查资产。保留 8 条/8000 Unicode 字符图引导。",
+    "对齐共享检索参数和角色可用示例；修复仅允许未测试资产的 Planner 仍被提示普通 DSL 查询的问题。",
+    "新启动标记 planner_proactive_prompt_v1 升级已完成旧迁移的默认提示词；只匹配已知旧默认哈希，自定义原文保留并追加固定运行规则。"
+  ],
+  "tests": {
+    "agent": "full suite passed; final targeted race passed",
+    "db": "full suite passed",
+    "server": "full suite passed; final Planner/role examples/direct-deferred/noa and permission focused tests passed after final identity guard",
+    "guard": "full suite passed",
+    "build": "go test ./... -run ^$ passed with explicit isolated DSN",
+    "vet": "go vet ./agent ./db ./server passed",
+    "environment": "temporary PostgreSQL 17 container on 127.0.0.1:15439 with separate test databases; no business database used",
+    "coverage": [
+      "unqueried submission",
+      "proactive query and submit",
+      "state-filtered query",
+      "has_more without reading remainder",
+      "failed query does not supply or remove admission rights",
+      "batch partial success",
+      "exact duplicate reuse",
+      "ancestor revoked approval",
+      "pending/blocked/revoked and task isolation via existing regressions",
+      "missing/mismatched Planner identity",
+      "manual-mode rejection",
+      "role-specific real-handler examples direct/deferred",
+      "disabled/coverage-only tools",
+      "prompt migration after old marker, idempotence and custom text preservation",
+      "bootstrap bounds, request revalidation and original history preserved"
+    ]
+  },
+  "scenarios": {
+    "old_add_first_then_recover": {
+      "tools": 3,
+      "mock_model_requests": 4,
+      "gate_denials": 1,
+      "source": "runs-before.txt"
+    },
+    "new_add_first": {
+      "tools": 1,
+      "mock_model_requests": 2,
+      "gate_denials": 0,
+      "source": "server-final.txt"
+    },
+    "new_proactive_query_then_add": {
+      "tools": 2,
+      "mock_model_requests": 3,
+      "failed_retries": 0,
+      "source": "server-final.txt"
+    },
+    "new_supervision_only": {
+      "tools": 0,
+      "mock_model_requests": 1,
+      "failed_retries": 0,
+      "source": "server-final.txt"
+    }
+  },
+  "same_successful_query_then_add_measurements": {
+    "before": [
+      {
+        "nodes": 10,
+        "text_chars": 7065,
+        "text_bytes": 15535,
+        "sql": 32,
+        "tools": 2,
+        "mock_model_requests": 3,
+        "elapsed": "39.966292ms",
+        "allocated_bytes": 622432
+      },
+      {
+        "nodes": 1000,
+        "text_chars": 7070,
+        "text_bytes": 15540,
+        "sql": 32,
+        "tools": 2,
+        "mock_model_requests": 3,
+        "elapsed": "192.853959ms",
+        "allocated_bytes": 447024
+      }
+    ],
+    "after": [
+      {
+        "nodes": 10,
+        "text_chars": 7578,
+        "text_bytes": 16622,
+        "sql": 32,
+        "tools": 2,
+        "mock_model_requests": 3,
+        "elapsed": "122.100625ms",
+        "allocated_bytes": 627456
+      },
+      {
+        "nodes": 1000,
+        "text_chars": 7582,
+        "text_bytes": 16626,
+        "sql": 32,
+        "tools": 2,
+        "mock_model_requests": 3,
+        "elapsed": "129.952708ms",
+        "allocated_bytes": 533920
+      }
+    ]
+  },
+  "notes": [
+    "Mock providers script their choices: tests verify first-request instructions and tool paths, not a real model guarantee to proactively search.",
+    "Normal query-then-add takes two tool calls and three mock requests both before and after. Add-first no longer pays the mandatory failed-submit/query/retry cycle.",
+    "The clearer fixed guidance adds approximately 512 Unicode characters in the 1000-node scenario (7070 -> 7582); no blanket Token saving is claimed. Counts exclude tool schemas and protocol framing.",
+    "No actual model usage or external model calls; characters/bytes are not Token measurements. Runtime and allocations are local synthetic measurements with normal environmental variation.",
+    "All querying remains model-driven. No backend automatic search, forced first tool, schema aliases or permission relaxation were introduced.",
+    "No SDK, original audit/conversation or business schema changes; no Git commit, service restart or deployment performed. Backend rebuild/restart is needed for runtime activation."
+  ]
+}

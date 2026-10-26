@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,5 +23,28 @@ func TestPlannerAssetPromptUsesActualBindings(t *testing.T) {
 		if !strings.Contains(text, "未审批、封禁、撤回或越界") {
 			t.Fatal("approval boundary missing", text)
 		}
+	}
+}
+
+func TestPlannerAssetGuidanceRespectsCoverageOnlySchema(t *testing.T) {
+	base := NewToolSet(nil, "planner").assetSearch()
+	for _, required := range []any{[]string{"untested"}, []any{"untested"}} {
+		schema := deepCopyJSONMap(base.InputSchema())
+		schema["required"] = required
+		tool := DecorateTool(base, "only untested assets", schema)
+		guidance := plannerAssetGuidance([]actool.CoreTool{tool})
+		if !strings.Contains(guidance, "传 untested=true") || strings.Contains(guidance, "普通检索传非空") {
+			t.Fatal(guidance)
+		}
+	}
+	// Coverage-disabled roles must not receive an unusable required selector.
+	ts := NewToolSet(nil, "planner")
+	ts.SetCoverageEnabled(false)
+	schema := deepCopyJSONMap(base.InputSchema())
+	schema["required"] = []any{"untested"}
+	tools := ts.StripCoverageParams([]actool.CoreTool{DecorateTool(base, "only untested", schema)})
+	if len(tools) != 0 {
+		raw, _ := json.Marshal(tools[0].InputSchema())
+		t.Fatal(string(raw))
 	}
 }
