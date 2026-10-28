@@ -196,7 +196,19 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 	if w = req("GET", fmt.Sprintf("/api/exploration/findings/%d/traffic/%d", other.FindingID, first), ""); w.Code != 404 {
 		t.Fatal(w.Code, w.Body)
 	}
-	exportURL := fmt.Sprintf("/api/exploration/findings/export?format=md-zip&scope=selected&ids=%d", f.FindingID)
+	// 导出统一只输出提交版 report：先给 finding 写入一份带技术附录的报告。
+	reportText := "# 测试报告\n\n" +
+		"**漏洞名称：** 测试报告\n" +
+		"**漏洞等级：** 低危\n" +
+		"**漏洞类型：** 测试\n" +
+		"**漏洞URL：** http://evidence.local/\n\n" +
+		"## 详细描述\n测试报告。\n\n" +
+		fmt.Sprintf("## 复现步骤\n证据 #%d：完整请求响应。\n\n", first) +
+		"## 修复方案\n修复。"
+	if _, err := s.m.pg.SetFindingReportVersionByNodeID(context.Background(), *finding.NodeID, reportText, "完整技术明细", nil); err != nil {
+		t.Fatal(err)
+	}
+	exportURL := fmt.Sprintf("/api/exploration/findings/export?format=md-report-zip&scope=selected&ids=%d", f.FindingID)
 	w = req("GET", exportURL, "")
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
@@ -205,9 +217,14 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binaries := 0
-	linked := false
+	reportEntry := false
 	for _, entry := range archive.File {
+		if strings.HasPrefix(entry.Name, "evidence/") {
+			t.Fatal("submission export leaked evidence attachment")
+		}
+		if !strings.HasSuffix(entry.Name, ".md") {
+			continue
+		}
 		r, err := entry.Open()
 		if err != nil {
 			t.Fatal(err)
@@ -217,18 +234,12 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.HasSuffix(entry.Name, "/response.bin") {
-			binaries++
-			if !bytes.Equal(raw, body) {
-				t.Fatal("export changed binary")
-			}
-		}
-		if strings.HasSuffix(entry.Name, ".md") && bytes.Contains(raw, []byte(fmt.Sprintf("evidence/%d/%d/", f.FindingID, third))) {
-			linked = true
+		if bytes.Contains(raw, []byte("测试报告")) && !bytes.Contains(raw, []byte("完整技术明细")) {
+			reportEntry = true
 		}
 	}
-	if binaries != 3 || !linked {
-		t.Fatalf("missing attachments/links: %d %v", binaries, linked)
+	if !reportEntry {
+		t.Fatal("submission export missing report or leaked technical detail")
 	}
 	// Reports can use snapshots with capture stopped and original rows gone.
 	result, err := s.toolGetFindingTraffic().Call(context.Background(), json.RawMessage(fmt.Sprintf(`{"finding_id":"%d"}`, f.FindingID)), nil)
@@ -241,8 +252,9 @@ func TestFindingTrafficAPIAndExport(t *testing.T) {
 	if err = os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if w = req("GET", exportURL, ""); w.Code < 400 || strings.Contains(w.Header().Get("Content-Type"), "zip") {
-		t.Fatal("corrupt export returned an attachment", w.Code)
+	// 导出已只输出提交版 report；证据损坏应先在 staging 阶段失败。
+	if err := s.evidenceStore().StageFindingsExport(context.Background(), []*db.DBFinding{finding}, t.TempDir(), true); err == nil {
+		t.Fatal("corrupt evidence staged for export")
 	}
 }
 
@@ -453,7 +465,20 @@ func TestFindingTrafficUTF8SegmentsAndInheritedWrites(t *testing.T) {
 	if _, err = s.m.traffic.DeleteHost("evidence.local"); err != nil {
 		t.Fatal(err)
 	}
-	result, err := s.toolUpdateFindingReport().Call(ctx, json.RawMessage(fmt.Sprintf(`{"finding_node_id":%d,"evidence_version":1,"report":"## 证据报告\n\n证据 #%d：已验证完整请求响应"}`, f.NodeID, list.Bindings[0].ID)), nil)
+	reportText := "# 测试报告\n\n" +
+		"**漏洞名称：** 测试报告\n" +
+		"**漏洞等级：** 低危\n" +
+		"**漏洞类型：** 测试\n" +
+		"**漏洞URL：** http://evidence.local/\n\n" +
+		"## 详细描述\n测试报告。\n\n" +
+		fmt.Sprintf("## 复现步骤\n证据 #%d：完整请求响应。\n\n", list.Bindings[0].ID) +
+		"## 修复方案\n修复。\n\n" +
+		"<!-- SERIES:TECHNICAL:BEGIN -->\n完整技术明细\n<!-- SERIES:TECHNICAL:END -->"
+	payload, err := json.Marshal(map[string]any{"finding_node_id": f.NodeID, "evidence_version": 1, "report": reportText})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.toolUpdateFindingReport().Call(ctx, payload, nil)
 	if err != nil || result.IsError {
 		t.Fatal(result, err)
 	}
@@ -464,6 +489,12 @@ func TestFindingTrafficUTF8SegmentsAndInheritedWrites(t *testing.T) {
 	if updated.ReportEvidenceVersion != 1 || updated.EvidenceVersion != 1 {
 		t.Fatal("report did not record the read evidence version")
 	}
+	if !strings.Contains(updated.Report, fmt.Sprint(list.Bindings[0].ID)) || strings.Contains(updated.Report, "完整技术明细") {
+		t.Fatal("report split failed", updated.Report)
+	}
+	if !strings.Contains(updated.ReportDetail, "完整技术明细") {
+		t.Fatal("technical detail missing", updated.ReportDetail)
+	}
 	for _, format := range []string{"md-single", "json", "csv"} {
 		w := req("GET", fmt.Sprintf("/api/exploration/findings/export?scope=selected&ids=%d&format=%s", f.FindingID, format), "")
 		if w.Code != 200 {
@@ -471,6 +502,18 @@ func TestFindingTrafficUTF8SegmentsAndInheritedWrites(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), fmt.Sprint(list.Bindings[0].ID)) {
 			t.Fatal("export omitted evidence ID", format)
+		}
+		if format == "json" {
+			var rows []map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("json export rows = %d", len(rows))
+			}
+			if _, ok := rows[0]["report_detail"]; ok {
+				t.Fatal("json export leaked report_detail")
+			}
 		}
 	}
 }

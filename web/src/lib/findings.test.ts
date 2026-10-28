@@ -30,7 +30,9 @@ test("demo exports preserve selected report text and offer real ZIP bytes", () =
   const finding = { ...item("7", "1", "7"), name: "中文漏洞", report: "详细报告", evidence: "证据" };
   const json = mockFindingExport([finding], "json");
   assert.equal(JSON.parse(new TextDecoder().decode(json.bytes))[0].report, "详细报告");
-  assert.match(new TextDecoder().decode(mockFindingExport([finding], "md-single").bytes), /证据/);
+  const single = new TextDecoder().decode(mockFindingExport([finding], "md-single").bytes);
+  assert.match(single, /详细报告/);
+  assert.doesNotMatch(single, /证据/);
   assert.match(new TextDecoder().decode(mockFindingExport([finding], "csv").bytes), /中文漏洞/);
   const bytes = mockFindingExport([finding], "md-zip").bytes;
   const view = new DataView(bytes.buffer);
@@ -38,7 +40,9 @@ test("demo exports preserve selected report text and offer real ZIP bytes", () =
   assert.equal(view.getUint32(bytes.length - 22, true), 0x06054b50);
   const nameSize = view.getUint16(26, true),
     size = view.getUint32(18, true);
-  assert.match(new TextDecoder().decode(bytes.slice(30 + nameSize, 30 + nameSize + size)), /详细报告/);
+  const zipped = new TextDecoder().decode(bytes.slice(30 + nameSize, 30 + nameSize + size));
+  assert.match(zipped, /详细报告/);
+  assert.doesNotMatch(zipped, /证据/);
 });
 test("traffic mock supports versioned atomic edits, order, unlink and read only", () => {
   const store = new MockFindingTraffic();
