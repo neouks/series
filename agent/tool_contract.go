@@ -20,6 +20,14 @@ func ResolveBuiltinTool(t actool.CoreTool, description string, saved map[string]
 	if t.Name() != "list_assets" && t.Name() != "check_target_access" {
 		mergeToolMetadataMode(schema, saved, !contractOwned)
 	}
+	if t.Name() == "asset_search" {
+		// The untested mode requires an explicit selector and a separate grant.
+		// An old saved default would otherwise be injected again by this inner
+		// decorator after the outer role/coverage schema removed the parameter.
+		if prop, ok := nestedMap(schema, "properties", "untested"); ok {
+			delete(prop, "default")
+		}
+	}
 	// These descriptions contain versioned pagination/write protocols. Old saved
 	// text must not replace the current contract (e.g. "all findings").
 	if contractOwned {

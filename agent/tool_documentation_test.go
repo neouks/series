@@ -102,3 +102,48 @@ func TestStoredNestedDefaultsAreNotAdvertisedAsInjected(t *testing.T) {
 		t.Fatal("uninjected nested defaults advertised", string(got))
 	}
 }
+
+func TestContextSearchExplicitSelectorsSurviveDefaultInjection(t *testing.T) {
+	tool := NewToolSet(nil, "planner").contextSearch()
+	saved := obj(map[string]any{
+		"q": str("keyword"), "state": str("status"), "severity": str("level"),
+	})
+	props := saved["properties"].(map[string]any)
+	for k, v := range map[string]string{"q": "default keyword", "state": "running", "severity": "high"} {
+		props[k].(map[string]any)["default"] = v
+	}
+	resolved := ResolveBuiltinTool(tool, "", saved)
+	for _, input := range []string{
+		`{"types":["intent"],"q":"","state":"","severity":""}`,
+		`{"types":["intent"],"q":null,"state":null,"severity":null}`,
+	} {
+		raw, err := PrepareToolInput(resolved, json.RawMessage(input))
+		if err != nil {
+			// Validation may reject null; it must never turn it into a filter.
+			if !strings.Contains(input, "null") {
+				t.Fatal(err)
+			}
+			continue
+		}
+		var got, original map[string]json.RawMessage
+		json.Unmarshal(raw, &got)
+		json.Unmarshal([]byte(input), &original)
+		for _, key := range []string{"q", "state", "severity"} {
+			if string(got[key]) != string(original[key]) {
+				t.Fatal("explicit selector overwritten", key, string(raw))
+			}
+		}
+		if strings.Contains(input, "null") {
+			result, err := resolved.Call(t.Context(), raw, nil)
+			if err != nil || !result.IsError || !strings.Contains(result.Flatten(), "null") {
+				t.Fatal("null selector accepted", err, result.Flatten())
+			}
+		}
+	}
+	// Other tools retain their existing empty/default compatibility behavior.
+	other := DecorateTool(NewToolSet(nil, "").addHint(), "", obj(map[string]any{"text": map[string]any{"type": "string", "default": "hint"}}))
+	raw, err := PrepareToolInput(other, json.RawMessage(`{"text":""}`))
+	if err != nil || !strings.Contains(string(raw), `"text":"hint"`) {
+		t.Fatal("unrelated defaults changed", string(raw), err)
+	}
+}

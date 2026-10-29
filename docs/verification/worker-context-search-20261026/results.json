@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-26",
+  "reported_role": "worker",
+  "reported_input": {
+    "q": "hsaxh",
+    "types": [
+      "fact",
+      "finding"
+    ],
+    "limit": 50
+  },
+  "root_cause": "The default Worker grants permit finding and activity search, not fact search. The role-filtered enum rejected types[0]. The keyword, limit, and mixed-search implementation are valid. This is an authorization restriction with ambiguous diagnostics, not a reason to grant additional access.",
+  "changes": [
+    "Generic enum errors list bounded schema choices without echoing rejected input.",
+    "context_search validates its final role schema at both hook and execution boundaries, independently of finding-traffic binding and direct/deferred dispatch.",
+    "The tool description no longer names fact/finding/intent as generic defaults for every role; it refers to the actual scope-specific types description. Fixed guidance explicitly limits mixed queries to the current enum."
+  ],
+  "permissions": "No defaults, bindings, saved grants or migrations changed. All requested types must be authorized; unauthorized types are never silently removed. Explicitly authorized fact/finding mixed queries still succeed. Revoked assets and unrelated tasks remain inaccessible.",
+  "regressions": [
+    "TestEnumInputErrorShowsAllowedValuesWithoutEchoingInput",
+    "TestWorkerContextSearchSchemaRejectsUnsupportedTypeBeforeExecution",
+    "TestWorkerContextSearchThroughSDK: 8 combinations of default/explicit fact permission, traffic binding on/off, direct/deferred; four searches each, including the exact reported request, allowed finding search, omitted types and cross-task denial. Revoked and foreign-task findings are excluded."
+  ],
+  "verification": {
+    "environment": "PostgreSQL 17 disposable container series-worker-context-review-20261026 on 127.0.0.1:15439; separate package databases with explicit SERIES_PG_DSN; simulated local model only.",
+    "red_tests": "The diagnostic and role-description regression tests failed before the fixes.",
+    "sdk_focused": "passed, 1.597s",
+    "agent_full": "passed, 66.621s",
+    "db_full": "passed, 66.341s",
+    "guard_full": "passed, 1.060s",
+    "server_full_final": "passed, 35.302s",
+    "intermediate_failure": "Initial validation wrapping also changed when legacy asset_search rejects a missing selector. Limited the new preflight wrapper to context_search; the unchanged asset migration regression and full Server suite then passed.",
+    "agent_focused_race": "passed, 1.630s",
+    "server_focused_race": "passed, 2.408s",
+    "build": "go build ./... passed",
+    "vet": "go vet ./agent ./server passed",
+    "diff_check": "passed"
+  },
+  "limits": [
+    "Real models are guided by the clarified schema; tests do not guarantee they never request an unauthorized type.",
+    "Existing Planner review edits were preserved. No Git commit, production database mutation, service restart or SDK change.",
+    "Worker still needs an explicit fact search grant to search fact; without it, use finding search or permitted context_get reads of known references. Backend rebuild/restart is needed to apply code changes."
+  ]
+}

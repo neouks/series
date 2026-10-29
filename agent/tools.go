@@ -283,6 +283,9 @@ func (t *ToolSet) StripCoverageParams(tools []actool.CoreTool) []actool.CoreTool
 			}
 			if props, ok := nestedMap(schema, "properties"); ok {
 				delete(props, "untested")
+				if dsl, ok := props["dsl"].(map[string]any); ok {
+					dsl["description"] = "必填非空筛选表达式，如 ip==192.0.2.1；type是独立参数，不写入dsl"
+				}
 			}
 			schema["required"] = []string{"dsl"}
 			desc = "检索当前角色授权可见的资产摘要，必须提供非空dsl；本任务已关闭覆盖度，不提供未测试筛选。默认页长见limit.default，最多50条；保持筛选条件用next_offset续页。任务范围及资产审批过滤仍生效。"
@@ -471,7 +474,7 @@ func jsonResult(v any) (actool.Result, error) {
 // --- read tools (planner + worker) ---
 
 func (t *ToolSet) graphOverview() actool.CoreTool {
-	return readTool("graph_overview", "任务态势窗口。sections给出shown、has_more（null表示未知）及读取入口；省略字段按omitted_fields读取，未展示不代表不存在。Planner每轮已预取，仅需刷新时调用。", obj(map[string]any{"task_id": contextTaskSchema()}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
+	return readTool("graph_overview", "按需读取有界任务态势窗口。sections给出shown、has_more（null表示未知）及读取入口；省略字段按omitted_fields读取，未展示不代表不存在。Planner默认仅获得轻量图引导；需要整体态势时调用，不必每轮重复读取。", obj(map[string]any{"task_id": contextTaskSchema()}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			TaskID contextTaskID `json:"task_id"`
 		}

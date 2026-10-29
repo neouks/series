@@ -7,8 +7,10 @@ import (
 
 // injectDefaults fills scalar parameter defaults declared in the (possibly edited)
 // schema into the input JSON whenever the model omitted the field or left it empty/
-// null. Structure (names/types/required) is untouched — only缺省值 are merged in.
-func injectDefaults(in json.RawMessage, schema map[string]any) json.RawMessage {
+// null. missingOnly preserves explicit values for selectors whose empty strings
+// remove a filter; their invalid null inputs remain for the handler to reject.
+// Structure (names/types/required) is untouched — only defaults are merged in.
+func injectDefaults(in json.RawMessage, schema map[string]any, missingOnly bool) json.RawMessage {
 	defs := scalarDefaults(schema)
 	if len(defs) == 0 {
 		return in
@@ -25,7 +27,7 @@ func injectDefaults(in json.RawMessage, schema map[string]any) json.RawMessage {
 	}
 	changed := false
 	for k, dv := range defs {
-		if cur, ok := m[k]; !ok || isEmptyJSON(cur) {
+		if cur, ok := m[k]; !ok || (!missingOnly && isEmptyJSON(cur)) {
 			m[k] = dv
 			changed = true
 		}

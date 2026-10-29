@@ -37,7 +37,13 @@ func validateBusinessBounds(schema map[string]any, value any, path string) error
 			found = found || reflect.DeepEqual(allowed, value)
 		}
 		if !found {
-			return fmt.Errorf("%s: unsupported value", path)
+			// Report the schema's choices, not the rejected input (which may
+			// contain secrets). Role-filtered enums need actionable diagnostics.
+			choices, err := json.Marshal(values)
+			if err == nil && len(choices) <= 512 {
+				return fmt.Errorf("%s: unsupported value; allowed values: %s", path, choices)
+			}
+			return fmt.Errorf("%s: unsupported value; see the parameter's enum for allowed values", path)
 		}
 	}
 	check := func(n float64, low, high string) error {

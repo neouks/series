@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-26",
+  "reviewed_commit": "b76c684e4ea686c3bef905e329b817820d3c0290",
+  "status": "fixed and verified; uncommitted",
+  "findings": [
+    {
+      "priority": "P2",
+      "problem": "A saved asset_search untested=true default was re-injected by an inner tool decorator after the role/coverage schema hid that selector. Documented ordinary asset searches could fail with an untested permission or disabled-coverage error.",
+      "fix": "The capability-sensitive untested selector now requires an explicit value; its stored default is ignored. Other valid defaults such as limit remain effective. Disabled-coverage DSL instructions no longer say the DSL may be omitted.",
+      "regression": "TestAssetSearchModeMustBeExplicit: four role/coverage combinations failed before the fix; all pass through direct and deferred calls. Explicit untested requests still require permission and enabled coverage."
+    },
+    {
+      "priority": "P2",
+      "problem": "The search instructions said to omit state for cross-state deduplication, but an administrator-configured state default still filtered results. Explicit state=empty was also overwritten by default injection, silently hiding queued or historical directions.",
+      "fix": "context_search applies defaults only to absent fields. Explicit empty q/state/severity remain intact and invalid null values are not converted to valid filters. The fixed Planner guidance and intent-search example use state=empty to remove a configured state filter. Unrelated tools retain their previous default behavior.",
+      "regression": "TestPlannerSearchExampleClearsConfiguredState initially returned one running intent instead of three. After the fix, omitted state still returns the configured running subset, and the documented example returns open/running/done through direct and deferred calls. TestContextSearchExplicitSelectorsSurviveDefaultInjection also covers null rejection and unrelated defaults."
+    },
+    {
+      "priority": "P2",
+      "problem": "Merged role schemas listed local and cross-task types/views together without explaining which scope allowed each capability, or when an activity query required intent_id. Roles with no implicit default types were still shown an optional types field.",
+      "fix": "Parameter descriptions now identify per-scope types, default behavior, activity selectors and reference-specific views. If neither scope has an implicit default search type, the final schema requires types. Existing runtime grants and task isolation are unchanged.",
+      "regression": "TestContextDocumentationSeparatesLocalAndCrossScope, existing role example execution tests, context selector isolation tests, and Planner migration/scope tests pass."
+    },
+    {
+      "priority": "P3",
+      "problem": "graph_overview still claimed that Planner received the overview automatically every round.",
+      "fix": "Its authoritative description now distinguishes the default lightweight bootstrap from an explicitly requested bounded overview; stale stored descriptions cannot replace it.",
+      "regression": "TestGraphOverviewDocumentationIsOnDemand failed before the fix and passes afterwards."
+    }
+  ],
+  "security_and_behavior_review": {
+    "old_gate": "No executable query ledger, checkPlannerSearch, recordPlannerSearch, beforeCreate callback or search_required error response remains. The remaining search_required text only corrects stale historical instructions or is a negative test assertion.",
+    "no_search_required": "Legitimate writes succeed without a query, including when the read-grant set is empty; state-filtered and partial-page searches do not affect admission.",
+    "authorization": "Direct and deferred regression cases retain pending/out-of-task rejection, fresh revocation checks, missing/mismatched role/task rejection, manual-mode rejection, per-item success, and no residual rejected intents.",
+    "migration": "The previous default prompt hash in the migration was checked against 05c8e90 and matches ab074edd2c859623145f25ca9f5d7ca24d09f3e3eee9e20cf981f702971d7acf. Existing migration idempotence/custom-prompt preservation tests passed; no migration or grant changes were added.",
+    "bootstrap": "The 8-record/8000-Unicode-character lightweight bootstrap and dynamic asset revalidation remain in place.",
+    "performance": "No extra database queries, automatic searches, model calls or history preloading were introduced. Changes are tool metadata/default handling and regression coverage; no performance or Token reduction claim is made."
+  },
+  "verification": {
+    "database_environment": "Disposable PostgreSQL 17 container on 127.0.0.1:15439 with separate agent/db/server/guard databases and explicit SERIES_PG_DSN. Business databases and services were not used.",
+    "toolchain": "Locally cached official Go 1.26.3 with GOTOOLCHAIN=local",
+    "agent_full": "passed, 59.112s; agent-full.txt",
+    "server_full": "passed, 27.940s; server-full.txt",
+    "db_full": "passed, 41.186s; db-full.txt",
+    "guard_full": "passed, 1.358s; guard-full.txt",
+    "agent_focused_race": "passed, 5.856s; agent-race.txt",
+    "server_focused_race": "passed, 3.109s; server-race.txt",
+    "build": "go build ./... passed; build.txt is empty on success",
+    "vet": "go vet ./agent ./server ./db passed; vet.txt is empty on success",
+    "diff_check": "git diff --check passed"
+  },
+  "limits": [
+    "Scripted model tests verify first-input instructions and direct/deferred/noa paths; they do not guarantee a real model will proactively query on every run.",
+    "No official norma SDK changes, frontend changes, business database migration, Git commit, deployment or service restart.",
+    "The pre-existing .DS_Store modification is unrelated and remains untouched. Backend rebuild/restart is required to activate the fixes."
+  ]
+}

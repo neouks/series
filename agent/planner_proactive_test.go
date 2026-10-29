@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -122,7 +123,7 @@ func TestPlannerProactivePromptReplacesGateGuidance(t *testing.T) {
 			t.Fatal(stale)
 		}
 	}
-	for _, guidance := range []string{"准备新增方向时", "仅监督或等待结果", "信息足够后提交", "asset_id", "不要求遍历全图", "查询失败时说明信息缺口"} {
+	for _, guidance := range []string{"准备新增方向时", "仅监督或等待结果", "信息足够后提交", "asset_id", `state=""`, "不要求遍历全图", "查询失败时说明信息缺口"} {
 		if !strings.Contains(text, guidance) {
 			t.Fatal("missing proactive guidance", guidance)
 		}
@@ -133,5 +134,114 @@ func TestPlannerProactivePromptReplacesGateGuidance(t *testing.T) {
 	text = plannerSystem("mission", t.TempDir(), t.TempDir()) + plannerRetrievalRule
 	if !strings.HasPrefix(text, "custom:") || !strings.Contains(text, "替代旧版查询门槛说明") {
 		t.Fatal("custom prompt lost or stale gate uncorrected")
+	}
+}
+
+func TestGraphOverviewDocumentationIsOnDemand(t *testing.T) {
+	tool := NewToolSet(nil, "planner").graphOverview()
+	resolved := ResolveBuiltinTool(tool, "Planner每轮已预取，仅需刷新时调用", nil)
+	if strings.Contains(resolved.Description(), "每轮已预取") || !strings.Contains(resolved.Description(), "按需") {
+		t.Fatal("overview contradicts the lightweight bootstrap", resolved.Description())
+	}
+}
+
+func TestPlannerWithoutSearchDirectDeferredKeepsPermissions(t *testing.T) {
+	d := testDB(t)
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("Planner permission review", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	other, err := d.CreateTask("outside task", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(other.ID)
+	as := d.Assets()
+	asset := func(taskID int64, ip string, approve bool) int64 {
+		t.Helper()
+		id, err := as.UpsertIP(db.UpsertIPReq{IP: ip, TaskID: taskID, AgentDiscovered: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if approve {
+			if err := as.ApproveTaskAssets(taskID, []int64{id}, "test", ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return id
+	}
+	approved := asset(task.ID, "192.0.2.201", true)
+	pending := asset(task.ID, "192.0.2.202", false)
+	foreign := asset(other.ID, "192.0.2.203", true)
+	ts := NewToolSet(d.Exploration(task.ExplorationID), "planner")
+	ts.SetTaskID(task.ID)
+	ts.SetAssetStore(as, d.Companies())
+	// Revoked/disabled search grants no longer prevent legitimate writes, and
+	// they confer no execution rights either. No search is run in this test.
+	ctx := WithContextAccess(WithRunInfo(t.Context(), RunInfo{AgentKey: "planner", TaskID: task.ID}), ContextAccess{})
+	for _, deferred := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferred=%v", deferred), func(t *testing.T) {
+			tool := ResolveBuiltinTool(ts.addIntent(), "old query gate", nil)
+			invoke := func(ctx context.Context, input any) actool.Result {
+				t.Helper()
+				raw, _ := json.Marshal(input)
+				var result actool.Result
+				var err error
+				if deferred {
+					raw, _ = json.Marshal(map[string]any{"tool_name": "add_intent", "params": json.RawMessage(raw)})
+					result, err = actool.NewExecuteExtraTool(actool.NewRegistry(tool), nil).Call(ctx, raw, nil)
+				} else {
+					result, err = tool.Call(ctx, raw, nil)
+				}
+				if err != nil || strings.Contains(result.Flatten(), "search_required") {
+					t.Fatal(err, result.Flatten())
+				}
+				return result
+			}
+			items := []any{}
+			for _, id := range []int64{approved, pending, foreign} {
+				items = append(items, map[string]any{"summary": fmt.Sprintf("review %v/%d", deferred, id), "asset_ids": []int64{id}})
+			}
+			r := invoke(ctx, map[string]any{"intents": items})
+			var batch struct {
+				IDs    []int64           `json:"ids"`
+				Errors map[string]string `json:"errors"`
+			}
+			if err := json.Unmarshal([]byte(r.Flatten()), &batch); err != nil || len(batch.IDs) != 3 || batch.IDs[0] <= 0 || batch.IDs[1] != 0 || batch.IDs[2] != 0 || len(batch.Errors) != 2 {
+				t.Fatal(err, r.Flatten())
+			}
+			// A completed read/previous success is never a lasting authorization.
+			if err := as.RevokeTaskAssets(task.ID, []int64{approved}, "test", ""); err != nil {
+				t.Fatal(err)
+			}
+			if r := invoke(ctx, items[0]); !r.IsError {
+				t.Fatal("reused approved ID bypassed revocation", r.Flatten())
+			}
+			if err := as.ApproveTaskAssets(task.ID, []int64{approved}, "test", ""); err != nil {
+				t.Fatal(err)
+			}
+			for _, ri := range []RunInfo{{}, {AgentKey: "planner", TaskID: other.ID}, {AgentKey: "worker", TaskID: task.ID}} {
+				// WithRunInfo merges attribution; start without the valid run so
+				// the empty case really tests missing identity.
+				if r := invoke(WithContextAccess(WithRunInfo(t.Context(), ri), ContextAccess{}), items[0]); !r.IsError {
+					t.Fatal("invalid role/context accepted", ri, r.Flatten())
+				}
+			}
+			if _, err := ts.ts.SetExecutionMode(db.ExecutionManual); err != nil {
+				t.Fatal(err)
+			}
+			if r := invoke(ctx, items[0]); !r.IsError {
+				t.Fatal("manual mode bypass", r.Flatten())
+			}
+			if _, err := ts.ts.SetExecutionMode(db.ExecutionManaged); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	intents, err := ts.ts.ListByKind(db.KindIntent, 100)
+	if err != nil || len(intents) != 2 {
+		t.Fatal("denied items left residual intents", len(intents), err)
 	}
 }

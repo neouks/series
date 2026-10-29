@@ -15,7 +15,7 @@ import (
 const plannerBootstrapRunes = 8000
 const plannerRetrievalRule = `
 【Planner 主动检索流程，替代旧版查询门槛说明】本轮图引导只是任务信息、授权计数、事件和少量相关摘要，不是完整探索图。准备新增方向时，先主动用 context_search 查询相关 intent，比较正在处理和历史方向，再按需要补读 goal/hint/fact/finding/digest。仅监督或等待结果时复用已有上下文，不必固定查询。缺少展示不代表不存在，不能只凭计数判定目标完成。
-已知资产 ID 直接用于 context_search.asset_id；仅身份不明确时用 asset_search，缺字段时才用 asset_get。正文按 context_get 的 read/next 读取。查重优先不限制状态，监督可按 state 筛选；has_more 只表示未展示完，按需收窄或续页，不要求遍历全图或逐资产补齐查询证明。信息足够后提交，不能靠先提交报错获取查询用法。
+已知资产 ID 直接用于 context_search.asset_id；仅身份不明确时用 asset_search，缺字段时才用 asset_get。正文按 context_get 的 read/next 读取。查重优先不限制状态，传 state="" 清除可能配置的默认状态；监督可按 state 筛选。has_more 只表示未展示完，按需收窄或续页，不要求遍历全图或逐资产补齐查询证明。信息足够后提交，不能靠先提交报错获取查询用法。
 平台不以是否查询、查询关键词或分页完成度作为 add_intent 的准入条件；不要遵循旧历史中的 search_required 补查循环。查询失败时说明信息缺口，避免无依据的结论，不重复相同错误请求。工具绑定、资产审批、任务隔离、用户取消及禁报约束继续生效；手工模式停用 Planner。`
 
 // Called by the trusted host during assembly, before any model/tool execution.

@@ -1,0 +1,22 @@
+=== RUN   TestWorkerContextSearchThroughSDK
+2026/10/26 23:07:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:07:33 [mcp] playwright MCP 已移除捕获代理配置
+=== RUN   TestWorkerContextSearchThroughSDK/fact=false/binding=false/deferred=false
+=== RUN   TestWorkerContextSearchThroughSDK/fact=false/binding=false/deferred=true
+=== RUN   TestWorkerContextSearchThroughSDK/fact=false/binding=true/deferred=false
+=== RUN   TestWorkerContextSearchThroughSDK/fact=false/binding=true/deferred=true
+=== RUN   TestWorkerContextSearchThroughSDK/fact=true/binding=false/deferred=false
+=== RUN   TestWorkerContextSearchThroughSDK/fact=true/binding=false/deferred=true
+=== RUN   TestWorkerContextSearchThroughSDK/fact=true/binding=true/deferred=false
+=== RUN   TestWorkerContextSearchThroughSDK/fact=true/binding=true/deferred=true
+--- PASS: TestWorkerContextSearchThroughSDK (1.52s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=false/binding=false/deferred=false (0.48s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=false/binding=false/deferred=true (0.08s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=false/binding=true/deferred=false (0.10s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=false/binding=true/deferred=true (0.07s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=true/binding=false/deferred=false (0.10s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=true/binding=false/deferred=true (0.07s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=true/binding=true/deferred=false (0.07s)
+    --- PASS: TestWorkerContextSearchThroughSDK/fact=true/binding=true/deferred=true (0.07s)
+PASS
+ok  	github.com/neouks/series/server	1.597s

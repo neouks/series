@@ -34,6 +34,30 @@ func TestContextDocumentationMatchesRoleViews(t *testing.T) {
 	}
 }
 
+func TestContextDocumentationSeparatesLocalAndCrossScope(t *testing.T) {
+	ts := agent.NewToolSet(nil, "test")
+	policy := agent.ContextAccess{Local: []string{"goal", "activity", "output"}, Cross: []string{"finding", "activity_all", "activity_detail"}}
+	tool := applyContextPolicy(ts.ContextSearchTool(), policy)
+	props := tool.InputSchema()["properties"].(map[string]any)
+	desc := props["types"].(map[string]any)["description"].(string)
+	local, cross, ok := strings.Cut(desc, "其他任务（指定task_id）")
+	if !ok || !strings.Contains(local, "无默认类型，必须提供types") || !strings.Contains(local, "指定intent_id") || strings.Contains(local, "finding") || !strings.Contains(cross, "省略types时查询finding") || !strings.Contains(cross, "省略intent_id") {
+		t.Fatal("scope-dependent usage is missing", desc)
+	}
+	tool = applyContextPolicy(ts.ContextGetTool(), policy)
+	item := tool.InputSchema()["properties"].(map[string]any)["items"].(map[string]any)["items"].(map[string]any)
+	desc = item["properties"].(map[string]any)["view"].(map[string]any)["description"].(string)
+	if !strings.Contains(desc, "本任务可用node: output") || !strings.Contains(desc, "其他任务（指定task_id）可用activity: detail") {
+		t.Fatal("view grant scopes conflated", desc)
+	}
+	// Without any implicit default type, the final schema must ask for types.
+	tool = applyContextPolicy(ts.ContextSearchTool(), agent.ContextAccess{Local: []string{"goal", "activity"}})
+	result, err := tool.Call(t.Context(), json.RawMessage(`{}`), nil)
+	if err != nil || !result.IsError || !strings.Contains(result.Flatten(), "types") {
+		t.Fatal("missing types reached the handler", err, result.Flatten())
+	}
+}
+
 func TestHostToolDocumentationHasNoRetiredEntrypoints(t *testing.T) {
 	s := &Server{}
 	for _, tool := range append(s.orchestrationTools(), s.platformTools()...) {

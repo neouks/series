@@ -137,7 +137,9 @@ func (o *overriddenTool) InputSchema() map[string]any { return o.schema }
 func (o *overriddenTool) AcceptsRawInput() bool { return true }
 
 func (o *overriddenTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
-	resolved := injectDefaults(in, o.schema)
+	// Search's explicit empty q/state/severity clear filters. Replacing them
+	// with configured defaults can silently omit existing planning directions.
+	resolved := injectDefaults(in, o.schema, o.Name() == "context_search")
 	return resolved, validateBusinessInput(o.validation, resolved)
 }
 

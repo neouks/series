@@ -41,6 +41,36 @@ func TestContextPolicySchemaAndRuntimeBoundaries(t *testing.T) {
 	}
 }
 
+func TestWorkerContextSearchSchemaRejectsUnsupportedTypeBeforeExecution(t *testing.T) {
+	ts := agent.NewToolSet(nil, "worker")
+	tool := applyContextPolicy(agent.ResolveBuiltinTool(ts.ContextSearchTool(), "", nil), defaultContextAccess("worker"))
+	if strings.Contains(tool.Description(), "默认查询有权限的 fact/finding/intent") {
+		t.Fatal("role description still suggests types unavailable to Worker")
+	}
+	// Without the evidence workflow decorator this used to pass preflight, then
+	// fail in the handler with a different error. Both paths must agree.
+	for _, wrapped := range []bool{false, true} {
+		candidate := tool
+		if wrapped {
+			candidate = agent.DecorateTool(tool, tool.Description(), tool.InputSchema())
+		}
+		input := json.RawMessage(`{"q":"hsaxh","types":["fact","finding"],"limit":50}`)
+		_, err := agent.PrepareToolInput(candidate, input)
+		if err == nil || !strings.Contains(err.Error(), `allowed values: ["finding","activity"]`) {
+			t.Fatalf("wrapped=%v: missing role-specific choices: %v", wrapped, err)
+		}
+		result, err := candidate.Call(t.Context(), input, nil)
+		if err != nil || !result.IsError || !strings.Contains(result.Flatten(), `allowed values: ["finding","activity"]`) {
+			t.Fatalf("wrapped=%v: execution boundary disagrees: %v %s", wrapped, err, result.Flatten())
+		}
+		for _, permitted := range []string{`{"q":"hsaxh","limit":50}`, `{"q":"hsaxh","types":["finding"],"limit":50}`} {
+			if _, err := agent.PrepareToolInput(candidate, json.RawMessage(permitted)); err != nil {
+				t.Fatalf("valid query refused: %v", err)
+			}
+		}
+	}
+}
+
 func TestContextTaskSelectorThroughPolicyAndCatalog(t *testing.T) {
 	dsn, _, err := db.DSN()
 	if err != nil {

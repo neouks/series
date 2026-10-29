@@ -1,0 +1,762 @@
+2026/10/26 23:08:13 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:13 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:13 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:13 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:13 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:14 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:14 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:14 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:14 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:14 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:14 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:14 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:14 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:14 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:14 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:15 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:15 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:15 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:15 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:15 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:15 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingReportToolScopeAndEvidenceIDCompatibility626338265/004/jwt.key
+2026/10/26 23:08:15 [btw] recover: context canceled
+2026/10/26 23:08:16 [reporter] 已预置「报告撰写」agent + finding 触发器
+2026/10/26 23:08:16 [custom-tool] 自动检测到 python 解释器: /opt/homebrew/bin/python3
+2026/10/26 23:08:16 [engine] no LLM provider configured — engine idle until set via /api/llm or env
+2026/10/26 23:08:16 [task-archive] worker: context canceled
+2026/10/26 23:08:17 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:17 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:17 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestReporterDefaultPromptUpgradeUsesCurrentParameter1210208062/004/jwt.key
+2026/10/26 23:08:17 [btw] recover: context canceled
+2026/10/26 23:08:17 [engine] no LLM provider configured — engine idle until set via /api/llm or env
+2026/10/26 23:08:17 [task-archive] worker: context canceled
+2026/10/26 23:08:17 [task-archive] worker: context canceled
+2026/10/26 23:08:17 [reporter] 触发消息已升级为读取并回传 evidence_version
+2026/10/26 23:08:17 [reporter] 触发消息已升级为读取并回传 evidence_version
+2026/10/26 23:08:17 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:17 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:17 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestChatUnavailableReasonDistinguishesStates1535813580/002/jwt.key
+2026/10/26 23:08:17 [engine] no LLM provider configured — engine idle until set via /api/llm or env
+2026/10/26 23:08:17 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:17 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:17 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:17 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestResolveChatAgentHonoursConversationProfile2738979955/002/jwt.key
+2026/10/26 23:08:17 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:18 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:18 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:18 [worker chat] task 18 意图 #29 结束: done (写回 事实0 资产0 漏洞0)
+2026/10/26 23:08:18 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:18 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:19 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:19 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:19 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestCoreTaskLifecyclePG2028608832/002/jwt.key
+2026/10/26 23:08:19 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:19 [task] 新建任务 #20 «smoke» 目标: 测试 SQLi/XSS
+2026/10/26 23:08:19 [seed] task 20: 未能从 "smoke 测试 SQLi/XSS" 解析出目标 host/IP，不创建站点（请手动配置 scope）
+2026/10/26 23:08:19 [goals] task 20: LLM 目标拆解无产出，回退为「原始目标作为单目标」
+2026/10/26 23:08:19 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:19 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:19 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:19 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:20 [work worker-1 · #1] 空转回合(仅思考、无正文无工具)，注入续跑指令 (1/2)
+2026/10/26 23:08:20 [work ] 空转回合(仅思考、无正文无工具)，注入续跑指令 (1/5)
+2026/10/26 23:08:20 [work ] 空转回合(仅思考、无正文无工具)，注入续跑指令 (2/5)
+2026/10/26 23:08:20 [work ] 空转回合(仅思考、无正文无工具)，注入续跑指令 (3/5)
+2026/10/26 23:08:20 [work ] 空转回合(仅思考、无正文无工具)，注入续跑指令 (4/5)
+2026/10/26 23:08:20 [work ] 空转回合(仅思考、无正文无工具)，注入续跑指令 (5/5)
+2026/10/26 23:08:20 [work ] 空转回合(仅思考、无正文无工具)已达续跑上限 5，放行收场
+2026/10/26 23:08:20 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:20 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:20 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:20 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:20 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:20 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:21 [deadline] task 22 到达超时上限,进入收尾时序
+2026/10/26 23:08:21 [deadline] task 22 收尾完成,终态=timeout
+2026/10/26 23:08:21 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:21 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:21 [deadline] task 23 首次运行,截止于 2026-10-26 23:09:21
+2026/10/26 23:08:21 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:21 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:21 [deadline] task 24 首次运行,截止于 2026-10-26 23:09:21
+2026/10/26 23:08:21 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:21 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:21 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:21 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:21 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:21 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:21 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:21 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:21 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:21 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:21 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:21 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:22 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:22 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:22 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:22 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:22 [task] #30 批量重开 1 条 blocked 意图
+2026/10/26 23:08:22 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:22 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:22 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:22 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:23 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:23 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:23 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:23 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:24 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:24 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:24 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:24 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:24 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:24 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:24 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:24 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:24 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:24 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:25 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:25 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:25 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:25 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:25 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:25 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:25 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:25 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:25 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:25 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:25 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:25 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:26 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:26 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:26 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:26 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:26 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:26 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:26 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:26 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:26 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:26 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:26 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:26 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:26 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:27 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:27 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:27 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:27 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:27 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:27 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:27 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:27 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:27 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:27 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:27 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:27 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:27 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:28 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:28 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:28 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:28 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:28 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:28 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:28 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:28 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:28 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:28 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:28 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:29 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:29 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:29 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:29 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:29 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:29 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingTrafficToolUpgradePreservesCustomization500750073/004/jwt.key
+2026/10/26 23:08:29 [btw] recover: context canceled
+2026/10/26 23:08:29 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:29 [task-archive] worker: context canceled
+2026/10/26 23:08:29 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:29 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:29 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:29 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:29 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:29 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:30 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingTrafficAPIAndExport707408646/004/jwt.key
+2026/10/26 23:08:30 [btw] recover: context canceled
+2026/10/26 23:08:30 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:30 [task-archive] worker: context canceled
+2026/10/26 23:08:30 [task-archive] worker: context canceled
+2026/10/26 23:08:30 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:30 [planner] task 56 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:30 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:30 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingTrafficArchiveV3RoundTripAndRetry3341594243/004/jwt.key
+2026/10/26 23:08:30 [btw] recover: context canceled
+2026/10/26 23:08:30 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:30 [task-archive] worker: context canceled
+2026/10/26 23:08:30 [task-archive] worker: context canceled
+2026/10/26 23:08:30 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:30 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:30 [manager] reloaded 1 task(s) from PG
+2026/10/26 23:08:31 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:31 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:31 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingTrafficFailedReportDoesNotTrigger3668926377/004/jwt.key
+2026/10/26 23:08:31 [btw] recover: context canceled
+2026/10/26 23:08:31 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:31 [task-archive] worker: context canceled
+2026/10/26 23:08:31 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:31 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:31 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingTrafficUTF8SegmentsAndInheritedWrites3152912288/004/jwt.key
+2026/10/26 23:08:31 [btw] recover: context canceled
+2026/10/26 23:08:31 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:31 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:31 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:31 [task-archive] worker: context canceled
+2026/10/26 23:08:31 [task-archive] worker: context canceled
+2026/10/26 23:08:31 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:31 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:31 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:32 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:32 [planner] task 60 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:32 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingWorkflowAutoHintToPlannerAndSetting3695888095/004/jwt.key
+2026/10/26 23:08:32 [btw] recover: context canceled
+2026/10/26 23:08:32 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:32 [task-archive] worker: context canceled
+2026/10/26 23:08:32 [task-archive] worker: context canceled
+2026/10/26 23:08:32 [planner] task 61 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:32 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:32 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:32 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:33 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:33 [planner] task 63 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:33 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingWorkflowMigrationPreservesUserConfiguration3667002819/004/jwt.key
+2026/10/26 23:08:33 [btw] recover: context canceled
+2026/10/26 23:08:33 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:33 [task-archive] worker: context canceled
+2026/10/26 23:08:33 [task-archive] worker: context canceled
+2026/10/26 23:08:33 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:33 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:33 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:33 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:33 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingWorkflowReporterBindsBeforeWritingReport34187563/004/jwt.key
+2026/10/26 23:08:33 [btw] recover: context canceled
+2026/10/26 23:08:33 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:33 [task-archive] worker: context canceled
+2026/10/26 23:08:33 [task-archive] worker: context canceled
+2026/10/26 23:08:33 [mcp] playwright MCP 已挂捕获代理 http://127.0.0.1:0 (CA /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestFindingWorkflowReporterBindsBeforeWritingReport34187563/001/traffic/_ca/mitmproxy-ca-cert.pem)
+2026/10/26 23:08:33 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:33 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:34 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:34 [planner] task 65 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:34 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:34 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:34 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:34 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:34 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:34 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:34 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:35 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:35 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:35 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:35 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:35 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestInheritedActivityDetailAndRelationDeletion4149729517/004/jwt.key
+2026/10/26 23:08:35 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:35 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:35 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:35 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:36 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:36 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:36 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:36 [planner] task 72 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:36 [planner] task 71 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:36 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:36 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:36 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:36 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:36 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:36 [worker worker] task 78 意图 #159 已停止，等待登记用户取消
+2026/10/26 23:08:36 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:37 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:37 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:37 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:37 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:37 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:37 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:37 [task] #82 意图 #171 已重开(重跑)
+2026/10/26 23:08:37 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:37 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:37 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:37 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:37 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:37 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:38 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:38 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:38 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:38 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:38 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:38 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:38 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:39 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:39 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:39 [seed] task 85: 目标站点 https://seed.example.test
+2026/10/26 23:08:39 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:39 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:39 [mcusage] insert demo/login: ledger unavailable
+2026/10/26 23:08:39 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:39 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:39 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestMgmtAPI3822657448/002/jwt.key
+2026/10/26 23:08:39 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:39 [manager] reloaded 2 task(s) from PG
+2026/10/26 23:08:39 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:39 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:39 [mcp] t-itest 添加后工具发现失败: exec: "x": executable file not found in $PATH
+2026/10/26 23:08:39 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:39 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:39 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:39 [task-archive] worker: sql: database is closed
+--- FAIL: TestPlannerAssetSearchMigratedCallAndScope (0.23s)
+    planner_asset_search_test.go:104: input: missing required property "untested"
+2026/10/26 23:08:40 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:40 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:40 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:40 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:40 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:40 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:40 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:41 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:41 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:41 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:41 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:41 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:41 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:41 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:41 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:41 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:41 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:41 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:41 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:41 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:41 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:41 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:42 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:42 [toolusage] shell gogo: ledger unavailable
+2026/10/26 23:08:42 [toolusage] insert Bash: ledger unavailable
+2026/10/26 23:08:42 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:42 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:42 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:42 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:42 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:42 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:42 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:42 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:42 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:42 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:43 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:43 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:43 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:43 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:43 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:43 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:43 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:43 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:43 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:43 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:43 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:43 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:44 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:44 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:44 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:44 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:44 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:44 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:44 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:44 [manager] reloaded 2 task(s) from PG
+2026/10/26 23:08:44 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:44 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:44 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:45 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:45 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:45 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:45 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:45 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:45 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:45 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:45 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:45 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:45 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:45 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:45 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:45 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:46 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:46 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:46 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:46 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:46 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:46 [task] #113 已继续
+2026/10/26 23:08:46 [task] #113 已暂停
+2026/10/26 23:08:46 [task] #113 已继续
+2026/10/26 23:08:46 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:46 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:46 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:46 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:46 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:46 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:46 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:46 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:47 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:47 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:47 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:47 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:47 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:47 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:47 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:47 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:47 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:47 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:47 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:47 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:47 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:47 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:47 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:47 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:48 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:48 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:48 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:48 [task] #125 已暂停
+2026/10/26 23:08:48 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:48 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:48 [task] #126 已暂停
+2026/10/26 23:08:48 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:48 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:48 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestTaskArchiveAPIQueueListAndLimits2802599754/002/jwt.key
+2026/10/26 23:08:48 [btw] recover: context canceled
+2026/10/26 23:08:48 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:48 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:48 [manager] reloaded 3 task(s) from PG
+2026/10/26 23:08:48 [task-archive] worker: context canceled
+2026/10/26 23:08:48 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:48 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:49 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:49 [planner] task 127 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:49 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:49 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestTaskCategoryBatchRoute2612784128/002/jwt.key
+2026/10/26 23:08:49 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:49 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:49 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:49 [manager] reloaded 3 task(s) from PG
+2026/10/26 23:08:49 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:49 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:49 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:49 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:50 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:50 [planner] task 124 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:50 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:50 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:50 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestWorkerControlRoutes882515117/002/jwt.key
+2026/10/26 23:08:50 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:50 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:50 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:51 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:51 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:51 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:51 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:51 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:51 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:51 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:51 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:52 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:52 [manager] reloaded 3 task(s) from PG
+2026/10/26 23:08:52 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:52 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:52 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:52 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:52 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:53 [planner] task 124 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:53 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:53 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:53 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:53 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:53 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:53 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:53 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:53 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:53 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:54 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:54 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:54 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:54 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:54 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:54 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:54 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:55 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:55 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:55 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (1/2): openai: status 429: rate limit exceeded
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (2/2): openai: status 429: rate limit exceeded
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (1/2): openai: status 500: internal server error
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (2/2): openai: status 500: internal server error
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (1/2): dial tcp: network is unreachable
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (2/2): dial tcp: network is unreachable
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (1/2): anthropic: overloaded_error
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (2/2): anthropic: overloaded_error
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (1/2): dial tcp: connection reset by peer
+2026/10/26 23:08:55 [task-llm] task 7 提交前流失败,0s 后同 provider 重试 (2/2): dial tcp: connection reset by peer
+2026/10/26 23:08:55 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:55 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:55 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:55 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:55 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:55 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:55 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:55 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:55 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:55 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:55 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:56 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:56 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestTaskMetadataPatchReturnsRenameAndPin246793295/004/jwt.key
+2026/10/26 23:08:56 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:56 [manager] reloaded 7 task(s) from PG
+2026/10/26 23:08:56 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:56 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:56 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:56 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:56 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:56 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:57 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:57 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:57 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestConversationBatchDeleteReportsMissing3682213919/004/jwt.key
+2026/10/26 23:08:57 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:08:57 [manager] reloaded 7 task(s) from PG
+2026/10/26 23:08:57 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:57 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:57 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:57 [task] #140 已暂停
+2026/10/26 23:08:57 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:57 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:57 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:57 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:57 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:57 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:57 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:57 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:58 [planner] task 136 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:58 [planner] task 135 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:58 [planner] task 134 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:58 [planner] task 124 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:08:58 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:58 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:58 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:58 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:58 [task] #140 已继续
+2026/10/26 23:08:58 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:58 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:58 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:58 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:08:58 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:58 [task] #141 已暂停
+2026/10/26 23:08:59 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:59 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:59 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:59 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:59 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:59 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:59 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:59 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:08:59 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:59 [task-archive] worker: sql: database is closed
+2026/10/26 23:08:59 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:08:59 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:00 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:00 [deadline] task 142 到达超时上限,进入收尾时序
+2026/10/26 23:09:00 [deadline] task 142 收尾完成,终态=timeout
+2026/10/26 23:09:00 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:00 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:00 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:00 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:00 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:00 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:00 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:00 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestTaskTemplateHTTPCRUD3450163056/004/jwt.key
+2026/10/26 23:09:00 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:09:00 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:00 [manager] reloaded 7 task(s) from PG
+2026/10/26 23:09:00 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:00 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:00 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:01 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [planner] task 136 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:01 [planner] task 135 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:01 [planner] task 134 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:01 [planner] task 124 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:01 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:01 [auth] 新 JWT key 已写入 /var/folders/tq/nly3h0q967zdnzbnzt6j7wp40000gn/T/TestConversationPatchReturnsPinState3027432864/004/jwt.key
+2026/10/26 23:09:01 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:01 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:01 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:02 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:02 [engine] LLM configured from DB: anthropic / claude-x
+2026/10/26 23:09:02 [manager] reloaded 7 task(s) from PG
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:02 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:02 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:03 [planner] task 136 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:03 [planner] task 135 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [planner] task 124 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:03 [planner] task 134 审批等待状态查询失败: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:03 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:03 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:04 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [tools] seed list_finding_deletion_feedback 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed list_task_assets 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed check_target_access 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed dispatch_intents 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed graph_overview 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed context_search 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed context_get 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed add_hint 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed add_intent 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed cancel_intent 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed steer_work 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed set_goals 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed set_constraints 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed insert_assets 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed add_company_scope 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed asset_search 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed asset_get 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed report_finding 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed record_fact 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed add_task_scope 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed prove_goal 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed kill_work 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed list_companies 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed traffic_search 失败: sql: database is closed
+2026/10/26 23:09:05 [tools] seed traffic_get 失败: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:05 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:05 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:06 [tools] 读取调用统计失败: ERROR: column "tool_key" does not exist (SQLSTATE 42703)
+2026/10/26 23:09:06 [toolusage] insert list_facts: ledger unavailable
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:06 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:07 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:07 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:07 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:08 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:08 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:09 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:09 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:09 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:09 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:09 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:10 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:10 [activity/stream] task=152 replay since=71: context canceled
+2026/10/26 23:09:10 [pg] 数据库配置来源: 环境变量 SERIES_PG_DSN
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:10 [mcp] playwright MCP 已移除捕获代理配置
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [task-archive] worker: sql: database is closed
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+2026/10/26 23:09:10 [worker feedback] read outbox: sql: database is closed
+FAIL
+FAIL	github.com/neouks/series/server	59.201s
+FAIL

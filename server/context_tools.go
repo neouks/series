@@ -64,7 +64,13 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 					defaults = append(defaults, kind)
 				}
 			}
-			prop["description"] = "可选类型：" + strings.Join(allowed, "/") + "；省略时按所选任务权限从 " + strings.Join(defaults, "/") + " 中选择；activity须显式指定"
+			prop["description"] = contextSearchScopeDescription("本任务", p.Local)
+			if len(p.Cross) > 0 {
+				prop["description"] = prop["description"].(string) + "；" + contextSearchScopeDescription("其他任务（指定task_id）", p.Cross)
+			}
+			if len(defaults) == 0 && len(allowed) > 0 {
+				schema["required"] = []any{"types"}
+			}
 		}
 		if len(allowed) > 0 {
 			kind := allowed[0]
@@ -78,6 +84,11 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 				kind = "intent"
 			}
 			example = map[string]any{"types": []string{kind}, "q": "认证"}
+			if kind == "intent" {
+				// Omission may inject a persisted state default. An explicit empty
+				// selector makes this planning example compare all intent states.
+				example["state"] = ""
+			}
 			if kind == "activity" && !slices.Contains(p.Local, "activity_all") {
 				example["intent_id"] = 123
 			}
@@ -132,9 +143,13 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 		}
 		view["description"] = strings.Join(parts, "；")
 		if slices.Contains(views, "detail") {
-			view["description"] = view["description"].(string) + "；省略默认detail"
+			view["description"] = view["description"].(string) + "；省略默认detail，仍须目标任务及引用类型的detail权限"
 		} else {
 			item["required"] = []any{"ref", "view"}
+		}
+		view["description"] = view["description"].(string) + "；" + contextViewScopeDescription("本任务", p.Local)
+		if len(p.Cross) > 0 {
+			view["description"] = view["description"].(string) + "；" + contextViewScopeDescription("其他任务（指定task_id）", p.Cross)
 		}
 		if len(views) > 0 {
 			view, ref := views[0], "node:123"
@@ -162,8 +177,68 @@ func applyContextPolicy(t actool.CoreTool, p agent.ContextAccess) actool.CoreToo
 		encoded, _ := json.Marshal(example)
 		desc += "\n调用示例（ID/关键词按当前上下文替换）：" + string(encoded)
 	}
-	return &contextPolicyTool{CoreTool: t, policy: p, schema: schema, desc: desc}
+	resolved := &contextPolicyTool{CoreTool: t, policy: p, schema: schema, desc: desc}
+	if t.Name() == "context_search" {
+		// Validate the search's role enum before hooks/execution, even when no
+		// later finding-workflow decorator is installed. The handler still checks
+		// the requested task's grants; this union enum is not scope authorization.
+		return agent.DecorateTool(resolved, desc, schema)
+	}
+	return resolved
 }
+
+// The schema enum is a union, but local and cross-task grants are independent.
+// Spell out the scope and the activity selector so the model need not discover
+// these restrictions by making a rejected request.
+func contextSearchScopeDescription(scope string, grants []string) string {
+	types, defaults := []string{}, []string{}
+	for _, kind := range agent.ContextTypes {
+		if kind == "activity" {
+			single, all := slices.Contains(grants, "activity"), slices.Contains(grants, "activity_all")
+			switch {
+			case single && all:
+				types = append(types, kind+"（须显式选择；intent_id可选）")
+			case single:
+				types = append(types, kind+"（须显式选择；指定intent_id）")
+			case all:
+				types = append(types, kind+"（须显式选择；省略intent_id）")
+			}
+		} else if slices.Contains(grants, kind) {
+			types = append(types, kind)
+			if slices.Contains([]string{"fact", "finding", "intent"}, kind) {
+				defaults = append(defaults, kind)
+			}
+		}
+	}
+	if len(types) == 0 {
+		return scope + "无可用检索类型"
+	}
+	text := scope + "可选：" + strings.Join(types, "/")
+	if len(defaults) == 0 {
+		return text + "；此范围无默认类型，必须提供types"
+	}
+	return text + "；此范围省略types时查询" + strings.Join(defaults, "/")
+}
+
+func contextViewScopeDescription(scope string, grants []string) string {
+	views := []string{}
+	if slices.Contains(grants, "detail") {
+		views = append(views, "node: detail/parents")
+	}
+	for _, view := range []string{"output", "members"} {
+		if slices.Contains(grants, view) {
+			views = append(views, "node: "+view)
+		}
+	}
+	if slices.Contains(grants, "activity_detail") {
+		views = append(views, "activity: detail")
+	}
+	if len(views) == 0 {
+		return scope + "无可用读取视图"
+	}
+	return scope + "可用" + strings.Join(views, ", ")
+}
+
 func (s *Server) wireContextReads() {
 	agent.ResolveContextTask = func(ctx context.Context, id string) (*agent.ToolSet, error) {
 		task, ok := s.m.Task(id)

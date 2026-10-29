@@ -17,7 +17,7 @@ import (
 // valid cache prefix, so the boundary is always the number of returned segments.
 const toolAvailabilityRule = "\n\n工具调用以本轮实际提供的名称和参数为准。正文或历史提到但本轮未提供的可选工具不代表可调用；缺少时说明限制，不猜测名称、不反复重试。延迟工具先按发现/解锁流程加载。"
 
-const contextReadRule = "\n读取规则：按本轮工具Schema选择类型和视图。本任务查询省略task_id，source_task_id只是来源标识。context_search用types/q、单个asset_id，按next_cursor续页；context_get用items:[{ref:带类型引用,view:视图}]，优先直接使用搜索返回的read。资产身份不明确用asset_search的dsl及独立type参数，按next_offset续页；已有资产ID复用，缺详情才用asset_get的ids。资产ID与node/activity引用不可混用。has_more表示未展示完，按需缩小范围或续读，不必全量翻页；未查完不能断言不存在。授权以当前角色及执行校验为准。"
+const contextReadRule = "\n读取规则：按本轮工具Schema选择类型和视图；types仅组合枚举内的值，混合查询不会跳过未授权类型。本任务查询省略task_id，source_task_id只是来源标识。context_search用types/q、单个asset_id，按next_cursor续页；context_get用items:[{ref:带类型引用,view:视图}]，优先直接使用搜索返回的read。资产身份不明确用asset_search的dsl及独立type参数，按next_offset续页；已有资产ID复用，缺详情才用asset_get的ids。资产ID与node/activity引用不可混用。has_more表示未展示完，按需缩小范围或续读，不必全量翻页；未查完不能断言不存在。授权以当前角色及执行校验为准。"
 
 func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary int) {
 	sysText += toolAvailabilityRule

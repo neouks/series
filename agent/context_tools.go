@@ -124,9 +124,9 @@ func querySignature(v any) string {
 	return hex.EncodeToString(sum[:12])
 }
 func (t *ToolSet) contextSearch() actool.CoreTool {
-	return readTool("context_search", "按类型检索授权可见的任务上下文摘要和正文，返回命中片段、match_offset及node:ID/activity:ID；read可直接传给context_get，从命中附近读取。默认查询有权限的 fact/finding/intent。activity 只含 Worker 执行记录，需显式选择，可混合查询；混合结果按登记时间倒序，单类按ID倒序。默认10条、最多50条，输出预算可能缩小页长；has_more表示还有未展示结果，按需收窄或用next_cursor续页。本任务省略task_id，资产筛选用单个asset_id，不用dsl或asset_ids。", obj(map[string]any{
+	return readTool("context_search", "按类型检索授权可见的任务上下文摘要和正文，返回命中片段、match_offset及node:ID/activity:ID；read可直接传给context_get，从命中附近读取。仅组合types枚举允许的类型；省略时按当前任务范围的默认类型查询，见types说明。activity只含Worker执行记录，须获授权且显式选择，可混合查询；混合结果按登记时间倒序，单类按ID倒序。默认10条、最多50条，输出预算可能缩小页长；has_more表示还有未展示结果，按需收窄或用next_cursor续页。本任务省略task_id，资产筛选用单个asset_id，不用dsl或asset_ids。", obj(map[string]any{
 		"task_id": contextTaskSchema(), "types": map[string]any{"type": "array", "description": "选择当前角色可用类型；省略时从 fact/finding/intent 中取有权限的类型，activity须显式选择", "items": map[string]any{"type": "string", "enum": ContextTypes}},
-		"q": str("不区分大小写的字面关键词，最多200字符；查摘要及正文（漏洞含报告），空值列出记录，不支持正则"), "asset_id": idp("单个资产ID，不是node引用；多资产可分次按需查"), "intent_id": idp("意图节点ID：查询该意图及其产出；activity查询该Worker记录"), "state": str("节点状态；activity按所属意图状态筛选，如open/running/done/blocked/exhausted/stopped；跨状态查重时省略"), "severity": str("payload.severity精确筛选，如critical/high/medium/low；其他不含该字段的记录也被排除"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("保留原查询条件，传入next_cursor；改变筛选条件时省略cursor开始新查询"),
+		"q": str("不区分大小写的字面关键词，最多200字符；查摘要及正文（漏洞含报告），空值列出记录，不支持正则"), "asset_id": idp("单个资产ID，不是node引用；多资产可分次按需查"), "intent_id": idp("意图节点ID：查询该意图及其产出；activity查询该Worker记录"), "state": str("节点状态；activity按所属意图状态筛选，如open/running/done/blocked/exhausted/stopped；跨状态查重显式传空字符串，覆盖可能配置的default；省略使用default（无default时不筛选）"), "severity": str("payload.severity精确筛选，如critical/high/medium/low；其他不含该字段的记录也被排除"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("保留原查询条件，传入next_cursor；改变筛选条件时省略cursor开始新查询"),
 	}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a contextSearchInput
 		if err := decodeToolInput(raw, &a); err != nil {
