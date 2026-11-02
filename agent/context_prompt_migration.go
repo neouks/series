@@ -23,3 +23,10 @@ var PreviousToolContractPromptHashes = map[string][]string{
 var PreviousPlannerProactivePromptHashes = []string{
 	"ab074edd2c859623145f25ca9f5d7ca24d09f3e3eee9e20cf981f702971d7acf",
 }
+
+// Exact defaults from the proactive-query workflow and its prior query gate.
+// Custom templates are not rewritten; fixed runtime rules override old flow.
+var PreviousPlannerDirectDispatchPromptHashes = []string{
+	"8fb2c8c0151aa0c331a8bda21903d838768227f2741199584ea253f9080e9de6",
+	"ab074edd2c859623145f25ca9f5d7ca24d09f3e3eee9e20cf981f702971d7acf",
+}

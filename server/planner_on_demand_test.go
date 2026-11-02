@@ -70,8 +70,8 @@ func TestPlannerOnDemandRealRunDirectDeferredAndNoa(t *testing.T) {
 								firstInput += b.Text
 							}
 						}
-						if !strings.Contains(firstInput, "准备新增方向时") || !strings.Contains(firstInput, "仅监督或等待结果") || strings.Contains(firstInput, "工具会强制检查") {
-							t.Fatal("first input lacks proactive workflow")
+						if !strings.Contains(firstInput, "信息足够时直接调用 add_intent") || !strings.Contains(firstInput, "无需先查询") || strings.Contains(firstInput, "先主动用 context_search") || strings.Contains(firstInput, "先查询已有方向再新增意图") || strings.Contains(firstInput, "缩小检索范围，再决定下一步") {
+							t.Fatal("first input still requires querying before dispatch")
 						}
 					}
 					for _, m := range req.Messages {
@@ -81,7 +81,7 @@ func TestPlannerOnDemandRealRunDirectDeferredAndNoa(t *testing.T) {
 							}
 						}
 					}
-					queryFirst := round != 1 && round != 4
+					queryFirst := round == 2
 					addTurn := 1
 					if queryFirst {
 						addTurn = 2
@@ -114,7 +114,11 @@ func TestPlannerOnDemandRealRunDirectDeferredAndNoa(t *testing.T) {
 				for round = 0; round < 5; round++ {
 					calls = 0
 					var commands []string
-					_, _, err := planner.Plan(t.Context(), taskID, nil, nil, task.Store, "original-goal", nil, func(a db.Activity) {
+					var triggers []agent.TriggerEvent
+					if round == 0 {
+						triggers = []agent.TriggerEvent{{Kind: "goal_edited"}}
+					}
+					_, _, err := planner.Plan(t.Context(), taskID, nil, nil, task.Store, "original-goal", triggers, func(a db.Activity) {
 						if a.Kind == "command" {
 							commands = append(commands, a.Summary)
 						}
@@ -122,9 +126,9 @@ func TestPlannerOnDemandRealRunDirectDeferredAndNoa(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					wantCalls := 3
-					if round == 1 {
-						wantCalls = 2
+					wantCalls := 2
+					if round == 2 {
+						wantCalls = 3
 					}
 					if round == 4 {
 						wantCalls = 1
