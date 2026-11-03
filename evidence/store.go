@@ -129,7 +129,7 @@ func (s *Store) StageFindingsExport(ctx context.Context, findings []*db.DBFindin
 			f.TrafficCount = len(list.Bindings)
 			f.EvidenceVersion = list.Version
 			f.ReportEvidenceVersion = list.ReportVersion
-			if err = tx.QueryRow(`SELECT report FROM findings WHERE id=$1`, f.ID).Scan(&f.Report); err != nil {
+			if err = tx.QueryRow(`SELECT report,COALESCE(reproduction,'null'::jsonb) FROM findings WHERE id=$1`, f.ID).Scan(&f.Report, &f.Reproduction); err != nil {
 				return err
 			}
 			for _, b := range list.Bindings {

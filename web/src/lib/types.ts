@@ -537,7 +537,24 @@ export interface FindingAsset {
   label: string;
 }
 
+export interface FindingReproductionStep {
+  title: string;
+  action: string;
+  result: string;
+  proves?: string;
+  request?: string;
+  response?: string;
+  command?: string;
+  output?: string;
+  binding_ids?: string[];
+}
+export interface FindingReproduction {
+  entry_point?: string;
+  prerequisites?: string[];
+  steps: FindingReproductionStep[];
+}
 export interface Finding {
+  reproduction?: FindingReproduction | null;
   traffic_count?: number;
   evidence_version?: number;
   report_evidence_version?: number;
@@ -1545,7 +1562,11 @@ export interface InterceptExecution {
   items: Activity[];
 }
 
-export interface HTTPAuthSettings { enabled: boolean; username: string; password_set: boolean; }
+export interface HTTPAuthSettings {
+  enabled: boolean;
+  username: string;
+  password_set: boolean;
+}
 
 export interface FindingSuppressionRule {
   id: string;

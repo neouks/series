@@ -79,7 +79,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 		if e := strings.TrimSpace(f.Evidence); e != "" {
 			fmt.Fprintf(&b, "**证据：**\n\n```\n%s\n```\n\n", e)
 		}
-		if rep := strings.TrimSpace(f.Report); rep != "" {
+		if rep := findingReportBody(f); rep != "" {
 			b.WriteString("**详细报告：**\n\n")
 			b.WriteString(rep)
 			b.WriteString("\n\n")
@@ -110,7 +110,7 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	if e := strings.TrimSpace(f.Evidence); e != "" {
 		fmt.Fprintf(&b, "## 证据\n\n```\n%s\n```\n\n", e)
 	}
-	if rep := strings.TrimSpace(f.Report); rep != "" {
+	if rep := findingReportBody(f); rep != "" {
 		b.WriteString("## 详细报告\n\n")
 		b.WriteString(rep)
 		b.WriteString("\n")
@@ -197,4 +197,11 @@ func findingTrafficMarkdown(f *db.DBFinding, attachments bool) string {
 	}
 	out.WriteString("\n")
 	return out.String()
+}
+
+func findingReportBody(f *db.DBFinding) string {
+	if rep := strings.TrimSpace(f.Report); rep != "" {
+		return rep
+	}
+	return ReproductionMarkdown(f.Reproduction)
 }

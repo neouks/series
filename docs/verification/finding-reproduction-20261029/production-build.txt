@@ -1,0 +1,55 @@
+
+> series-web@2.2.0 build:static
+> NEXT_EXPORT=1 next build
+
+▲ Next.js 16.2.9 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 21.8s
+  Running TypeScript ...
+  Finished TypeScript in 6.8s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/28) ...
+  Generating static pages using 7 workers (7/28) 
+  Generating static pages using 7 workers (14/28) 
+  Generating static pages using 7 workers (21/28) 
+✓ Generating static pages using 7 workers (28/28) in 236ms
+  Finalizing page optimization ...
+⚠ Statically exporting a Next.js application via `next export` disables API routes and middleware.
+This command is meant for static-only hosts, and is not necessary to make your application static.
+Pages in your application without server-side data dependencies will be automatically statically exported by `next build`, including pages powered by `getStaticProps`.
+Learn more: https://nextjs.org/docs/messages/api-routes-static-export
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /chat
+├ ○ /dashboard
+├ ○ /function/assets
+├ ○ /function/commands
+├ ○ /function/findings
+├ ○ /function/findings/detail
+├ ○ /function/llm-records
+├ ○ /function/tasks
+├ ○ /function/tasks/detail
+├ ○ /function/tasks/new
+├ ○ /function/traffic
+├ ○ /icon.png
+├ ○ /login
+├ ○ /setup
+├ ○ /system/agents
+├ ○ /system/agents/detail
+├ ○ /system/intercept
+├ ○ /system/intercept/approvals
+├ ○ /system/llm
+├ ○ /system/logs
+├ ○ /system/mcp
+├ ○ /system/settings
+├ ○ /system/skills
+└ ○ /system/tools
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)  prerendered as static content
+

@@ -1711,3 +1711,6 @@ CREATE TABLE IF NOT EXISTS finding_suppression_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_finding_suppression_task ON finding_suppression_rules(task_id,id DESC);
 ALTER TABLE finding_suppression_rules ADD COLUMN IF NOT EXISTS targets JSONB NOT NULL DEFAULT '[]';
+
+-- Structured, immutable reproduction captured at discovery time.
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS reproduction JSONB;

@@ -26,14 +26,15 @@ func TestFindingTrafficLegacyArchiveDefaults(t *testing.T) {
 	if err = d.EnsureLLMUsageTable(); err != nil {
 		t.Fatal(err)
 	}
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			task, err := d.CreateTask("legacy archive evidence defaults", "fixture", nil, 0, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer func() { d.Exec(`DELETE FROM task_archives WHERE task_id=$1`, task.ID); d.DeleteTask(task.ID) }()
-			f, err := d.Exploration(task.ExplorationID).RecordFinding(t.Context(), RecordFindingInput{TaskID: task.ID, ExplorationID: task.ExplorationID, Summary: "legacy", Severity: "low"})
+			repro, _ := DecodeFindingReproduction(json.RawMessage(reproductionFixture))
+			f, err := d.Exploration(task.ExplorationID).RecordFinding(t.Context(), RecordFindingInput{Reproduction: repro, TaskID: task.ID, ExplorationID: task.ExplorationID, Summary: "legacy", Severity: "low"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,6 +63,9 @@ func TestFindingTrafficLegacyArchiveDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, row := range rows {
+				if version < 3 {
+					delete(row, "reproduction")
+				}
 				delete(row, "evidence_version")
 				delete(row, "report_evidence_version")
 			}
@@ -74,6 +78,16 @@ func TestFindingTrafficLegacyArchiveDefaults(t *testing.T) {
 			}
 			if _, err = d.RestoreTaskArchive(archive.ID, snapshot, 0); err != nil {
 				t.Fatal(err)
+			}
+			restored, err := d.GetFinding(f.FindingID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if version == 3 && len(restored.Reproduction) == 0 {
+				t.Fatal("archive lost reproduction")
+			}
+			if version < 3 && len(restored.Reproduction) != 0 && string(restored.Reproduction) != "null" {
+				t.Fatal("old archive unexpectedly populated reproduction")
 			}
 			got, err := d.GetFindingTraffic(t.Context(), f.FindingID)
 			if err != nil {

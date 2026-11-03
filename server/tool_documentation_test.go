@@ -80,7 +80,7 @@ func TestBuiltinSchemaRefreshPreservesConfiguredDefaultsAndBindings(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { pg.Close() })
-	const flag = "tool_schema_refresh_v9_contract_docs"
+	const flag = "tool_schema_refresh_v10_reproduction"
 	flagValue, flagFound, err := pg.GetSetting(flag)
 	if err != nil {
 		t.Fatal(err)

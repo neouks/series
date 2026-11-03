@@ -289,6 +289,9 @@ func migrateContextCatalog(pg *db.DB) error {
 	}
 	defaults := agent.BuiltinPromptSeeds()
 	defaults["reporter"] = agent.ReporterDefaultPrompt
+	if err := pg.MigrateFindingReproductionPrompts(agent.ReporterDefaultPrompt); err != nil {
+		return err
+	}
 	if err := pg.MigrateContextPrompts(defaults, agent.PreviousContextPromptHashes); err != nil {
 		return err
 	}

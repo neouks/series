@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-29",
+  "status": "implemented; uncommitted",
+  "implementation": {
+    "registration": "Optional report_finding.reproduction: entry_point, prerequisites, ordered steps. Each step requires title/action/result; optional proves, request/response, command/output, traffic_refs. Up to 50 steps/50 prerequisites and 1MiB JSON; unknown fields and model-supplied binding_ids rejected. Original evidence remains compatible.",
+    "persistence": "Nullable findings.reproduction JSONB via existing schema startup; same transaction saves both standalone finding and exploration payload after exact binding resolution. Failed resolution rolls back provisional findings, nodes, anchors and bindings. Immutable after registration.",
+    "authorization": "Existing role, asset, task, intent and suppression checks preserved. Step traffic uses explicit verified IDs, converts to finding-owned stable binding IDs, requires local/direct-source asset registration and current role approval under the asset lock. No matching by time/domain/content. Host comparison here is authorization only. No host query for non-traffic steps.",
+    "reports": "Reporter uses saved steps first and directed history reads only for missing details. Existing Reporter and model calls reused. Five report sections and remediation <=50 Chinese characters retained. Fixed assembly guidance also reaches custom prompts, and only the exact previous default gets upgraded.",
+    "compatibility": "No history backfill, no rewriting of existing reports or audit history, no screenshots/upload feature, no Word/PDF, no report progress UI. Existing task lifecycle, manual mode and Worker dispatch unchanged.",
+    "read_export": "Only detail/export load reproduction; regular/task list projections remain small. JSON export includes reproduction. Markdown uses a deterministic saved-step fallback only when report is empty. Existing evidence ZIP attachments and version guards retained. Archive restore handles old missing fields; task deletion may preserve standalone steps.",
+    "frontend": "One shared panel used by global findings, task findings, standalone detail. Natural-language descriptions expanded; raw packets/commands collapsed and copied independently. Evidence body viewer mounts only on explicit click; no new network requests merely for step display."
+  },
+  "migrations": {
+    "database": "ALTER TABLE findings ADD COLUMN IF NOT EXISTS reproduction JSONB",
+    "tool_schema": "tool_schema_refresh_v10_reproduction; disabled flags, bindings and compatible scalar defaults preserved",
+    "reporter_prompt": "finding_reproduction_prompts_v1; previous exact default hash; customized text and prompt history preserved",
+    "trigger": "reporter_trigger_reproduction_v1; exact V1/V2/V3 defaults updated, custom trigger text preserved"
+  },
+  "verification": {
+    "database_environment": "Disposable PostgreSQL 17 container series-reproduction-test-20261029 on 127.0.0.1:15439, explicit SERIES_PG_DSN and separate package databases. Business data not used.",
+    "agent_full": "passed 57.533s",
+    "db_full": "passed 55.728s",
+    "server_full": "passed 51.626s",
+    "evidence_full": "passed 3.389s",
+    "guard_full": "passed 0.573s",
+    "report_full": "passed 0.011s",
+    "hardening_follow_up": "After full suites, shared traffic host-scope test reproduced pending Worker access to an unrelated registered host. Added actual task/source membership check. Focused Agent/DB/Server/Evidence regression logs and final DB race test cover the final change.",
+    "focused_final": {
+      "agent": "ok  \tgithub.com/neouks/series/agent\t1.953s",
+      "db": "ok  \tgithub.com/neouks/series/db\t5.606s",
+      "server": "ok  \tgithub.com/neouks/series/server\t7.642s",
+      "evidence": "ok  \tgithub.com/neouks/series/evidence\t1.792s"
+    },
+    "race": {
+      "agent": "ok  \tgithub.com/neouks/series/agent\t1.419s",
+      "db": "ok  \tgithub.com/neouks/series/db\t2.783s",
+      "server": "ok  \tgithub.com/neouks/series/server\t2.581s"
+    },
+    "db_race_final": "ok  \tgithub.com/neouks/series/db\t3.475s",
+    "frontend_tests": "56 passed, 0 failed (includes detail-only projections, scoped detail and deterministic export fallback)",
+    "typescript": "tsc --noEmit passed",
+    "lint": "Focused Biome check passed",
+    "production_static_build": "npm run build:static passed; production backend API mode, not a mock-only build",
+    "compile": "go build ./... passed",
+    "vet": "go vet ./agent ./db ./server ./evidence ./report passed",
+    "browser": {
+      "mode": "Mock; synthetic local test data, no live targets or paid model requests",
+      "entrypoints": "Global finding detail, task findings selection, standalone finding page verified",
+      "desktop": "1280x1000 light mode; descriptions/steps visible, request headers preserved on expansion, copy feedback works",
+      "mobile": "390x844 actual dark mode selected through Appearance UI; no document horizontal overflow",
+      "lazy_render": "Initially zero pre elements in collapsed step packets; opening one renders only one body. Evidence viewer remains unmounted until a binding click.",
+      "command": "Command-output expansion shows saved output for f-3",
+      "screenshots": [
+        "reproduction-desktop.png",
+        "reproduction-mobile-dark.png"
+      ]
+    },
+    "final_contract_test": "ok  \tgithub.com/neouks/series/agent\t0.214s",
+    "database_cleanup": "Disposable test container removed after verification; existing containers untouched."
+  },
+  "artifacts": [
+    "sample-reproduction.json",
+    "sample-report.md",
+    "reproduction-desktop.png",
+    "reproduction-mobile-dark.png"
+  ],
+  "limitations": [
+    "Mock screenshots and scripted providers verify integration, not real-model writing quality or that the model always supplies optional steps.",
+    "The sample report is the deterministic no-Reporter fallback generated by the production renderer from synthetic evidence, not a new vulnerability finding.",
+    "Step evidence links are scoped to the current finding; removed bindings return the existing explicit unavailable error rather than guessing a replacement.",
+    "No commit or backend service restart. Rebuild/restart backend to run the new startup schema/prompt migrations."
+  ]
+}

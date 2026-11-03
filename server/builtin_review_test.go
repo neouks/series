@@ -113,11 +113,11 @@ func TestReporterDefaultPromptUpgradeUsesCurrentParameter(t *testing.T) {
 	if strings.Contains(reporterToolCallMessage, "update_finding_report(finding_id") || !strings.Contains(reporterToolCallMessage, "update_finding_report(finding_node_id,") {
 		t.Fatal("report prompt does not match schema")
 	}
-	if _, err := pg.Exec(`DELETE FROM settings WHERE key='reporter_trigger_finding_node_id_v2'`); err != nil {
+	if _, err := pg.Exec(`DELETE FROM settings WHERE key='reporter_trigger_reproduction_v1'`); err != nil {
 		t.Fatal(err)
 	}
 	expected := map[int64]string{}
-	for _, body := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, "USER CUSTOM PROMPT"} {
+	for _, body := range []string{reporterToolCallMessageV1, reporterToolCallMessageV2, reporterToolCallMessageV3, "USER CUSTOM PROMPT"} {
 		tr, err := pg.CreateTrigger(&db.AgentTrigger{AgentKey: "reporter", OnToolCall: true, ToolCallMessage: body, ToolNames: []string{"report_finding"}})
 		if err != nil {
 			t.Fatal(err)

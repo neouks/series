@@ -305,6 +305,8 @@ func coverageAssetRefDTO(ref db.AssetRef) CoverageAssetRefDTO {
 // ---- Finding (frontend "Finding") ----
 
 type FindingDTO struct {
+	Reproduction json.RawMessage `json:"reproduction,omitempty"`
+
 	TrafficCount          int                        `json:"traffic_count"`
 	EvidenceVersion       int64                      `json:"evidence_version"`
 	ReportEvidenceVersion int64                      `json:"report_evidence_version"`
@@ -446,6 +448,7 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		status = db.FindingPending
 	}
 	d := FindingDTO{
+		Reproduction: f.Reproduction,
 		ID:           i64s(f.ID),
 		FindingID:    i64s(f.ID),
 		TrafficCount: f.TrafficCount, EvidenceVersion: f.EvidenceVersion, ReportEvidenceVersion: f.ReportEvidenceVersion,

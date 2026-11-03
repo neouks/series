@@ -109,3 +109,8 @@ func (d *DB) migratePromptContracts(flag, reportKey string, defaults map[string]
 }
 
 var legacyFindingReportParameter = regexp.MustCompile(`(?s)\bupdate_finding_report\s*\([^)]*\bfinding_id\s*(?:=|,|\))`)
+
+// MigrateFindingReproductionPrompts upgrades only the previous exact default.
+func (d *DB) MigrateFindingReproductionPrompts(reporter string) error {
+	return d.migratePromptContracts("finding_reproduction_prompts_v1", "finding_reproduction_prompts_report_v1", map[string]string{"reporter": reporter}, map[string][]string{"reporter": {"bedffb29857b4bec88751dc7cca61e00f3f8d94755a1456ff19094c63c895ca8"}})
+}

@@ -23,6 +23,20 @@ func findingTrafficBindingEnabled() bool {
 // all actual reporters (including Planner and custom chat agents) see the same
 // API contract. Disabled/unbound tools are never reintroduced here.
 func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.CoreTool, string) {
+	tools = append([]actool.CoreTool(nil), tools...)
+	fixed := ""
+	for i, tool := range tools {
+		if tool.Name() == "report_finding" {
+			fixed += reproductionWriteGuidance
+			if findingTrafficBindingEnabled() {
+				fixed += "每步可用 traffic_refs 交接已核实流量，服务端解析为当前漏洞的绑定编号。"
+			}
+			tools[i] = DecorateTool(tool, tool.Description()+reproductionWriteGuidance, tool.InputSchema())
+		}
+		if tool.Name() == "update_finding_report" {
+			fixed += reproductionReportGuidance
+		}
+	}
 	if !findingTrafficBindingEnabled() {
 		out := make([]actool.CoreTool, 0, len(tools))
 		for _, tool := range tools {
@@ -46,10 +60,10 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 		}
 		for _, tool := range out {
 			if tool.Name() == "report_finding" || tool.Name() == "add_hint" || tool.Name() == "add_task_hint" || tool.Name() == "update_finding_report" {
-				return out, "\n\n当前未启用流量证据绑定：正常保存文字/命令证据，不传流量绑定参数，不为绑定额外查包。此规则优先于历史或自定义提示中的绑定要求。"
+				return out, fixed + "\n\n当前未启用流量证据绑定：正常保存文字/命令证据，不传流量绑定参数，不为绑定额外查包。此规则优先于历史或自定义提示中的绑定要求。"
 			}
 		}
-		return out, ""
+		return out, fixed
 	}
 	out := append([]actool.CoreTool(nil), tools...)
 	has := map[string]bool{}
@@ -84,7 +98,7 @@ func findingWorkflowTools(agentKey string, tools []actool.CoreTool) ([]actool.Co
 	if guidance != "" || has["get_finding_traffic"] || has["update_finding_report"] {
 		guidance += findingIDGuidance
 	}
-	return out, guidance
+	return out, fixed + guidance
 }
 
 func stripTrafficParameters(schema map[string]any) {
@@ -99,6 +113,13 @@ func stripTrafficParameters(schema map[string]any) {
 			}
 		}
 		schema["required"] = kept
+	}
+	if reproduction, ok := props["reproduction"].(map[string]any); ok {
+		if steps, ok := reproduction["properties"].(map[string]any)["steps"].(map[string]any); ok {
+			if item, ok := steps["items"].(map[string]any); ok {
+				stripTrafficParameters(item)
+			}
+		}
 	}
 	if hints, ok := props["hints"].(map[string]any); ok {
 		if items, ok := hints["items"].(map[string]any); ok {

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
+import { FindingReproductionPanel } from "@/components/finding-reproduction-panel";
 import { FindingDeleteDialog } from "@/components/finding-delete-dialog";
 import { FindingRetestPanel } from "@/components/finding-retest-panel";
 import { FindingTrafficPanel } from "@/components/finding-traffic-panel";
@@ -274,6 +275,9 @@ export function FindingDetailContent({
               )}
             </div>
           </div>
+          {finding.reproduction?.steps?.length ? (
+            <FindingReproductionPanel reproduction={finding.reproduction} findingId={id} contextTask={contextTask} />
+          ) : null}
           <div>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-medium">证据 / PoC</h3>

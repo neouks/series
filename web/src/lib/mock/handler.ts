@@ -3040,6 +3040,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
           ...f,
           finding_id: f.finding_id,
           report: undefined,
+          reproduction: undefined,
           evidence: "",
           inherited: f.task_id !== context,
           source_task_id: f.task_id !== context ? f.task_id : undefined,
@@ -3055,6 +3056,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ...f,
       evidence: q.get("summary_only") === "1" ? "" : f.evidence,
       report: undefined,
+          reproduction: undefined,
       finding_id: f.id,
     });
     if (task) {

@@ -324,6 +324,8 @@ func (d *DB) EditFindingTraffic(ctx context.Context, findingID, bindingID, versi
 }
 
 type RecordFindingInput struct {
+	Reproduction *FindingReproduction
+
 	// Set only by the trusted task tool adapter, never from model arguments.
 	AccessRole string `json:"-"`
 	// Trusted caller rechecks role/asset permissions after a potentially slow review.
@@ -343,6 +345,9 @@ type RecordedFinding struct {
 }
 
 func RecordFindingTx(tx *sql.Tx, in RecordFindingInput, prepared []PreparedTrafficEvidence) (*RecordedFinding, error) {
+	if err := in.Reproduction.ValidateInput(); err != nil {
+		return nil, err
+	}
 	if err := LockFindingRecordTx(tx, in); err != nil {
 		return nil, err
 	}
@@ -368,6 +373,9 @@ func RecordFindingTx(tx *sql.Tx, in RecordFindingInput, prepared []PreparedTraff
 		return nil, err
 	}
 	if err := ValidateFindingAccessTx(tx, in); err != nil {
+		return nil, err
+	}
+	if err := validateReproductionTrafficTx(tx, in, prepared); err != nil {
 		return nil, err
 	}
 	payload, _ := json.Marshal(map[string]any{"vulnclass": in.VulnClass, "name": in.Name, "severity": in.Severity, "summary": in.Summary, "evidence": map[string]any{"by": in.Worker, "poc": in.Evidence}})
@@ -415,7 +423,22 @@ VALUES(NULLIF($1,0),$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, in.TaskID, out.NodeI
 	}
 	var err error
 	out.Traffic, err = FindingTrafficTx(tx, out.FindingID)
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	if in.Reproduction != nil {
+		raw, err := in.Reproduction.Resolve(out.Traffic.Bindings)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(`UPDATE findings SET reproduction=$2::jsonb WHERE id=$1`, out.FindingID, string(raw)); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(`UPDATE exploration_nodes SET payload=jsonb_set(payload,'{reproduction}',$2::jsonb) WHERE id=$1`, out.NodeID, string(raw)); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // RecordFinding is the atomic legacy/no-recorder path used by tools and tests.

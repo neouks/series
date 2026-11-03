@@ -604,6 +604,31 @@ export const findings: Finding[] = [
   },
   {
     id: "f-2",
+    reproduction: {
+      entry_point: "GET https://api.acme.com/v1/orders?id=1002",
+      prerequisites: ["使用测试账号A登录，准备账号A和账号B各自的订单；以下为本地合成演示数据。"],
+      steps: [
+        {
+          title: "读取自己的订单作为对照",
+          action: "使用账号A的会话读取其订单1001，确认接口及返回格式。",
+          request:
+            "GET /v1/orders?id=1001 HTTP/1.1\r\nHost: api.acme.com\r\nAuthorization: Bearer DEMO_SESSION_A\r\n\r\n",
+          response: 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"id":1001,"owner":"A"}',
+          result: "返回账号A的订单。",
+          proves: "合法账号可正常访问自己的订单。",
+        },
+        {
+          title: "仅修改订单编号读取其他账号订单",
+          action: "保持账号A的会话不变，将id从1001改为账号B的订单1002。",
+          request:
+            "GET /v1/orders?id=1002 HTTP/1.1\r\nHost: api.acme.com\r\nAuthorization: Bearer DEMO_SESSION_A\r\n\r\n",
+          response:
+            'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"id":1002,"owner":"B","address":"演示地址"}',
+          result: "接口返回账号B的订单及地址。",
+          proves: "本次演示可跨账号读取该订单，未验证其他资源。",
+        },
+      ],
+    },
     assets: [assetRef(15)],
     vulnclass: "IDOR",
     severity: "high",
@@ -617,6 +642,19 @@ export const findings: Finding[] = [
   },
   {
     id: "f-3",
+    reproduction: {
+      prerequisites: ["仅使用本地合成测试Token。"],
+      steps: [
+        {
+          title: "检查本地签名验证输出",
+          action: "读取本地验证命令返回结果。",
+          command: "printf 'demo signature verified\\n'",
+          output: "demo signature verified\n",
+          result: "演示输出已保留。",
+          proves: "该内容为UI演示，不是线上验证证据。",
+        },
+      ],
+    },
     assets: [assetRef(3)],
     vulnclass: "Weak JWT",
     severity: "high",
@@ -1317,7 +1355,15 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
 };
 
 export const intents: TaskNode[] = [
-  { id: "101", type: "intent", payload: P({ summary: "接口权限核验（Worker 回传演示）" }), priority: 5, state: "done", origin: "mainagent", ts: T("2026-07-26T09:55:00Z") },
+  {
+    id: "101",
+    type: "intent",
+    payload: P({ summary: "接口权限核验（Worker 回传演示）" }),
+    priority: 5,
+    state: "done",
+    origin: "mainagent",
+    ts: T("2026-07-26T09:55:00Z"),
+  },
   ...explorationGraph.nodes.filter((n) => n.type === "intent"),
 ];
 export const frontier: TaskNode[] = explorationGraph.nodes.filter(
@@ -2784,7 +2830,11 @@ export const activity: Activity[] = [
       "确认拿下。攻击路径：shop Fastjson RCE → DMZ 提权 → 内网 Jenkins 导出域凭据 → svc_deploy 属 Domain Admins → psexec DC01 SYSTEM → secretsdump 全域哈希。四个目标全部达成或推进中。",
   },
   {
-    seq: 408, worker: "work#1", intent_id: "101", ts: T("2026-07-26T09:59:00Z"), kind: "result",
+    seq: 408,
+    worker: "work#1",
+    intent_id: "101",
+    ts: T("2026-07-26T09:59:00Z"),
+    kind: "result",
     summary: "完成接口权限核验，已记录核验事实。仅展示测试结果，不发起额外执行。",
   },
   {
@@ -2793,7 +2843,8 @@ export const activity: Activity[] = [
     main_seg: 0,
     ts: T("2026-07-26T10:00:00Z"),
     kind: "text",
-    summary: "### Worker 结果 · 意图 #101\n\n状态：已完成\n\n已完成接口核验，记录了已验证事实。详细过程见 Worker 原始会话。\n\n[查看 Worker 原始会话](/function/tasks/detail?id=t-acme-web&session=intent:101&activity=408)",
+    summary:
+      "### Worker 结果 · 意图 #101\n\n状态：已完成\n\n已完成接口核验，记录了已验证事实。详细过程见 Worker 原始会话。\n\n[查看 Worker 原始会话](/function/tasks/detail?id=t-acme-web&session=intent:101&activity=408)",
     metadata: { worker_feedback: { id: 1, intent_id: 101, state: "done", source_activity_id: 408 } },
   },
   {
@@ -2806,7 +2857,6 @@ export const activity: Activity[] = [
     summary: "### Worker 结果 · 意图 #102\n\n状态：已终止\n\n本次未产生最终总结，请查看 Worker 会话中的已有记录。",
     metadata: { worker_feedback: { id: 2, intent_id: 102, state: "stopped" } },
   },
-
 ];
 
 export function activityForTask(): Activity[] {
@@ -3378,9 +3428,15 @@ export const missingSkills: MissingSkill[] = [
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 export const tools: Tool[] = [
-  ...contextToolCatalog.map((entry): Tool => ({
-    ...entry, system: true, enabled: true, kind: "builtin", calls: 12,
-  })),
+  ...contextToolCatalog.map(
+    (entry): Tool => ({
+      ...entry,
+      system: true,
+      enabled: true,
+      kind: "builtin",
+      calls: 12,
+    }),
+  ),
   {
     key: "bash",
     system: true,
