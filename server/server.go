@@ -2254,10 +2254,11 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 // findingsExport 导出发现页的漏洞。
 //
 //	scope   = filtered（沿用页面筛选）| all（全部）| selected（勾选的 ids）
-//	format  = md-single（整合一份 .md）| md-zip（一漏洞一 .md,打包 zip）
-//	          | csv | json
+//	format  = md-report / md-single（提交版单文件）
+//	          | md-report-zip / md-zip（提交版一漏洞一文件）| csv | json
 //	ids     = 逗号分隔的 finding id（scope=selected 时必填）
 //	筛选参数 severity/status/vulnclass/task_id/q/sort 与列表接口一致（scope=filtered 用）。
+//	所有导出格式都只输出 findings.report（人类提交版），不带汇总/证据/技术明细。
 func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	scope := q.Get("scope")
@@ -2304,10 +2305,6 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer os.RemoveAll(stage)
-	if err = s.evidenceStore().StageFindingsExport(r.Context(), fs, stage, format == "md-zip"); err != nil {
-		evidenceError(w, err)
-		return
-	}
 	now := time.Now()
 	stamp := now.Format("20060102-150405")
 	setDownload := func(contentType, filename string) {
@@ -2316,12 +2313,12 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch format {
-	case "md-single":
-		setDownload("text/markdown; charset=utf-8", "findings-"+stamp+".md")
-		_, _ = w.Write([]byte(report.FindingsMarkdown(fs, now)))
-	case "md-zip":
-		path := filepath.Join(stage, "findings.zip")
-		if err := buildFindingsEvidenceZip(path, fs, stage, now); err != nil {
+	case "md-report", "md-single":
+		setDownload("text/markdown; charset=utf-8", "findings-report-"+stamp+".md")
+		_, _ = w.Write([]byte(report.FindingsReportMarkdown(fs)))
+	case "md-report-zip", "md-zip":
+		path := filepath.Join(stage, "findings-report.zip")
+		if err := buildFindingsReportZip(path, fs); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -2331,8 +2328,8 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer file.Close()
-		setDownload("application/zip", "findings-"+stamp+".zip")
-		http.ServeContent(w, r, "findings.zip", now, file)
+		setDownload("application/zip", "findings-report-"+stamp+".zip")
+		http.ServeContent(w, r, "findings-report.zip", now, file)
 	case "csv":
 		setDownload("text/csv; charset=utf-8", "findings-"+stamp+".csv")
 		_, _ = w.Write(report.FindingsCSV(fs))
@@ -2344,7 +2341,10 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 				f.TrafficBindings[i].Snapshot.ReqHead = ""
 				f.TrafficBindings[i].Snapshot.RespHead = ""
 			}
-			out = append(out, findingFromDB(f, assets))
+			dto := findingFromDB(f, assets)
+			// JSON 也只导出人类提交版：技术明细只供 context_search 使用。
+			dto.ReportDetail = ""
+			out = append(out, dto)
 		}
 		setDownload("application/json; charset=utf-8", "findings-"+stamp+".json")
 		enc := json.NewEncoder(w)

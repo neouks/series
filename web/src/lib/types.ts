@@ -550,7 +550,8 @@ export interface Finding {
   status: FindingStatus;
   summary: string;
   evidence: string;
-  report?: string; // 详细报告(Markdown);仅详情接口返回,列表为空
+  report?: string; // 人类提交版(Markdown);仅详情接口返回,列表为空
+  report_detail?: string; // 完整技术明细(Markdown);内部检索用,不导出
   intent_id?: string;
   param_id?: string;
   task_id?: string;

@@ -119,3 +119,56 @@ func buildFindingsEvidenceZip(path string, findings []*db.DBFinding, stage strin
 	}
 	return nil
 }
+
+// buildFindingsReportZip builds the reviewer-facing ZIP: one human submission
+// report per finding, no summary/evidence wrapper. Findings without a report are
+// skipped rather than emitting an empty/damaged file.
+func buildFindingsReportZip(path string, findings []*db.DBFinding) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	zw := zip.NewWriter(f)
+	used := map[string]int{}
+	var writeErr error
+	for _, finding := range findings {
+		body := report.SingleFindingReportMarkdown(finding)
+		if strings.TrimSpace(body) == "" {
+			continue
+		}
+		base := report.FindingReportFilename(finding)
+		name := base
+		if n := used[base]; n > 0 {
+			name = fmt.Sprintf("%s-%d.md", strings.TrimSuffix(base, ".md"), n+1)
+		}
+		used[base]++
+		w, err := zw.Create(name)
+		if err != nil {
+			writeErr = err
+			break
+		}
+		if _, err = io.WriteString(w, body); err != nil {
+			writeErr = err
+			break
+		}
+	}
+	if err := errors.Join(writeErr, zw.Close(), f.Sync(), f.Close()); err != nil {
+		return err
+	}
+	archive, err := zip.OpenReader(path)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	for _, entry := range archive.File {
+		r, err := entry.Open()
+		if err != nil {
+			return err
+		}
+		_, readErr := io.Copy(io.Discard, r)
+		if err := errors.Join(readErr, r.Close()); err != nil {
+			return err
+		}
+	}
+	return nil
+}

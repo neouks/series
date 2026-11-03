@@ -285,7 +285,7 @@ export function FindingDetailContent({
           </div>
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-medium">详细报告</h3>
+              <h3 className="font-medium">提交报告</h3>
               {finding.report && <CopyButton text={finding.report} />}
             </div>
             {finding.report_stale && (
@@ -297,9 +297,17 @@ export function FindingDetailContent({
               {finding.report ? (
                 <Markdown text={finding.report} />
               ) : (
-                <p className="text-muted-foreground">暂无详细报告。</p>
+                <p className="text-muted-foreground">暂无提交报告。</p>
               )}
             </div>
+            {finding.report_detail && finding.report_detail !== finding.report && (
+              <details className="mt-4 rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">技术细节（内部检索，不导出）</summary>
+                <div className="mt-3 max-h-[60vh] overflow-auto">
+                  <Markdown text={finding.report_detail} />
+                </div>
+              </details>
+            )}
           </div>
         </CardContent>
       </Card>
