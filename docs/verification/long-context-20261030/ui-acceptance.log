@@ -1,0 +1,84 @@
+
+> series-web@2.2.0 test:ui
+> node -r ./scripts/test-register.cjs --test src/lib/*.test.ts src/lib/*.test.mjs src/lib/mock/*.test.ts
+
+(node:41090) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/pphua/Documents/GitHub/ARTEX/web/src/lib/activity-merge.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/pphua/Documents/GitHub/ARTEX/web/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ overlapping poll responses render tool 198 only once (1.145167ms)
+✔ a late response and overlapping older page preserve newer messages (0.121666ms)
+✔ replayed results and duplicate entries do not double-count usage (0.104042ms)
+✔ merging does not mutate either response and keeps distinct IDs (0.090958ms)
+(node:41091) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/pphua/Documents/GitHub/ARTEX/web/src/lib/chat-mentions.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/pphua/Documents/GitHub/ARTEX/web/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ mention trigger supports Chinese and cursor placement without hijacking email (0.919333ms)
+✔ categories, Chinese aliases, IP and keyword search (0.819292ms)
+✔ tokens roundtrip labels and removing one reference preserves its neighbors (2.917ms)
+(node:41092) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/pphua/Documents/GitHub/ARTEX/web/src/lib/exploration-graph.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/pphua/Documents/GitHub/ARTEX/web/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ folded inverse edges disappear while other relationships survive (15.458625ms)
+✔ unfolded intents retain distinct finding relations (0.21ms)
+✔ selection survives refreshed objects, changes page and clears empty results (1.429584ms)
+✔ demo exports preserve selected report text and offer real ZIP bytes (3.219459ms)
+✔ traffic mock supports versioned atomic edits, order, unlink and read only (42.316166ms)
+✔ 入口认证 challenge 不被当成 JWT 过期，也不读取或修改浏览器凭据 (49.265416ms)
+✔ JWT 401 和正常响应保留给现有调用逻辑 (6.540041ms)
+✔ MCP import retains argument arrays and remote transport (32.630625ms)
+✔ full history search uses detail, supports literal input and session-bound cursors (868.7055ms)
+✔ 动作审批定位原始会话，资产来源仍可独立定位 (499.595583ms)
+✔ 服务不独立审批，删除仅隐藏记录且允许重新关联 (987.596ms)
+✔ 任务模板默认值、分组原子校验和手动封禁恢复 (1460.231167ms)
+✔ 审批来源可打开原始调用，窗口连续且限制在所属任务和会话 (863.691417ms)
+✔ broadcast mock separates list summaries from paged details and isolates tasks (520.788291ms)
+✔ context catalog replaces retired callable names without changing history fixtures (0.985041ms)
+✔ context catalog advertises item budgets and mixed activity search (0.176209ms)
+✔ manual selection persists, repeated mode is idempotent, and finish preserves work (1342.565292ms)
+✔ 删除漏洞保留原因，非法原因不删除，重复删除不重复反馈 (618.428458ms)
+✔ task finding filters run before pagination and preserve source isolation (5880.284666ms)
+✔ reproduction is detail-only and remains available in task context (623.232584ms)
+✔ fallback markdown preserves real packets, step order and code delimiters (0.298208ms)
+✔ 删除反馈创建任务禁报规则，空原因、分页、解除与继承隔离 (1985.264333ms)
+✔ HTTP entry settings preserve independent credentials and never echo passwords (1096.625208ms)
+✔ Shell interpreter is read-only and legacy writes fail before saving (866.503041ms)
+✔ shell editor metadata roundtrips and testing does not increment usage (737.482083ms)
+✔ 任务分级计数随漏洞删除刷新且任务隔离 (502.416292ms)
+✔ traffic mock filters, sorts, paginates, and clears independently of filters (10.403333ms)
+✔ SSE MCP 保存及重新读取保留传输方式与 URL (377.51925ms)
+✔ 审批分页保留总数且页面间不重复 (243.288667ms)
+✔ 等待 Worker 取消保留记录、重复取消幂等、手动重新开启解除标记 (628.319292ms)
+✔ 取消运行中 Worker 保留原因，用户重跑解除取消状态 (487.082333ms)
+✔ 队列手动排序、版本冲突、取消后重开追加队尾和物理删除 (1585.108208ms)
+✔ templates only create a task after explicit submission (1110.575792ms)
+✔ slow polls finish, never overlap, and stopping cancels in-flight work (142.842958ms)
+✔ hidden pages pause and explicit refresh replaces a request without overlap (31.445125ms)
+✔ hung request is aborted by its deadline (30.427458ms)
+✔ 旁路历史拒绝异常响应，兼容 Go 空切片 (1.023708ms)
+✔ 三种旁路父会话的 Mock 都返回合法历史且不伪造问答成功 (1100.612625ms)
+✔ 角标上限、损坏存储、分类隔离与单向已读进度 (1.201875ms)
+✔ 首次无历史提醒；新增、查看、处理、删除与任务范围 (0.271334ms)
+✔ 加载快照后新增不被旧快照清除 (0.088708ms)
+✔ 只响应调用和执行边界，不为普通流式文本重复查询 (1.020042ms)
+✔ 调用位置配对、跨页、状态筛选和稳定游标 (1.36775ms)
+✔ 轮次与空 ID 不按名称误配对，长中文安全分段 (29.791125ms)
+✔ 查询地址保留任务会话，异常响应明确报错，封装工具不伪造调用 (0.376042ms)
+✔ Mock 路由覆盖两类会话，不把旧任务记录给空任务或新会话分段 (609.721583ms)
+(node:41131) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/pphua/Documents/GitHub/ARTEX/web/src/lib/worker-feedback.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/pphua/Documents/GitHub/ARTEX/web/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ worker feedback neither starts nor settles a main turn (0.434083ms)
+✔ settings preserve task, session, source location and filters (1.9745ms)
+✔ shortcuts respect IME, editors, overlays and conversation search (0.186958ms)
+ℹ tests 56
+ℹ suites 0
+ℹ pass 56
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9196.851208

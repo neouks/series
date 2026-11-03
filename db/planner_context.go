@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -30,6 +32,8 @@ type PlannerContext struct {
 	HasMore            bool                   `json:"has_more"`
 	TaskDescription    string                 `json:"task_description"`
 	DescriptionOmitted bool                   `json:"description_omitted"`
+	Revision           string                 `json:"revision"`
+	AccessRevision     string                 `json:"access_revision"`
 }
 
 // Planner only needs the ordering policy, not every queued intent payload or a
@@ -52,11 +56,27 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
 	if seeds == nil {
 		seeds = []int64{}
 	}
+	revision, err := s.GraphRevision(ctx, true)
+	if err != nil {
+		return PlannerContext{}, err
+	}
+	sorted := append([]string{}, kinds...)
+	slices.Sort(sorted)
+	policyKey := "planner:" + strings.Join(sorted, ",")
+	cachedCounts, cached, err := s.GraphCountCache(ctx, policyKey, revision)
+	if err != nil {
+		return PlannerContext{}, err
+	}
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner
  FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
  WHERE n.kind=ANY($2::text[])
  AND (n.exploration_id=$1 OR n.kind<>'intent' OR n.state IN ('done','blocked','exhausted','stopped'))
  AND (n.kind<>'digest' OR n.state='active')`
+	if cached {
+		roots += ` AND (n.id=ANY($3::bigint[]) OR (n.kind='intent' AND n.state IN ('open','running') AND (cardinality($3::bigint[])>0 OR $4::boolean))
+   OR n.id IN(SELECT e.src_id FROM exploration_edges e WHERE e.exploration_id IN(SELECT exp FROM contexts) AND e.rel IN ('derived_from','yields') AND e.dst_id=ANY($3::bigint[])
+    UNION SELECT e.dst_id FROM exploration_edges e WHERE e.exploration_id IN(SELECT exp FROM contexts) AND e.rel IN ('derived_from','yields') AND e.src_id=ANY($3::bigint[])))`
+	}
 	query := contextVisibility(roots, false) + `, event_nodes AS MATERIALIZED (
  SELECT * FROM visible WHERE id=ANY($3::bigint[])
  ), candidates AS (
@@ -76,7 +96,7 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
  SELECT * FROM (SELECT * FROM ranked UNION ALL SELECT * FROM idle WHERE NOT EXISTS(SELECT 1 FROM ranked)) c ORDER BY rank,id DESC LIMIT 9
  ), grouped AS (
  SELECT kind,CASE WHEN state IN ('open','running','paused','done','blocked','exhausted','stopped','met','active','confirmed','origin','abandoned','dismissed','consumed','superseded') THEN state ELSE 'other' END state,
- exploration_id<>$1 inherited,count(*) count FROM visible GROUP BY 1,2,3
+ exploration_id<>$1 inherited,count(*) count FROM visible WHERE NOT $6::boolean GROUP BY 1,2,3
  ) SELECT jsonb_build_object('task_description',(SELECT left(COALESCE(description,''),240) FROM explorations WHERE id=$1),
  'description_omitted',(SELECT length(COALESCE(description,''))>240 FROM explorations WHERE id=$1),
  'counts',COALESCE((SELECT jsonb_agg(to_jsonb(g) ORDER BY kind,state,inherited) FROM grouped g),'[]'::jsonb),
@@ -100,12 +120,22 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
 		return out, err
 	}
 	var raw []byte
-	err = tx.QueryRowContext(ctx, query, s.expID, kinds, seeds, heartbeat, int64(0)).Scan(&raw)
+	err = tx.QueryRowContext(ctx, query, s.expID, kinds, seeds, heartbeat, int64(0), cached).Scan(&raw)
 	if err != nil {
 		return out, err
 	}
 	if err = json.Unmarshal(raw, &out); err != nil {
 		return out, err
 	}
-	return out, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return out, err
+	}
+	if cached {
+		out.Counts = cachedCounts
+	} else if err = s.SaveGraphCounts(ctx, policyKey, revision, out.Counts); err != nil {
+		return out, err
+	}
+	out.Revision = revision
+	out.AccessRevision = graphAccessPart(revision)
+	return out, nil
 }

@@ -1,0 +1,10 @@
+=== RUN   TestProjectedPayloadAssetLineageAndLegacyFallback
+--- PASS: TestProjectedPayloadAssetLineageAndLegacyFallback (0.25s)
+=== RUN   TestConcurrentGraphDigestPublicationAndMetadataEpoch
+--- PASS: TestConcurrentGraphDigestPublicationAndMetadataEpoch (0.20s)
+=== RUN   TestGraphPublicationRacingSourceDeletionDoesNotDeadlock
+--- PASS: TestGraphPublicationRacingSourceDeletionDoesNotDeadlock (0.38s)
+=== RUN   TestGraphHotFrontierFanoutResumeAndConcurrentWrites
+--- PASS: TestGraphHotFrontierFanoutResumeAndConcurrentWrites (1.66s)
+PASS
+ok  	github.com/neouks/series/db	3.537s

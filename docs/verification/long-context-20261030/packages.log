@@ -1,0 +1,15 @@
+ok  	github.com/neouks/series/agent	51.782s
+ok  	github.com/neouks/series/cmd/series	0.039s
+ok  	github.com/neouks/series/config	0.005s
+ok  	github.com/neouks/series/db	52.748s
+?   	github.com/neouks/series/enrich	[no test files]
+ok  	github.com/neouks/series/evidence	2.097s
+ok  	github.com/neouks/series/guard	0.371s
+ok  	github.com/neouks/series/intercept	0.010s
+ok  	github.com/neouks/series/llmpool	0.007s
+ok  	github.com/neouks/series/llmrec	0.314s
+ok  	github.com/neouks/series/mcphttp	0.015s
+ok  	github.com/neouks/series/report	0.009s
+ok  	github.com/neouks/series/server	38.231s
+ok  	github.com/neouks/series/sidequestion	0.036s
+ok  	github.com/neouks/series/traffic	5.618s

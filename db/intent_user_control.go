@@ -19,8 +19,9 @@ func (n *Node) UserCancelled() bool {
 
 // UserCancelledIntents is read independently of graph compaction and pagination.
 func (s *ExplorationStore) UserCancelledIntents() ([]*Node, error) {
-	rows, err := s.db.Query(`SELECT `+nodeCols+` FROM exploration_nodes
-	WHERE exploration_id=$1 AND kind='intent' AND payload->>'cancelled_by_user'='true' ORDER BY id`, s.expID)
+	rows, err := s.db.Query(`SELECT id,kind,jsonb_build_object('summary',payload->'summary','cancel_reason',payload->'cancel_reason','cancelled_by_user',true),
+ priority,state,COALESCE(origin,''),COALESCE(owner,''),COALESCE(blocked_reason,''),created_at FROM exploration_nodes
+ WHERE exploration_id=$1 AND kind='intent' AND payload->>'cancelled_by_user'='true' ORDER BY id`, s.expID)
 	if err != nil {
 		return nil, err
 	}

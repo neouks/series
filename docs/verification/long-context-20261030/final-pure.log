@@ -1,0 +1,38 @@
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=false
+2026/10/30 10:56:33 [context-input] task=1 role=worker chars=13877 bytes=30219 system_bytes=5159 tool_schema_bytes=4 history_bytes=24945 before_chars=59125 history_retrieval_calls=100 repeated_queries=0 projection_ms=3
+2026/10/30 10:56:33 [context-filter] task=1 role=worker elapsed_ms=40
+2026/10/30 10:56:33 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=1 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=true
+2026/10/30 10:56:33 [context-input] task=1 role=worker chars=13877 bytes=30219 system_bytes=5159 tool_schema_bytes=4 history_bytes=24945 before_chars=59125 history_retrieval_calls=100 repeated_queries=0 projection_ms=3
+2026/10/30 10:56:33 [context-filter] task=1 role=worker elapsed_ms=41
+2026/10/30 10:56:33 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=false
+2026/10/30 10:56:33 [context-input] task=1 role=worker chars=22925 bytes=39306 system_bytes=515 tool_schema_bytes=4 history_bytes=38676 before_chars=454250 history_retrieval_calls=100 repeated_queries=0 projection_ms=42
+2026/10/30 10:56:33 [context-filter] task=1 role=worker elapsed_ms=72
+2026/10/30 10:56:33 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=true
+2026/10/30 10:56:33 [context-input] task=1 role=worker chars=22925 bytes=39306 system_bytes=515 tool_schema_bytes=4 history_bytes=38676 before_chars=454250 history_retrieval_calls=100 repeated_queries=0 projection_ms=38
+2026/10/30 10:56:33 [context-filter] task=1 role=worker elapsed_ms=68
+2026/10/30 10:56:33 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+--- PASS: TestProjectedHistoryFinalOpenAIJSONPairing (0.32s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=false (0.05s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=true (0.05s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=false (0.11s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=true (0.11s)
+=== RUN   TestRequestMeasurementAndLongRetrievalProjection
+2026/10/30 10:56:33 [context-input] task=999902 role=worker chars=9207 bytes=25402 system_bytes=368 tool_schema_bytes=4 history_bytes=24919 before_chars=9207 history_retrieval_calls=2 repeated_queries=0 projection_ms=0
+    long_context_test.go:225: pages=2 original_chars=9078 read_window_chars=9207 projected_chars=9207 projected_bytes=25402
+2026/10/30 10:56:33 [context-input] task=999902 role=worker chars=25333 bytes=65558 system_bytes=1074 tool_schema_bytes=4 history_bytes=64369 before_chars=25333 history_retrieval_calls=10 repeated_queries=0 projection_ms=0
+    long_context_test.go:225: pages=10 original_chars=44820 read_window_chars=25333 projected_chars=25333 projected_bytes=65558
+2026/10/30 10:56:33 [context-input] task=999902 role=worker chars=13907 bytes=30264 system_bytes=5204 tool_schema_bytes=4 history_bytes=24945 before_chars=59155 history_retrieval_calls=100 repeated_queries=0 projection_ms=4
+    long_context_test.go:225: pages=100 original_chars=447422 read_window_chars=59155 projected_chars=13907 projected_bytes=30264
+2026/10/30 10:56:33 [context-input] task=999902 role=worker chars=13910 bytes=30267 system_bytes=5195 tool_schema_bytes=4 history_bytes=24957 before_chars=126015 history_retrieval_calls=300 repeated_queries=0 projection_ms=6
+    long_context_test.go:225: pages=300 original_chars=1342824 read_window_chars=126015 projected_chars=13910 projected_bytes=30267
+--- PASS: TestRequestMeasurementAndLongRetrievalProjection (0.13s)
+=== RUN   TestReadQuerySemanticNormalizationPreservesPaging
+--- PASS: TestReadQuerySemanticNormalizationPreservesPaging (0.00s)
+=== RUN   TestCompletedErrorsKeepLatestAndMergeOnlyExactDiagnostics
+--- PASS: TestCompletedErrorsKeepLatestAndMergeOnlyExactDiagnostics (0.00s)
+PASS
+ok  	github.com/neouks/series/agent	0.472s

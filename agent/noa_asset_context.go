@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"log"
+	"time"
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noaadapter"
@@ -11,6 +13,13 @@ import (
 // while the normal authorization/deduplication pipeline parses structured JSON.
 // Restore refs afterwards; neither raw audit messages nor noa's ledger change.
 func (p assetContextProvider) filter(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, error) {
+	started := time.Now()
+	ri := RunInfoFrom(ctx)
+	if ri.AgentKey == "planner" || ri.AgentKey == "worker" {
+		defer func() {
+			log.Printf("[context-filter] task=%d role=%s elapsed_ms=%d", ri.TaskID, ri.AgentKey, time.Since(started).Milliseconds())
+		}()
+	}
 	type ref struct {
 		m, b, c int
 		suffix  string
@@ -51,16 +60,18 @@ func (p assetContextProvider) filter(ctx context.Context, req llm.CompletionRequ
 	if err != nil {
 		return out, err
 	}
+	out = refreshPlannerStateHistory(ctx, out)
 	out = boundRetrievalHistory(deduplicateToolHistory(out))
 	out, err = p.refreshFindingFeedback(ctx, out)
 	if err != nil {
 		return out, err
 	}
+	out = refreshWorkerTodos(ctx, out)
 	for _, r := range refs {
 		b := &out.Messages[r.m].Content[r.b]
 		if r.c < len(b.Content) && b.Content[r.c].Type == llm.BlockText {
 			b.Content[r.c].Text += r.suffix
 		}
 	}
-	return out, nil
+	return projectRequestBudget(ctx, out), nil
 }

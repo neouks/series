@@ -123,7 +123,7 @@ func TestWorkerParentContextHasUsableContinuation(t *testing.T) {
 	if e = json.Unmarshal([]byte(text[strings.Index(text, "{"):]), &page); e != nil {
 		t.Fatal(e)
 	}
-	if len(page.Parents) != 20 || len(page.Next) == 0 {
+	if len(page.Parents) != 8 || len(page.Next) == 0 {
 		t.Fatal(text)
 	}
 	seen := map[int64]bool{}

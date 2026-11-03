@@ -140,8 +140,8 @@ type Engine struct {
 
 	plannerRound  sync.Map // taskID -> int, planner round counter (for UI round separators)
 	plannerActive sync.Map // live planner calls only; read-only activity views must not guess from task status
-	// Last successfully planned blackboard hash. Pure heartbeats with the same hash
-	// and no running Worker can skip the Planner LLM call.
+	// Last successfully planned semantic revision. Unchanged heartbeats never
+	// call the Planner model, including while Workers are running.
 	plannerRevision sync.Map // taskID -> string
 
 	// 任务级超时(见 docs/任务级超时与收尾设计.md):
@@ -854,6 +854,155 @@ func resetPlannerTimer(timer *time.Timer, d time.Duration) {
 	timer.Reset(d)
 }
 
+func (e *Engine) runPlannerRound(ctx context.Context, t *Task, src string) {
+
+	if t.lifecycleSnapshot().ExecutionMode == db.ExecutionManual {
+		t.drainTriggers() // Persisted graph changes are read afresh when managed resumes.
+		return
+	}
+	// debounce: coalesce a burst of changes into one planning round
+	timer := time.NewTimer(e.debounce)
+	edgeSignal := src == "edge"
+drain:
+	for {
+		select {
+		case <-t.notify:
+			edgeSignal = true
+		case <-timer.C:
+			break drain
+		}
+	}
+	if edgeSignal {
+		src = "edge"
+	}
+	if t.lifecycleSnapshot().ExecutionMode == db.ExecutionManual {
+		t.drainTriggers()
+		return
+	}
+	planner, _ := e.snapshotFor(t)
+	if planner == nil {
+		return // idle until LLM configured
+	}
+	if e.IsPaused(t.ID) {
+		return // user-paused: don't plan
+	}
+	if e.IsDeleting(t.ID) {
+		return
+	}
+	// terminal task (goals all met → done, or failed): the run is over. A
+	// resume/nudge — e.g. auto-resume of the active task on restart — must NOT
+	// re-plan (it would burn an LLM round and re-confirm a settled result).
+	if isTerminalStatus(t.lifecycleSnapshot().Status) {
+		return
+	}
+	// 任务级超时收尾中:丢弃普通唤醒——worker 收尾写回、Resume 的 Notify 都不再
+	// 触发常规规划轮;终局那一轮由协调器(settleTask)直接驱动,不走这里。
+	if e.isSettling(t.ID) {
+		return
+	}
+	if waiting, err := t.Store.WaitingForAssetApproval(); err != nil {
+		log.Printf("[planner] task %s 审批等待状态查询失败: %v", t.ID, err)
+		return
+	} else if waiting {
+		return
+	}
+	// goalless（人工直投）分支：任务已无 open 目标时 planner 不跑——跑了会重判
+	// met→cancelExec 杀掉用户经主 agent 直投的意图。是否结束改由 frontier 决定：
+	// 还有 open/running 意图 → 保持 running、静默等待；意图已全部跑干 → 落 done。
+	// 整段纯 Go、不触发任何 LLM 调用，也不打规划轮 marker。
+	if open, err := t.Store.HasOpenGoal(); err == nil && !open {
+		t.drainTriggers() // 丢弃累积的 done/finding 触发，避免 goalless 长会话里无界增长
+		if active, err := t.Store.HasActiveIntent(); err == nil && !active {
+			// frontier 抽干且无在跑意图 → 收尾。用 Guarded 版做 CAS，避免踩到并发的
+			// pause/delete/超时收尾的状态转换。
+			if won, err := e.completeAutomatically(t); err != nil {
+				log.Printf("[goalless] task %s 收尾落 done 失败: %v", t.ID, err)
+			} else if won {
+				e.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
+					Summary: "目标已全部达成，直投意图已执行完毕，任务结束"})
+			}
+		}
+		return // goalless 分支永不进入 planner.Plan
+	}
+	if src == "heartbeat" {
+		planner.MaintainGraph(ctx, t.Store)
+	}
+	if src == "heartbeat" && !t.hasPendingTriggers() {
+		revision, revisionErr := t.Store.BlackboardRevision()
+		previous, hasPrevious := e.plannerRevision.Load(t.ID)
+		if revisionErr == nil && hasPrevious && previous.(string) == revision {
+			log.Printf("[planner] task %s 心跳跳过：黑板无变化", t.ID)
+			return
+		}
+	}
+	if !e.beginTaskOperation(t.ID) {
+		return
+	}
+	defer e.decInflight(t.ID)
+	e.stampFirstRun(t) // 首次真正规划 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
+	e.touch(t.ID)
+	emit := func(r db.Activity) { e.emitActivity(t, r) }
+	ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
+	if ectx.Err() != nil || e.IsDeleting(t.ID) {
+		return
+	}
+	ectx, releasePlanner, allowed := t.beginPlannerRound(ectx)
+	if !allowed {
+		return
+	}
+	defer releasePlanner()
+	if ectx.Err() != nil {
+		return
+	}
+	log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
+	// round marker: each Plan() is one planner round; emit a boundary so the
+	// UI can separate rounds in the transcript (kind='round').
+	e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
+		Summary: fmt.Sprintf("第 %d 轮规划", e.nextPlannerRound(t.ID))})
+	// what fired this round (worker done / finding; may be several — debounce
+	// coalesces a burst; empty for time/heartbeat wakes).
+	triggers := t.drainTriggers()
+	taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
+	// Store only the revision observed before this call. Recording the post-call
+	// revision could swallow an async asset mutation that happened while the
+	// Planner was running even though that request never saw the mutation.
+	observedRevision, observedRevisionErr := t.Store.BlackboardRevision()
+	e.BeginLLMCall(t.ID)
+	planCtx := agent.WithRunInfo(ectx, agent.RunInfo{Trigger: src})
+	e.plannerActive.Store(t.ID, true)
+	met, reason, err := planner.Plan(planCtx, taskIDInt, e.m.assets, t.Guard, t.Store, t.Goal, triggers, emit)
+	e.plannerActive.Delete(t.ID)
+	t.wakeWorkers()
+	e.EndLLMCall(t.ID)
+	if ectx.Err() != nil {
+		return // Cancelled rounds cannot finish the task or update its planning revision.
+	}
+	if err == nil && observedRevisionErr == nil {
+		e.plannerRevision.Store(t.ID, observedRevision)
+	}
+	switch {
+	case err != nil && ectx.Err() == nil:
+		log.Printf("[planner] task %s 规划出错: %v", t.ID, err)
+	case met:
+		log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
+		// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
+		won, finishErr := e.completeAutomatically(t)
+		if finishErr != nil {
+			log.Printf("[planner] task %s 标记完成失败: %v", t.ID, finishErr)
+		}
+		if !won {
+			return
+		}
+		// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
+		// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
+		// 归为 stopped(而非 blocked)。
+		e.cancelExec(t.ID, agent.AbortGoalMet)
+	default:
+		log.Printf("[planner] task %s 规划完成", t.ID)
+	}
+	e.touch(t.ID)
+}
+
 func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	interval := plannerHeartbeatInterval(t)
 	// 心跳定时器在 loop 入口臂 = 从任务 start 计时:即使是跳过首轮 planner 的 seed 任务
@@ -863,161 +1012,16 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 	defer heartbeat.Stop()
 
 	// runRound 跑一轮规划(含 debounce 合并 + 各 guard)。src 仅用于日志区分触发来源。
-	runRound := func(src string) {
-		if t.lifecycleSnapshot().ExecutionMode == db.ExecutionManual {
-			t.drainTriggers() // Persisted graph changes are read afresh when managed resumes.
-			return
-		}
-		// debounce: coalesce a burst of changes into one planning round
-		timer := time.NewTimer(e.debounce)
-		edgeSignal := src == "edge"
-	drain:
-		for {
-			select {
-			case <-t.notify:
-				edgeSignal = true
-			case <-timer.C:
-				break drain
-			}
-		}
-		if edgeSignal {
-			src = "edge"
-		}
-		if t.lifecycleSnapshot().ExecutionMode == db.ExecutionManual {
-			t.drainTriggers()
-			return
-		}
-		planner, _ := e.snapshotFor(t)
-		if planner == nil {
-			return // idle until LLM configured
-		}
-		if e.IsPaused(t.ID) {
-			return // user-paused: don't plan
-		}
-		if e.IsDeleting(t.ID) {
-			return
-		}
-		// terminal task (goals all met → done, or failed): the run is over. A
-		// resume/nudge — e.g. auto-resume of the active task on restart — must NOT
-		// re-plan (it would burn an LLM round and re-confirm a settled result).
-		if isTerminalStatus(t.lifecycleSnapshot().Status) {
-			return
-		}
-		// 任务级超时收尾中:丢弃普通唤醒——worker 收尾写回、Resume 的 Notify 都不再
-		// 触发常规规划轮;终局那一轮由协调器(settleTask)直接驱动,不走这里。
-		if e.isSettling(t.ID) {
-			return
-		}
-		if waiting, err := t.Store.WaitingForAssetApproval(); err != nil {
-			log.Printf("[planner] task %s 审批等待状态查询失败: %v", t.ID, err)
-			return
-		} else if waiting {
-			return
-		}
-		// goalless（人工直投）分支：任务已无 open 目标时 planner 不跑——跑了会重判
-		// met→cancelExec 杀掉用户经主 agent 直投的意图。是否结束改由 frontier 决定：
-		// 还有 open/running 意图 → 保持 running、静默等待；意图已全部跑干 → 落 done。
-		// 整段纯 Go、不触发任何 LLM 调用，也不打规划轮 marker。
-		if open, err := t.Store.HasOpenGoal(); err == nil && !open {
-			t.drainTriggers() // 丢弃累积的 done/finding 触发，避免 goalless 长会话里无界增长
-			if active, err := t.Store.HasActiveIntent(); err == nil && !active {
-				// frontier 抽干且无在跑意图 → 收尾。用 Guarded 版做 CAS，避免踩到并发的
-				// pause/delete/超时收尾的状态转换。
-				if won, err := e.completeAutomatically(t); err != nil {
-					log.Printf("[goalless] task %s 收尾落 done 失败: %v", t.ID, err)
-				} else if won {
-					e.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
-						Summary: "目标已全部达成，直投意图已执行完毕，任务结束"})
-				}
-			}
-			return // goalless 分支永不进入 planner.Plan
-		}
-		if src == "heartbeat" && !t.hasPendingTriggers() {
-			running, runningErr := t.Store.HasRunningIntent()
-			revision, revisionErr := t.Store.BlackboardRevision()
-			previous, hasPrevious := e.plannerRevision.Load(t.ID)
-			if runningErr == nil && revisionErr == nil && !running && hasPrevious && previous.(string) == revision {
-				log.Printf("[planner] task %s 心跳跳过：黑板无变化且无运行中的 work", t.ID)
-				return
-			}
-		}
-		if !e.beginTaskOperation(t.ID) {
-			return
-		}
-		defer e.decInflight(t.ID)
-		e.stampFirstRun(t) // 首次真正规划 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)
-		e.touch(t.ID)
-		emit := func(r db.Activity) { e.emitActivity(t, r) }
-		ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
-		if ectx.Err() != nil || e.IsDeleting(t.ID) {
-			return
-		}
-		ectx, releasePlanner, allowed := t.beginPlannerRound(ectx)
-		if !allowed {
-			return
-		}
-		defer releasePlanner()
-		if ectx.Err() != nil {
-			return
-		}
-		log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
-		// round marker: each Plan() is one planner round; emit a boundary so the
-		// UI can separate rounds in the transcript (kind='round').
-		e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-			Summary: fmt.Sprintf("第 %d 轮规划", e.nextPlannerRound(t.ID))})
-		// what fired this round (worker done / finding; may be several — debounce
-		// coalesces a burst; empty for time/heartbeat wakes).
-		triggers := t.drainTriggers()
-		taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
-		// Store only the revision observed before this call. Recording the post-call
-		// revision could swallow an async asset mutation that happened while the
-		// Planner was running even though that request never saw the mutation.
-		observedRevision, observedRevisionErr := t.Store.BlackboardRevision()
-		e.BeginLLMCall(t.ID)
-		planCtx := agent.WithRunInfo(ectx, agent.RunInfo{Trigger: src})
-		e.plannerActive.Store(t.ID, true)
-		met, reason, err := planner.Plan(planCtx, taskIDInt, e.m.assets, t.Guard, t.Store, t.Goal, triggers, emit)
-		e.plannerActive.Delete(t.ID)
-		t.wakeWorkers()
-		e.EndLLMCall(t.ID)
-		if ectx.Err() != nil {
-			return // Cancelled rounds cannot finish the task or update its planning revision.
-		}
-		if err == nil && observedRevisionErr == nil {
-			e.plannerRevision.Store(t.ID, observedRevision)
-		}
-		switch {
-		case err != nil && ectx.Err() == nil:
-			log.Printf("[planner] task %s 规划出错: %v", t.ID, err)
-		case met:
-			log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
-			// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
-			won, finishErr := e.completeAutomatically(t)
-			if finishErr != nil {
-				log.Printf("[planner] task %s 标记完成失败: %v", t.ID, finishErr)
-			}
-			if !won {
-				return
-			}
-			// 任务已判完成 → 立刻取消在跑的 worker：它们手头的意图跑出来也没意义了。
-			// 下一轮 worker 循环撞终态门就不再领新意图;被取消的这批走下方"任务已完成"分支
-			// 归为 stopped(而非 blocked)。
-			e.cancelExec(t.ID, agent.AbortGoalMet)
-		default:
-			log.Printf("[planner] task %s 规划完成", t.ID)
-		}
-		e.touch(t.ID)
-	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.notify:
-			runRound("edge") // worker 结束 / finding / kill / resume / seed 首轮
+			e.runPlannerRound(ctx, t, "edge") // worker 结束 / finding / kill / resume / seed 首轮
 		case <-heartbeat.C:
 			// 周期兜底:死锁兜底 + 唤醒去监督飞行中的 worker(steer/kill) + 周期复查。
-			runRound("heartbeat")
+			e.runPlannerRound(ctx, t, "heartbeat")
 		}
 		// 每次唤醒(边沿或心跳)后重臂心跳:任意规划触发都重算这段静置计时。
 		resetPlannerTimer(heartbeat, interval)

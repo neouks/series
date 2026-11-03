@@ -14,9 +14,12 @@ type ToolNodePage struct {
 }
 
 type ToolDigestIndexRow struct {
-	ID          int64  `json:"id"`
-	Body        string `json:"body"`
-	MemberCount int    `json:"member_count"`
+	ID             int64  `json:"id"`
+	Body           string `json:"body"`
+	MemberCount    int    `json:"member_count"`
+	BodyTruncated  bool   `json:"body_truncated"`
+	SourceRevision string `json:"source_revision"`
+	RuleVersion    int    `json:"rule_version"`
 }
 type ToolDigestIndexPage struct {
 	Digests []ToolDigestIndexRow `json:"digests"`
@@ -289,7 +292,7 @@ const toolNodeVisibilitySQL = `WITH RECURSIVE current_task AS (
  SELECT l.root,a.asset_id FROM lineage l JOIN exploration_anchors a ON a.node_id=l.id
  UNION SELECT l.root,CASE WHEN x.value ~ '^[0-9]{1,18}$' THEN x.value::bigint ELSE 0 END
  FROM lineage l JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp
- CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(n.payload->'asset_ids')='array' THEN n.payload->'asset_ids' ELSE '[]'::jsonb END) x(value)
+ CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN EXISTS(SELECT 1 FROM graph_node_projection gp WHERE gp.node_id=n.id AND gp.asset_metadata_ready) THEN to_jsonb((SELECT gp.payload_asset_ids FROM graph_node_projection gp WHERE gp.node_id=n.id)) ELSE CASE WHEN jsonb_typeof(n.payload->'asset_ids')='array' THEN n.payload->'asset_ids' ELSE '[]'::jsonb END END) x(value)
  ), permission_keys AS MATERIALIZED (
  SELECT DISTINCT r.owner,a.asset_id FROM anchors a JOIN roots r ON r.id=a.root WHERE r.owner<>0
  ), permissions AS MATERIALIZED (
@@ -298,6 +301,7 @@ const toolNodeVisibilitySQL = `WITH RECURSIVE current_task AS (
  ), visible AS MATERIALIZED (
  SELECT r.* FROM roots r WHERE ($5::bigint=0 OR EXISTS(SELECT 1 FROM anchors a WHERE a.root=r.id AND a.asset_id=$5))
  AND NOT EXISTS(SELECT 1 FROM lineage l LEFT JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp WHERE l.root=r.id AND n.id IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM lineage l JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp WHERE l.root=r.id AND n.kind='digest' AND NOT series_digest_sources_current(n.payload))
  AND NOT EXISTS(SELECT 1 FROM anchors a JOIN permissions p ON p.owner=r.owner AND p.asset_id=a.asset_id WHERE a.root=r.id AND NOT p.allowed)
  )`
 

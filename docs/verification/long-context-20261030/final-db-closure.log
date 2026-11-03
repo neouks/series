@@ -1,0 +1,10 @@
+=== RUN   TestProjectedPayloadAssetLineageAndLegacyFallback
+--- PASS: TestProjectedPayloadAssetLineageAndLegacyFallback (0.28s)
+=== RUN   TestLegacyEpochSeedPrecedesLazyMaintenance
+--- PASS: TestLegacyEpochSeedPrecedesLazyMaintenance (0.31s)
+=== RUN   TestConcurrentGraphDigestPublicationAndMetadataEpoch
+--- PASS: TestConcurrentGraphDigestPublicationAndMetadataEpoch (0.22s)
+=== RUN   TestGraphPublicationRacingSourceDeletionDoesNotDeadlock
+--- PASS: TestGraphPublicationRacingSourceDeletionDoesNotDeadlock (0.41s)
+PASS
+ok  	github.com/neouks/series/db	2.279s

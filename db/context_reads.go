@@ -3,6 +3,7 @@ package db
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -186,7 +187,8 @@ func (s *ExplorationStore) ContextNode(ctx context.Context, id int64, field stri
 	query := contextVisibility(roots, s.workerRead) + `, content AS (
  SELECT n.id,n.kind,n.state,v.owner,n.exploration_id<>$1 inherited,
  CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END finding_id,
- (CASE WHEN n.kind='finding' THEN n.payload||jsonb_build_object('report',COALESCE((SELECT f.report FROM findings f WHERE f.node_id=n.id LIMIT 1),'')) ELSE n.payload END)#>$3::text[] value
+ (CASE WHEN $3::text[]=ARRAY['asset_ids'] THEN jsonb_build_object('asset_ids',COALESCE((SELECT jsonb_agg(DISTINCT a.asset_id ORDER BY a.asset_id) FROM anchors a WHERE a.root=n.id),'[]'::jsonb))
+ WHEN n.kind='finding' THEN n.payload||jsonb_build_object('report',COALESCE((SELECT f.report FROM findings f WHERE f.node_id=n.id LIMIT 1),'')) ELSE n.payload END)#>$3::text[] value
  FROM visible v JOIN exploration_nodes n ON n.id=v.id
  ), children AS (
  SELECT child.key,child.value, row_number() OVER(ORDER BY child.key) seq FROM content c CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(c.value)='object' THEN c.value ELSE '{}'::jsonb END) child
@@ -202,6 +204,34 @@ func (s *ExplorationStore) ContextNode(ctx context.Context, id int64, field stri
 	// $5 belongs to the shared authorization CTE (asset filter).
 	var raw []byte
 	err := s.db.QueryRowContext(ctx, query, s.expID, id, path, index, int64(0), offset, budget, field).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return s.staleDigestNavigation(ctx, id, index, min(10, max(1, budget/250)))
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	err = decodeContextJSON(raw, &out)
+	return out, err
+}
+
+// A stale summary's body is never returned. This exception to freshness is only
+// for navigation metadata; full source/ancestor authorization still precedes
+// pagination, and every returned original node is checked again on reread.
+func (s *ExplorationStore) staleDigestNavigation(ctx context.Context, id int64, index, limit int) (map[string]any, error) {
+	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
+ WHERE n.id=$2 AND n.kind='digest' AND NOT series_digest_sources_current(n.payload)`
+	visibility := contextVisibility(roots, s.workerRead)
+	visibility = strings.Replace(visibility, "WHERE l.root=r.id AND n.kind='digest' AND NOT series_digest_sources_current(n.payload)", "WHERE l.root=r.id AND n.kind='digest' AND n.id<>$2 AND NOT series_digest_sources_current(n.payload)", 1)
+	query := visibility + `, members AS (
+ SELECT e.dst_id FROM visible v JOIN exploration_edges e ON e.exploration_id=v.exploration_id AND e.src_id=v.id AND e.rel='covers'
+ ORDER BY e.dst_id OFFSET $3 LIMIT $4
+ ) SELECT jsonb_build_object('ref','node:'||v.id,'kind','digest','state','stale','navigation_only',true,
+ 'message','摘要已失效，不能用作证据；以下是原始节点读取入口。','sources',COALESCE((SELECT jsonb_agg(jsonb_build_object('node_id',dst_id,'ref','node:'||dst_id,'read',jsonb_build_object('items',jsonb_build_array(jsonb_build_object('ref','node:'||dst_id)))) ORDER BY dst_id) FROM members),'[]'::jsonb),
+ 'next_index',CASE WHEN (SELECT count(*) FROM exploration_edges e WHERE e.exploration_id=v.exploration_id AND e.src_id=v.id AND e.rel='covers')>$3+$4 THEN $3+$4 END)
+ FROM visible v`
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, query, s.expID, id, index, limit, int64(0)).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}
@@ -330,10 +360,15 @@ func (s *ExplorationStore) ContextParents(ctx context.Context, intentID, before 
 	return out, rows.Err()
 }
 func (s *ExplorationStore) EdgesWithin(ids []int64) ([]Edge, error) {
+	return s.EdgesWithinContext(context.Background(), ids)
+}
+func (s *ExplorationStore) EdgesWithinContext(ctx context.Context, ids []int64) ([]Edge, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if len(ids) == 0 {
 		return []Edge{}, nil
 	}
-	rows, e := s.db.Query(`SELECT src_id,rel,dst_id FROM exploration_edges WHERE exploration_id=$1 AND src_id=ANY($2::bigint[]) AND dst_id=ANY($2::bigint[])`, s.expID, ids)
+	rows, e := s.db.QueryContext(ctx, `SELECT src_id,rel,dst_id FROM exploration_edges WHERE exploration_id=$1 AND src_id=ANY($2::bigint[]) AND dst_id=ANY($2::bigint[])`, s.expID, ids)
 	if e != nil {
 		return nil, e
 	}

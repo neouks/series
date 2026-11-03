@@ -1,0 +1,18 @@
+=== RUN   TestLegacyEpochSeedPrecedesLazyMaintenance
+--- PASS: TestLegacyEpochSeedPrecedesLazyMaintenance (0.31s)
+=== RUN   TestGraphLargeProjectionMetrics
+=== RUN   TestGraphLargeProjectionMetrics/10
+    graph_maintenance_test.go:557: nodes=10 write=15.3255ms repair=28.61775ms repair_client_sql=51 repair_go_alloc_bytes=80408 go_heap_after=676392 unchanged_revision_avg=547.433µs revision_client_sql_per_check=1.0
+=== RUN   TestGraphLargeProjectionMetrics/1000
+    graph_maintenance_test.go:557: nodes=1000 write=225.943834ms repair=113.536708ms repair_client_sql=184 repair_go_alloc_bytes=727216 go_heap_after=1336280 unchanged_revision_avg=527.329µs revision_client_sql_per_check=1.0
+=== RUN   TestGraphLargeProjectionMetrics/10000
+    graph_maintenance_test.go:557: nodes=10000 write=2.087707167s repair=1.173246708s repair_client_sql=1572 repair_go_alloc_bytes=6786112 go_heap_after=1644144 unchanged_revision_avg=694.979µs revision_client_sql_per_check=1.0
+=== RUN   TestGraphLargeProjectionMetrics/100000
+    graph_maintenance_test.go:557: nodes=100000 write=16.900542417s repair=22.453317417s repair_client_sql=15277 repair_go_alloc_bytes=67206496 go_heap_after=820208 unchanged_revision_avg=502.993µs revision_client_sql_per_check=1.0
+--- PASS: TestGraphLargeProjectionMetrics (52.49s)
+    --- PASS: TestGraphLargeProjectionMetrics/10 (0.21s)
+    --- PASS: TestGraphLargeProjectionMetrics/1000 (0.59s)
+    --- PASS: TestGraphLargeProjectionMetrics/10000 (4.24s)
+    --- PASS: TestGraphLargeProjectionMetrics/100000 (47.44s)
+PASS
+ok  	github.com/neouks/series/db	52.827s

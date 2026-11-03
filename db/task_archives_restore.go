@@ -101,6 +101,8 @@ WHERE relation.source_task_id=$1 LIMIT 1`, taskID).Scan(&dependent)
 		{`DELETE FROM activity WHERE exploration_id=$1`, []any{expID}},
 		{`DELETE FROM main_sessions WHERE exploration_id=$1`, []any{expID}},
 		{`DELETE FROM deleted_workers WHERE exploration_id=$1`, []any{expID}},
+		{`DELETE FROM planner_working_state WHERE exploration_id=$1`, []any{expID}},
+		{`DELETE FROM graph_count_cache WHERE exploration_id=$1`, []any{expID}},
 		{`DELETE FROM exploration_nodes WHERE exploration_id=$1`, []any{expID}},
 	} {
 		if _, err := tx.Exec(statement.query, statement.args...); err != nil {
@@ -249,7 +251,7 @@ WHERE archive.id=$1 FOR UPDATE OF archive,task`, archiveID).Scan(&taskID, &expID
 	}
 	// Insert graph rows in foreign-key order. The archived stub has no graph rows,
 	// so an ID conflict signals external corruption and must stop the restore.
-	for _, table := range []string{"exploration_nodes", "exploration_edges", "exploration_anchors", "task_constraints", "activity", "main_sessions", "deleted_workers"} {
+	for _, table := range []string{"exploration_nodes", "exploration_edges", "exploration_anchors", "task_constraints", "activity", "main_sessions", "deleted_workers", "planner_working_state"} {
 		if err := insertArchiveRows(tx, table, remappedTables[table]); err != nil {
 			return nil, fmt.Errorf("restore %s: %w", table, err)
 		}
@@ -436,6 +438,7 @@ func insertArchiveRows(tx *sql.Tx, table string, raw json.RawMessage) error {
 		"task_asset_skips":        true,
 		"task_asset_grants":       true,
 		"task_asset_dns_evidence": true,
+		"planner_working_state":   true,
 		"exploration_nodes":       true, "exploration_edges": true, "exploration_anchors": true,
 		"task_constraints": true, "activity": true, "task_asset_links": true, "task_asset_blocks": true, "findings": true,
 		"llm_records": true, "llm_usage": true, "skill_usage": true, "tool_usage": true, "mcp_usage": true,

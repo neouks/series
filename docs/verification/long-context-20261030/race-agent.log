@@ -1,0 +1,45 @@
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=false
+2026/10/30 10:33:19 [context-input] task=1 role=worker chars=13877 bytes=30219 system_bytes=5159 tool_schema_bytes=4 history_bytes=24945 before_chars=59125 history_retrieval_calls=100 repeated_queries=0 projection_ms=53
+2026/10/30 10:33:19 [context-filter] task=1 role=worker elapsed_ms=607
+2026/10/30 10:33:19 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=4 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=true
+2026/10/30 10:33:19 [context-input] task=1 role=worker chars=13877 bytes=30219 system_bytes=5159 tool_schema_bytes=4 history_bytes=24945 before_chars=59125 history_retrieval_calls=100 repeated_queries=0 projection_ms=54
+2026/10/30 10:33:19 [context-filter] task=1 role=worker elapsed_ms=606
+2026/10/30 10:33:19 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=3 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=false
+2026/10/30 10:33:21 [context-input] task=1 role=worker chars=22925 bytes=39306 system_bytes=515 tool_schema_bytes=4 history_bytes=38676 before_chars=454250 history_retrieval_calls=100 repeated_queries=0 projection_ms=962
+2026/10/30 10:33:21 [context-filter] task=1 role=worker elapsed_ms=1545
+2026/10/30 10:33:21 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=4 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=true
+2026/10/30 10:33:23 [context-input] task=1 role=worker chars=22925 bytes=39306 system_bytes=515 tool_schema_bytes=4 history_bytes=38676 before_chars=454250 history_retrieval_calls=100 repeated_queries=0 projection_ms=882
+2026/10/30 10:33:23 [context-filter] task=1 role=worker elapsed_ms=1452
+2026/10/30 10:33:23 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=3 failed=false
+--- PASS: TestProjectedHistoryFinalOpenAIJSONPairing (5.05s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=false (0.68s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=true (0.68s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=false (1.89s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=true (1.80s)
+=== RUN   TestWorkerTodoProgressIsBoundedDurableAndScoped
+--- PASS: TestWorkerTodoProgressIsBoundedDurableAndScoped (0.37s)
+=== RUN   TestContextSoftBudgetWarnsContinuesAndPreservesLatestFailure
+2026/10/30 10:33:23 [context-input] task=999901 role=worker chars=120197 bytes=360197 system_bytes=360004 tool_schema_bytes=4 history_bytes=78 before_chars=120197 history_retrieval_calls=0 repeated_queries=0 projection_ms=11
+2026/10/30 10:33:23 [context-budget-warning] task=999901 role=worker chars=120197 bytes=360197
+2026/10/30 10:33:23 [context-input] task=999901 role=worker chars=120197 bytes=360197 system_bytes=360004 tool_schema_bytes=4 history_bytes=78 before_chars=120197 history_retrieval_calls=0 repeated_queries=0 projection_ms=10
+--- PASS: TestContextSoftBudgetWarnsContinuesAndPreservesLatestFailure (0.03s)
+=== RUN   TestCompletedErrorsKeepLatestAndMergeOnlyExactDiagnostics
+--- PASS: TestCompletedErrorsKeepLatestAndMergeOnlyExactDiagnostics (0.00s)
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_read
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_write
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/image
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/application_json
+--- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_read (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_write (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/image (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/application_json (0.00s)
+=== RUN   TestSpillReceiptRequiresRealMatchingOutputInRunDirectory
+--- PASS: TestSpillReceiptRequiresRealMatchingOutputInRunDirectory (0.00s)
+PASS
+ok  	github.com/neouks/series/agent	6.507s

@@ -1,0 +1,55 @@
+=== RUN   TestGraphProjectionRepairRevisionAndDigestValidity
+--- PASS: TestGraphProjectionRepairRevisionAndDigestValidity (0.25s)
+=== RUN   TestConcurrentGraphDigestPublicationAndMetadataEpoch
+--- PASS: TestConcurrentGraphDigestPublicationAndMetadataEpoch (0.18s)
+=== RUN   TestGraphPublicationRacingSourceDeletionDoesNotDeadlock
+--- PASS: TestGraphPublicationRacingSourceDeletionDoesNotDeadlock (0.33s)
+PASS
+ok  	github.com/neouks/series/db	0.788s
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/success
+2026/10/30 10:29:40 [graph-summary-usage] exploration=2212 members=3 input_chars=691 input_bytes=691 elapsed_ms=0 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/unrelated
+2026/10/30 10:29:41 [graph-summary-usage] exploration=2213 members=3 input_chars=691 input_bytes=691 elapsed_ms=2 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/changed
+2026/10/30 10:29:41 [graph-summary-usage] exploration=2214 members=3 input_chars=691 input_bytes=691 elapsed_ms=1 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/omitted
+2026/10/30 10:29:41 [graph-summary-usage] exploration=2215 members=3 input_chars=691 input_bytes=691 elapsed_ms=0 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/manual
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/paused
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/pending
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/revoked
+2026/10/30 10:29:42 [graph-summary-usage] exploration=2219 members=3 input_chars=693 input_bytes=693 elapsed_ms=13 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+--- PASS: TestIncrementalSummaryPublicationAndSourceChange (1.95s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/success (0.31s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/unrelated (0.28s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/changed (0.28s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/omitted (0.22s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/manual (0.16s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/paused (0.15s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/pending (0.24s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/revoked (0.31s)
+=== RUN   TestCompletedErrorsKeepLatestAndMergeOnlyExactDiagnostics
+--- PASS: TestCompletedErrorsKeepLatestAndMergeOnlyExactDiagnostics (0.00s)
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_read
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_write
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/image
+=== RUN   TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/application_json
+--- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_read (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/partial_write (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/image (0.00s)
+    --- PASS: TestBatchProjectionKeepsPartialErrorsImagesAndApplicationJSON/application_json (0.00s)
+=== RUN   TestSpillReceiptRequiresRealMatchingOutputInRunDirectory
+--- PASS: TestSpillReceiptRequiresRealMatchingOutputInRunDirectory (0.00s)
+PASS
+ok  	github.com/neouks/series/agent	1.980s
+=== RUN   TestCompressSkipsAssetInspectionButPreservesHooks
+--- PASS: TestCompressSkipsAssetInspectionButPreservesHooks (0.00s)
+=== RUN   TestTodoMetadataDoesNotBecomeAnExecutionTarget
+--- PASS: TestTodoMetadataDoesNotBecomeAnExecutionTarget (0.00s)
+=== RUN   TestCompressAssetPolicyIsolation
+--- PASS: TestCompressAssetPolicyIsolation (0.19s)
+PASS
+ok  	github.com/neouks/series/guard	0.200s

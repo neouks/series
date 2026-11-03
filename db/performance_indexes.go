@@ -19,6 +19,9 @@ func ensurePerformanceIndexes(ctx context.Context, conn *sql.Conn) error {
 		return fmt.Errorf("search extension: %w", err)
 	}
 	indexes := []struct{ name, definition string }{
+		{"graph_nodes_state_page", `ON exploration_nodes(exploration_id,kind,state,id DESC)`},
+		{"graph_edges_reverse_page", `ON exploration_edges(exploration_id,dst_id,src_id)`},
+		{"graph_edges_forward_page", `ON exploration_edges(exploration_id,src_id,dst_id)`},
 		{"idx_mentions_findings_trgm", `ON findings USING gin (` + mentionFindingText + ` gin_trgm_ops)`},
 		{"idx_mentions_companies_trgm", `ON companies USING gin (` + mentionCompanyText + ` gin_trgm_ops)`},
 		{"idx_mentions_assets_trgm", `ON assets USING gin (` + mentionAssetText + ` gin_trgm_ops)`},

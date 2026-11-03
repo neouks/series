@@ -1,0 +1,6 @@
+=== RUN   TestGraphPublicationRacingSourceDeletionDoesNotDeadlock
+--- PASS: TestGraphPublicationRacingSourceDeletionDoesNotDeadlock (0.40s)
+=== RUN   TestGraphPublicationBusySourceDoesNotBlockWriter
+--- PASS: TestGraphPublicationBusySourceDoesNotBlockWriter (0.19s)
+PASS
+ok  	github.com/neouks/series/db	1.633s

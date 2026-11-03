@@ -1,0 +1,109 @@
+=== RUN   TestWorkerPreloadsInheritedAssetWithoutWholeGraph
+2026/10/30 10:37:59 [context-input] task=2022 role=worker chars=25927 bytes=36594 system_bytes=7866 tool_schema_bytes=28099 history_bytes=514 before_chars=25927 history_retrieval_calls=0 repeated_queries=0 projection_ms=1
+2026/10/30 10:37:59 [context-filter] task=2022 role=worker elapsed_ms=6
+2026/10/30 10:37:59 [context-usage] task=2022 role=worker input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+--- PASS: TestWorkerPreloadsInheritedAssetWithoutWholeGraph (0.26s)
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/success
+2026/10/30 10:37:59 [graph-summary-usage] exploration=2223 members=3 input_chars=716 input_bytes=716 elapsed_ms=0 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/unrelated
+2026/10/30 10:37:59 [graph-summary-usage] exploration=2224 members=3 input_chars=716 input_bytes=716 elapsed_ms=2 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/changed
+2026/10/30 10:38:00 [graph-summary-usage] exploration=2225 members=3 input_chars=716 input_bytes=716 elapsed_ms=1 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/omitted
+2026/10/30 10:38:00 [graph-summary-usage] exploration=2226 members=3 input_chars=716 input_bytes=716 elapsed_ms=0 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/manual
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/paused
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/pending
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/revoked
+2026/10/30 10:38:01 [graph-summary-usage] exploration=2230 members=3 input_chars=718 input_bytes=718 elapsed_ms=16 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+=== RUN   TestIncrementalSummaryPublicationAndSourceChange/escaped
+2026/10/30 10:38:02 [graph-summary-usage] exploration=2231 members=32 input_chars=14735 input_bytes=14735 elapsed_ms=0 input_tokens=100 output_tokens=30 cache_read_tokens=0 cache_write_tokens=0 failed=false
+--- PASS: TestIncrementalSummaryPublicationAndSourceChange (3.05s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/success (0.40s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/unrelated (0.39s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/changed (0.36s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/omitted (0.29s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/manual (0.20s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/paused (0.18s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/pending (0.31s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/revoked (0.42s)
+    --- PASS: TestIncrementalSummaryPublicationAndSourceChange/escaped (0.50s)
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=false
+2026/10/30 10:38:02 [context-input] task=1 role=worker chars=13877 bytes=30219 system_bytes=5159 tool_schema_bytes=4 history_bytes=24945 before_chars=59125 history_retrieval_calls=100 repeated_queries=0 projection_ms=3
+2026/10/30 10:38:02 [context-filter] task=1 role=worker elapsed_ms=39
+2026/10/30 10:38:02 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=true
+2026/10/30 10:38:02 [context-input] task=1 role=worker chars=13877 bytes=30219 system_bytes=5159 tool_schema_bytes=4 history_bytes=24945 before_chars=59125 history_retrieval_calls=100 repeated_queries=0 projection_ms=3
+2026/10/30 10:38:02 [context-filter] task=1 role=worker elapsed_ms=38
+2026/10/30 10:38:02 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=false
+2026/10/30 10:38:02 [context-input] task=1 role=worker chars=22925 bytes=39306 system_bytes=515 tool_schema_bytes=4 history_bytes=38676 before_chars=454250 history_retrieval_calls=100 repeated_queries=0 projection_ms=42
+2026/10/30 10:38:02 [context-filter] task=1 role=worker elapsed_ms=71
+2026/10/30 10:38:02 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+=== RUN   TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=true
+2026/10/30 10:38:02 [context-input] task=1 role=worker chars=22925 bytes=39306 system_bytes=515 tool_schema_bytes=4 history_bytes=38676 before_chars=454250 history_retrieval_calls=100 repeated_queries=0 projection_ms=45
+2026/10/30 10:38:02 [context-filter] task=1 role=worker elapsed_ms=78
+2026/10/30 10:38:02 [context-usage] task=1 role=worker input_tokens=123 output_tokens=3 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+--- PASS: TestProjectedHistoryFinalOpenAIJSONPairing (0.33s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=false (0.05s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=false/stream=true (0.05s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=false (0.11s)
+    --- PASS: TestProjectedHistoryFinalOpenAIJSONPairing/noa=true/stream=true (0.12s)
+=== RUN   TestRequestMeasurementAndLongRetrievalProjection
+2026/10/30 10:38:02 [context-input] task=999902 role=worker chars=9207 bytes=25402 system_bytes=368 tool_schema_bytes=4 history_bytes=24919 before_chars=9207 history_retrieval_calls=2 repeated_queries=0 projection_ms=0
+    long_context_test.go:225: pages=2 original_chars=9078 read_window_chars=9207 projected_chars=9207 projected_bytes=25402
+2026/10/30 10:38:02 [context-input] task=999902 role=worker chars=25333 bytes=65558 system_bytes=1074 tool_schema_bytes=4 history_bytes=64369 before_chars=25333 history_retrieval_calls=10 repeated_queries=0 projection_ms=0
+    long_context_test.go:225: pages=10 original_chars=44820 read_window_chars=25333 projected_chars=25333 projected_bytes=65558
+2026/10/30 10:38:02 [context-input] task=999902 role=worker chars=13907 bytes=30264 system_bytes=5204 tool_schema_bytes=4 history_bytes=24945 before_chars=59155 history_retrieval_calls=100 repeated_queries=0 projection_ms=4
+    long_context_test.go:225: pages=100 original_chars=447422 read_window_chars=59155 projected_chars=13907 projected_bytes=30264
+2026/10/30 10:38:02 [context-input] task=999902 role=worker chars=13910 bytes=30267 system_bytes=5195 tool_schema_bytes=4 history_bytes=24957 before_chars=126015 history_retrieval_calls=300 repeated_queries=0 projection_ms=7
+    long_context_test.go:225: pages=300 original_chars=1342824 read_window_chars=126015 projected_chars=13910 projected_bytes=30267
+--- PASS: TestRequestMeasurementAndLongRetrievalProjection (0.15s)
+=== RUN   TestPlannerOnDemandContextMetrics
+=== RUN   TestPlannerOnDemandContextMetrics/10
+    planner_context_metrics_test.go:86: nodes=10 mode=previous_overview chars=3444 bytes=3652 sql=18.0 elapsed_avg=255.91393ms allocated_avg=287117B
+    planner_context_metrics_test.go:86: nodes=10 mode=bootstrap_startup chars=1215 bytes=1365 sql=7.3 elapsed_avg=12.580153ms allocated_avg=59050B
+    planner_context_metrics_test.go:86: nodes=10 mode=bootstrap_event chars=1935 bytes=2103 sql=7.0 elapsed_avg=12.270527ms allocated_avg=87738B
+=== RUN   TestPlannerOnDemandContextMetrics/1000
+    planner_context_metrics_test.go:86: nodes=1000 mode=previous_overview chars=12381 bytes=12583 sql=18.0 elapsed_avg=230.591222ms allocated_avg=1105904B
+    planner_context_metrics_test.go:86: nodes=1000 mode=bootstrap_startup chars=1225 bytes=1375 sql=7.3 elapsed_avg=16.842083ms allocated_avg=44312B
+    planner_context_metrics_test.go:86: nodes=1000 mode=bootstrap_event chars=2214 bytes=2364 sql=7.0 elapsed_avg=21.819638ms allocated_avg=109109B
+=== RUN   TestPlannerOnDemandContextMetrics/10000
+    planner_context_metrics_test.go:86: nodes=10000 mode=previous_overview chars=12414 bytes=12616 sql=18.0 elapsed_avg=1.281152833s allocated_avg=1107552B
+    planner_context_metrics_test.go:86: nodes=10000 mode=bootstrap_startup chars=1230 bytes=1380 sql=7.3 elapsed_avg=52.023958ms allocated_avg=42749B
+    planner_context_metrics_test.go:86: nodes=10000 mode=bootstrap_event chars=2219 bytes=2369 sql=7.0 elapsed_avg=266.850374ms allocated_avg=109594B
+--- PASS: TestPlannerOnDemandContextMetrics (23.84s)
+    --- PASS: TestPlannerOnDemandContextMetrics/10 (0.91s)
+    --- PASS: TestPlannerOnDemandContextMetrics/1000 (2.54s)
+    --- PASS: TestPlannerOnDemandContextMetrics/10000 (20.28s)
+=== RUN   TestPlannerPlanningScenarioMetrics
+2026/10/30 10:38:26 [context-input] task=2035 role=planner chars=24749 bytes=41029 system_bytes=15994 tool_schema_bytes=22523 history_bytes=2397 before_chars=24749 history_retrieval_calls=0 repeated_queries=0 projection_ms=1
+2026/10/30 10:38:26 [context-filter] task=2035 role=planner elapsed_ms=5
+2026/10/30 10:38:26 [context-usage] task=2035 role=planner input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+2026/10/30 10:38:26 [context-read] task=2035 role=planner tool=context_search elapsed_ms=5 failed=false
+2026/10/30 10:38:26 [context-input] task=2035 role=planner chars=25043 bytes=41323 system_bytes=15994 tool_schema_bytes=22523 history_bytes=2691 before_chars=25043 history_retrieval_calls=1 repeated_queries=0 projection_ms=3
+2026/10/30 10:38:26 [context-filter] task=2035 role=planner elapsed_ms=5
+2026/10/30 10:38:26 [context-usage] task=2035 role=planner input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+2026/10/30 10:38:26 [context-input] task=2035 role=planner chars=25099 bytes=41379 system_bytes=15994 tool_schema_bytes=22523 history_bytes=2747 before_chars=25099 history_retrieval_calls=1 repeated_queries=0 projection_ms=0
+2026/10/30 10:38:26 [context-filter] task=2035 role=planner elapsed_ms=3
+2026/10/30 10:38:26 [context-usage] task=2035 role=planner input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+    planner_scenario_metrics_test.go:107: nodes=10 baseline=false text_chars=8342 text_bytes=17930 sql=40 tools=2 mock_model_requests=3 elapsed=52.651959ms allocated=1657960B
+2026/10/30 10:38:27 [context-input] task=2036 role=planner chars=24753 bytes=41033 system_bytes=15994 tool_schema_bytes=22523 history_bytes=2401 before_chars=24753 history_retrieval_calls=0 repeated_queries=0 projection_ms=0
+2026/10/30 10:38:27 [context-filter] task=2036 role=planner elapsed_ms=2
+2026/10/30 10:38:27 [context-usage] task=2036 role=planner input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+2026/10/30 10:38:27 [context-read] task=2036 role=planner tool=context_search elapsed_ms=36 failed=false
+2026/10/30 10:38:27 [context-input] task=2036 role=planner chars=25047 bytes=41327 system_bytes=15994 tool_schema_bytes=22523 history_bytes=2695 before_chars=25047 history_retrieval_calls=1 repeated_queries=0 projection_ms=0
+2026/10/30 10:38:27 [context-filter] task=2036 role=planner elapsed_ms=2
+2026/10/30 10:38:27 [context-usage] task=2036 role=planner input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+2026/10/30 10:38:27 [context-input] task=2036 role=planner chars=25099 bytes=41379 system_bytes=15994 tool_schema_bytes=22523 history_bytes=2747 before_chars=25099 history_retrieval_calls=1 repeated_queries=0 projection_ms=0
+2026/10/30 10:38:27 [context-filter] task=2036 role=planner elapsed_ms=2
+2026/10/30 10:38:27 [context-usage] task=2036 role=planner input_tokens=0 output_tokens=0 cache_read_tokens=0 cache_write_tokens=0 elapsed_ms=0 failed=false
+    planner_scenario_metrics_test.go:107: nodes=1000 baseline=false text_chars=8346 text_bytes=17934 sql=40 tools=2 mock_model_requests=3 elapsed=70.359583ms allocated=1395728B
+--- PASS: TestPlannerPlanningScenarioMetrics (1.00s)
+=== RUN   TestLongContextFixedStartupMetrics
+    request_budget_test.go:112: fixed_completed_todos=100 each_chars=600 projected_chars=200 projected_bytes=304 fixed_worker_intent_chars=24000 mandate_chars=1770 mandate_bytes=5136
+--- PASS: TestLongContextFixedStartupMetrics (0.00s)
+PASS
+ok  	github.com/neouks/series/agent	28.669s

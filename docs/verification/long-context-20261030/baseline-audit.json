@@ -1,0 +1,97 @@
+{
+  "scope": "Source audit and fixed synthetic fixtures; no production database or live LLM requests",
+  "units": "Unicode characters and UTF-8 bytes, not measured model tokens",
+  "business_code_modified": false,
+  "planner": {
+    "bootstrap_max_characters": 8000,
+    "bootstrap_records_total_max": 8,
+    "previous_round_transcript_automatically_resumed": false,
+    "counts_scope": "all currently visible nodes in current task and direct source tasks",
+    "startup_1000_nodes": {
+      "characters": 1143,
+      "sql_calls": 4,
+      "mean_milliseconds": 111.041903
+    },
+    "event_1000_nodes": {
+      "characters": 2092,
+      "sql_calls": 4,
+      "mean_milliseconds": 109.789263
+    },
+    "startup_10000_nodes_recheck": {
+      "characters": 1148,
+      "sql_calls": 4,
+      "mean_milliseconds": 83.081041
+    },
+    "event_10000_nodes_recheck": {
+      "characters": 2105,
+      "sql_calls": 4,
+      "mean_milliseconds": 105.252555
+    },
+    "first_10000_node_run": "5s timeout observed; isolated rerun passed, root cause not established"
+  },
+  "worker": {
+    "direct_parent_max_records": 20,
+    "parent_summary_max_characters": 240,
+    "asset_identity_max_records": 10,
+    "intent_payload_system_block": "full payload, no independent input length budget"
+  },
+  "history": {
+    "read_body_characters_budget": 24000,
+    "directory_characters_budget": 4000,
+    "100_page_fixture": {
+      "before_characters": 447392,
+      "after_characters": 59125,
+      "after_bytes": 99335,
+      "retained_data_body_characters": 21247
+    },
+    "not_covered": [
+      "tool-use arguments",
+      "write results",
+      "error diagnostics",
+      "Bash/file results (SDK compression still applies)"
+    ]
+  },
+  "stress_fixtures": {
+    "worker_intent_summary_24000_characters": {
+      "system_block_characters": 24113,
+      "bytes": 72199
+    },
+    "100_completed_todos_600_characters_each": {
+      "rendered_characters": 60645,
+      "bytes": 181015
+    },
+    "100_cancelled_intents_600_summary_plus_600_reason_characters_each": {
+      "rendered_characters": 122387,
+      "bytes": 363943
+    },
+    "long_system_and_write_24000_characters_each": {
+      "before_projection_characters": 48502,
+      "after_projection_characters": 48631,
+      "write_input_characters_unchanged": 24030
+    }
+  },
+  "fresh_default_tool_schema_measurement": {
+    "not_live_deployment_tool_config": true,
+    "planner": {
+      "tools": 18,
+      "bytes": 21555
+    },
+    "worker": {
+      "tools": 19,
+      "bytes": 27838
+    }
+  },
+  "tests": {
+    "targeted_agent_db_server": "passed, including direct/deferred and noa on/off mock runs",
+    "temporary_stress_test": "passed; temporary test removed from workspace",
+    "first_metrics_run": "failed at 10000-node bootstrap timeout",
+    "isolated_10000_node_recheck": "passed"
+  },
+  "priorities": [
+    "Bound planner todo and cancellation injection while preserving enforcement and safe read paths",
+    "Use a bounded mandate projection for Worker system context, leave long detail behind typed references",
+    "Project settled long write arguments and tool envelopes with protocol-safe paired history summaries",
+    "Reduce redundant supervision wakes and normalize semantically equivalent read queries",
+    "Investigate broad count/lineage query plans under cold/new-table statistics; retain authorization checks"
+  ]
+}

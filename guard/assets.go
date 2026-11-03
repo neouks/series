@@ -180,6 +180,11 @@ func (p TaskAssetPolicy) check(tool string, input []byte) (string, bool) {
 	if tool == noa.CompressToolName {
 		return "", false
 	}
+	// Built-in TodoWrite persists planning/progress text, never executes its
+	// mentioned targets. It still passes through the other hook layers.
+	if tool == "TodoWrite" {
+		return "", false
+	}
 	// Discovery registers candidates; authorization belongs to the transaction
 	// and the returned executable view, not a pre-tool test of its new hosts.
 	// Approval metadata reads enforce their own task/role boundary. add_intent

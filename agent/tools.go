@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -412,7 +414,12 @@ func readTool(name, desc string, schema map[string]any, run func(context.Context
 			if tc != nil && tc.MaxOutputChars > 0 {
 				ctx = context.WithValue(ctx, readBudgetKey{}, tc.MaxOutputChars)
 			}
+			started := time.Now()
 			res, err := run(ctx, in)
+			if retrievalTool(name) {
+				ri := RunInfoFrom(ctx)
+				log.Printf("[context-read] task=%d role=%s tool=%s elapsed_ms=%d failed=%t", ri.TaskID, ri.AgentKey, name, time.Since(started).Milliseconds(), err != nil || res.IsError)
+			}
 			return captureStructuredResult(name, res, tc), err
 		},
 	})
@@ -485,22 +492,28 @@ func (t *ToolSet) graphOverview() actool.CoreTool {
 		if err != nil {
 			return actool.Errorf(err.Error()), nil
 		}
-		return contextJSON(ctx, boundedGraphOverview(target.graphOverviewData(), plannerOverviewRunes, readOutputBudget(ctx), string(a.TaskID)))
+		return contextJSON(ctx, boundedGraphOverview(target.graphOverviewDataContext(ctx), plannerOverviewRunes, readOutputBudget(ctx), string(a.TaskID)))
 	})
 }
 
-// graphOverviewData computes the distilled situational snapshot shared by the
-// graph_overview tool and the planner's wake-up prompt (which pre-injects it so
-// the model needn't spend a turn calling the tool — every plan round starts with
-// an empty context and always needs this first).
+// graphOverviewData is the explicit bounded graph_overview read. Planner wakeups
+// use the separate lightweight plannerBootstrap path and never call this loader.
 func (t *ToolSet) graphOverviewData() map[string]any {
+	return t.graphOverviewDataContext(context.Background())
+}
+func (t *ToolSet) graphOverviewDataContext(ctx context.Context) map[string]any {
 	if t == nil || t.ts == nil {
 		return map[string]any{"error": "graph_overview 需要任务探索上下文，当前工具未绑定任务"}
 	}
 	local := *t
 	local.overviewReads = &overviewReadScope{states: map[int64]map[int64]string{}}
 	t = &local
-	out := map[string]any{}
+	out := map[string]any{"source_task_id": t.taskID, "is_navigation": true, "is_snapshot": true}
+	if rev, err := t.ts.GraphRevision(ctx, true); err == nil {
+		out["graph_revision"] = rev
+	} else {
+		out["revision_unavailable"] = true
+	}
 	unavailable := map[string]string{}
 	markError := func(err error, keys ...string) {
 		if err != nil {
@@ -553,65 +566,29 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// produced it. This is the relationship layer the flat lists lacked.
 	// Fold only authorized, still-cold members. Revived members remain eligible
 	// for the recent windows, which are capped independently of the hot set.
-	covered := t.authorizedCoveredMembers(t.ts, t.taskID)
-	var hotAtRender map[int64]bool
-	if len(covered) > 0 {
-		var err error
-		hotAtRender, err = t.ts.ToolHotNodeIDs(context.Background())
-		if err != nil {
-			covered = nil
-			markError(err, "folding")
-		}
-	}
-	hidden := func(id int64) bool { _, c := covered[id]; return c && !hotAtRender[id] }
+	hidden := func(int64) bool { return false } // SQL pages already exclude authorized cold folds.
 	const openIntentsCap = 30
-	frontier, frontierErr := t.ts.ToolOpenIntentPage(context.Background(), openIntentsCap)
+	frontier, frontierErr := t.ts.ToolOpenIntentPage(ctx, openIntentsCap)
 	markError(frontierErr, "frontier_open", "open_intents")
 	fr := frontier.Nodes
 	out["frontier_open"] = frontier.Total
-	all, intentsErr := t.ts.ToolNodesByKind(db.KindIntent, 300)
-	markError(intentsErr, "running_intents", "recent_done_intents", "done_intents_total", "done_intents_in_window")
-	all, intentsAuthErr := t.authorizedNodesForStore(all, t.ts, t.taskID)
-	markError(intentsAuthErr, "running_intents", "recent_done_intents", "done_intents_in_window")
-	var running, recentDone []*db.Node
-	doneTotal := 0
-	for _, n := range all {
-		switch n.State {
-		case "running":
-			running = append(running, n)
-		case "done", "blocked", "exhausted", "stopped":
-			doneTotal++
-			if hidden(n.ID) {
-				continue // in a cold_digest and still cold — shown via cold_digests (§6.2)
-			}
-			recentDone = append(recentDone, n) // newest first; cap applied below
-		}
-	}
-	// Recent terminal intents are capped below after authorization and folding.
-	// done_intents_total：已结束意图（done/blocked/exhausted）总数，与 recent_done_intents
-	// 平行命名——后者只是它的最新窗口（≤12）截断视图。两键并排即自描述："看到的是 N/总数"，
-	// 让 planner 去重时别把"没显示"当成"没派过"，无需在提示词里另行解释。
-	if t.as == nil || t.taskID <= 0 {
-		if total, err := t.ts.CountFinishedIntents(); err == nil {
-			out["done_intents_total"] = total
-		} else {
-			markError(err, "done_intents_total")
-		}
-	} else {
-		out["done_intents_in_window"] = doneTotal
+	running, intentsErr := t.ts.ToolRunningIntentPage(ctx, 31)
+	markError(intentsErr, "running_intents")
+	terminalPage, terminalErr := t.ts.ToolUnfoldedPage(ctx, db.KindIntent, 12, t.taskID)
+	markError(terminalErr, "recent_done_intents", "done_intents_total")
+	recentDone := terminalPage.Nodes
+	out["done_intents_total"] = terminalPage.Total
+	if len(running) > 30 {
+		running = running[:30]
+		out["running_intents_has_more"] = true
+		out["running_intents_read"] = map[string]any{"tool": "context_search", "args": map[string]any{"types": []string{"intent"}, "state": "running"}}
 	}
 	// findings (confirmed vulns) and facts (worker exploration results) are
 	// now distinct node kinds. recent_facts surfaces fact summaries (esp.
 	// negative results) so the planner sees them in one call; full content
 	// via node_detail(id).
-	vulnPage, vulnErr := t.ts.ToolLocalNodePage(context.Background(), db.KindFinding, 10)
-	hiddenIDs := []int64{}
-	for id := range covered {
-		if hidden(id) {
-			hiddenIDs = append(hiddenIDs, id)
-		}
-	}
-	factPage, factErr := t.ts.ToolLocalNodePageExcluding(context.Background(), db.KindFact, 20, hiddenIDs)
+	vulnPage, vulnErr := t.ts.ToolLocalNodePage(ctx, db.KindFinding, 10)
+	factPage, factErr := t.ts.ToolUnfoldedPage(ctx, db.KindFact, 20, t.taskID)
 	markError(vulnErr, "findings_total", "finding_list")
 	markError(factErr, "facts", "recent_facts")
 	vulnNodes := vulnPage.Nodes[:min(10, len(vulnPage.Nodes))]
@@ -621,7 +598,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	for id := range visible {
 		visibleIDs = append(visibleIDs, id)
 	}
-	edges, edgesErr := t.ts.EdgesWithin(visibleIDs)
+	edges, edgesErr := t.ts.EdgesWithinContext(ctx, visibleIDs)
 	markError(edgesErr, "lineage")
 	parentsOf := map[int64][]int64{}
 	yieldsOf := map[int64][]int64{}
@@ -686,7 +663,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	recentDone = recentDone[:min(recentDoneCap, len(recentDone))]
 	out["recent_done_intents"] = compactIntents(recentDone, parentsOf, yieldsOf)
 	const coldDigestsCap = 15
-	cds, more, coldErr := t.coldDigestsRecent(t.ts, t.taskID, coldDigestsCap)
+	cds, more, coldErr := t.coldDigestsRecentContext(ctx, t.ts, t.taskID, coldDigestsCap)
 	markError(coldErr, "cold_digests", "cold_digests_more")
 	if len(cds) > 0 {
 		out["cold_digests"] = cds
@@ -706,7 +683,7 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	// Direct source tasks are a live, read-only blackboard view. Keep their
 	// summaries in a separate field so their intents never enter this task's
 	// frontier or get mistaken for locally claimable work.
-	related, relatedErr := t.relatedTaskOverviews()
+	related, relatedErr := t.relatedTaskOverviewsContext(ctx)
 	markError(relatedErr, "related_tasks")
 	out["related_tasks"] = related
 	// coverage：粗略的资产测试覆盖度参考——范围(task_scope)内的资产里，被 fact 碰过的
@@ -964,6 +941,9 @@ func (b *overviewTextBudget) take(value any, fieldLimit int) string {
 // tasks. It intentionally reads each source's local store methods, never its own
 // related sources, so inheritance is one level only.
 func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
+	return t.relatedTaskOverviewsContext(context.Background())
+}
+func (t *ToolSet) relatedTaskOverviewsContext(ctx context.Context) ([]map[string]any, error) {
 	sources, err := t.directSourceStores()
 	if err != nil {
 		return nil, err
@@ -977,7 +957,7 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 		ts := source.Store
 		// §2 cross-task: render the source task's OWN folded view — fold out the
 		// members it has already folded, and surface its cold_digests read-only.
-		hidden := t.hiddenMembersFor(ts, source.Task.TaskID)
+		hidden := func(int64) bool { return false } // source pages fold in SQL.
 		budget := overviewTextBudget{remaining: perSourceTextBudget}
 		item := map[string]any{
 			"source_task_id": source.Task.TaskID,
@@ -995,7 +975,14 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 			}
 		}
 		readNodes := func(kind string, limit int) []*db.Node {
-			nodes, err := ts.ToolNodesByKind(kind, limit)
+			var nodes []*db.Node
+			var err error
+			if kind == db.KindFact {
+				page, e := ts.ToolUnfoldedPage(ctx, kind, limit, t.taskID)
+				nodes, err = page.Nodes, e
+			} else {
+				nodes, err = ts.ToolNodesByKind(kind, limit)
+			}
 			note(err, kind)
 			if err != nil {
 				return nil
@@ -1007,21 +994,6 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 		stats, statsErr := ts.Stats()
 		if t.as == nil {
 			note(statsErr, "node_stats")
-		}
-
-		edges, edgesErr := ts.Edges(5000)
-		note(edgesErr, "lineage")
-		parentsOf := map[int64][]int64{}
-		yieldsOf := map[int64][]int64{}
-		factFrom := map[int64]int64{}
-		for _, edge := range edges {
-			switch edge.Rel {
-			case db.RelDerivedFrom, db.RelSpawns:
-				parentsOf[edge.To] = append(parentsOf[edge.To], edge.From)
-			case db.RelYields:
-				yieldsOf[edge.From] = append(yieldsOf[edge.From], edge.To)
-				factFrom[edge.To] = edge.From
-			}
 		}
 
 		goals := readNodes(db.KindGoal, relatedOverviewMaxGoalsPerSource)
@@ -1048,8 +1020,29 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 
 		facts := readNodes(db.KindFact, relatedOverviewMaxFactsPerSource)
 		findings := readNodes(db.KindFinding, relatedOverviewMaxFindingsPerTask)
-		intentNodes := readNodes(db.KindIntent, 300)
+		intentPage, intentPageErr := ts.ToolUnfoldedPage(ctx, db.KindIntent, relatedOverviewMaxIntentsPerTask, t.taskID)
+		note(intentPageErr, "intent")
+		intentNodes := intentPage.Nodes
 		visible := visibleNodeIDs(goals, hints, facts, findings, intentNodes)
+		edgeIDs := []int64{}
+		for id := range visible {
+			edgeIDs = append(edgeIDs, id)
+		}
+		edges, edgesErr := ts.EdgesWithinContext(ctx, edgeIDs)
+		note(edgesErr, "lineage")
+		parentsOf := map[int64][]int64{}
+		yieldsOf := map[int64][]int64{}
+		factFrom := map[int64]int64{}
+		for _, edge := range edges {
+			switch edge.Rel {
+			case db.RelDerivedFrom, db.RelSpawns:
+				parentsOf[edge.To] = append(parentsOf[edge.To], edge.From)
+			case db.RelYields:
+				yieldsOf[edge.From] = append(yieldsOf[edge.From], edge.To)
+				factFrom[edge.To] = edge.From
+			}
+		}
+
 		factFrom = restrictNodeOrigins(factFrom, visible)
 		terminalIntent := make(map[int64]bool, len(intentNodes))
 		for _, intent := range intentNodes {
@@ -1092,7 +1085,7 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 		}
 		item["recent_facts"] = recentFacts
 
-		recentDoneRaw, terminalErr := ts.ToolTerminalIntents(relatedOverviewMaxIntentsPerTask)
+		recentDoneRaw, terminalErr := intentNodes, intentPageErr
 		if terminalErr != nil {
 			item["recent_intent_results_error"] = terminalErr.Error()
 		}
@@ -1133,7 +1126,7 @@ func (t *ToolSet) relatedTaskOverviews() ([]map[string]any, error) {
 		}
 		// §2 cross-task: the source task's folded cold region, read-only. Members are
 		// resolvable via expand_digest(id)/node_detail(id), which search source tasks.
-		cds, more, digestErr := t.coldDigestsRecent(ts, source.Task.TaskID, relatedOverviewMaxDigestsPerSource)
+		cds, more, digestErr := t.coldDigestsRecentContext(ctx, ts, source.Task.TaskID, relatedOverviewMaxDigestsPerSource)
 		if digestErr != nil {
 			item["cold_digests_error"] = digestErr.Error()
 		} else {

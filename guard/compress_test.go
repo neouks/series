@@ -41,6 +41,18 @@ func TestCompressSkipsAssetInspectionButPreservesHooks(t *testing.T) {
 	}
 }
 
+func TestTodoMetadataDoesNotBecomeAnExecutionTarget(t *testing.T) {
+	input := []byte(`{"todos":[{"content":"记录 https://pending.invalid.example 和 https://blocked.invalid.example 的限制，不执行","status":"pending"}]}`)
+	for _, deny := range []bool{false, true} {
+		inner := &compressTestHooks{block: deny}
+		h := assetPolicyHooks{inner: inner, policy: TaskAssetPolicy{Store: &db.AssetStore{}, TaskID: 1}}
+		blocked, reason, rewritten := h.PreToolUse(context.Background(), "TodoWrite", input)
+		if blocked != deny || reason != "inner hook" || string(rewritten) != string(input) || inner.calls != 1 {
+			t.Fatal("todo hook chain changed")
+		}
+	}
+}
+
 func TestCompressAssetPolicyIsolation(t *testing.T) {
 	dsn := os.Getenv("SERIES_PG_DSN")
 	if dsn == "" {
@@ -98,7 +110,7 @@ func TestCompressAssetPolicyIsolation(t *testing.T) {
 	}
 	// Similar names and real execution tools must retain authorization checks.
 	input, _ = json.Marshal(map[string]string{"url": "https://" + host})
-	for _, name := range []string{"Bash", "compress", "CompressCustom", "mcp__Compress"} {
+	for _, name := range []string{"Bash", "compress", "CompressCustom", "mcp__Compress", "mcp__TodoWrite", "TodoWriteCustom"} {
 		if reason := (TaskAssetPolicy{Store: assets, TaskID: task.ID}).Check(name, input); reason == "" {
 			t.Fatalf("%s bypassed revoked asset", name)
 		}

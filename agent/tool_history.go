@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/Autumn-27/norma/llm"
@@ -22,11 +23,60 @@ func normalizedReadQuery(name string, raw json.RawMessage) string {
 	switch name {
 	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
 		// New contracts have explicit continuation positions. Never deduplicate writes.
-		var v any
+		var v map[string]any
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
 		if dec.Decode(&v) != nil {
 			return ""
+		}
+		// These tools accept the same task ID as a JSON integer or decimal
+		// string. Normalize identity without merging different task scopes.
+		if name == "context_search" || name == "context_get" || name == "graph_overview" {
+			if id, ok := v["task_id"].(json.Number); ok && !strings.ContainsAny(id.String(), ".eE+-") {
+				v["task_id"] = id.String()
+			}
+		}
+		// Normalize only set-valued fields and aliases the handlers actually
+		// accept. Item order, cursors, limits and text offsets remain significant.
+		if name == "context_search" {
+			if values, ok := v["types"].([]any); ok {
+				types := []string{}
+				valid := true
+				for _, x := range values {
+					s, ok := x.(string)
+					if !ok {
+						valid = false
+						break
+					}
+					types = append(types, s)
+				}
+				if valid {
+					slices.Sort(types)
+					types = slices.Compact(types)
+					v["types"] = types
+				}
+			}
+		}
+		if name == "context_get" {
+			if items, ok := v["items"].([]any); ok {
+				for _, it := range items {
+					item, ok := it.(map[string]any)
+					if !ok {
+						continue
+					}
+					if item["view"] == "detail" || item["view"] == "" {
+						delete(item, "view")
+					}
+					for _, key := range []string{"offset", "index", "before"} {
+						if n, ok := item[key].(json.Number); ok && n == "0" {
+							delete(item, key)
+						}
+					}
+					if item["field"] == "" {
+						delete(item, "field")
+					}
+				}
+			}
 		}
 		b, _ := json.Marshal(v)
 		return name + ":" + string(b)

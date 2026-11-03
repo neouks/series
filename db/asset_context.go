@@ -36,14 +36,14 @@ func (s *AssetStore) TaskNodeAccess(taskID int64, ids []int64) (map[int64]NodeAc
  SELECT l.root_id,a.asset_id FROM lineage l JOIN exploration_anchors a ON a.node_id=l.id
  UNION SELECT l.root_id,CASE WHEN x.value ~ '^[0-9]{1,18}$' THEN x.value::bigint ELSE 0 END
  FROM lineage l JOIN exploration_nodes n ON n.id=l.id
- CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(n.payload->'asset_ids')='array' THEN n.payload->'asset_ids' ELSE '[]'::jsonb END)x(value)
+ CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN EXISTS(SELECT 1 FROM graph_node_projection gp WHERE gp.node_id=n.id AND gp.asset_metadata_ready) THEN to_jsonb((SELECT gp.payload_asset_ids FROM graph_node_projection gp WHERE gp.node_id=n.id)) ELSE CASE WHEN jsonb_typeof(n.payload->'asset_ids')='array' THEN n.payload->'asset_ids' ELSE '[]'::jsonb END END)x(value)
 ), permission_keys AS MATERIALIZED (
  SELECT DISTINCT r.owner,a.asset_id FROM roots r JOIN anchors a ON a.root_id=r.id
 ), permissions AS MATERIALIZED (
  SELECT owner,asset_id,task_asset_effectively_approved($1,asset_id) AND task_asset_effectively_approved(owner,asset_id) allowed, task_asset_effective_approval_state($1,asset_id) current_state, task_asset_effective_approval_state(owner,asset_id) owner_state FROM permission_keys
 )
 SELECT r.id,COALESCE((SELECT jsonb_agg(DISTINCT reason ORDER BY reason) FROM (
- SELECT 'unavailable' reason WHERE EXISTS(SELECT 1 FROM lineage l LEFT JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp_id WHERE l.root_id=r.id AND (n.id IS NULL OR (NOT $3::boolean AND n.kind='digest' AND NOT EXISTS(SELECT 1 FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.src_id=n.id AND e.rel='covers'))))
+ SELECT 'unavailable' reason WHERE EXISTS(SELECT 1 FROM lineage l LEFT JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp_id WHERE l.root_id=r.id AND (n.id IS NULL OR (n.kind='digest' AND NOT series_digest_sources_current(n.payload)) OR (NOT $3::boolean AND n.kind='digest' AND NOT EXISTS(SELECT 1 FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.src_id=n.id AND e.rel='covers'))))
  UNION ALL
  SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM assets asset WHERE asset.id=a.asset_id) THEN 'unavailable' ELSE st.reason END FROM anchors a JOIN permissions p ON p.owner=r.owner AND p.asset_id=a.asset_id
  CROSS JOIN LATERAL (VALUES(p.current_state),(p.owner_state)) st(reason)

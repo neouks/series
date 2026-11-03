@@ -256,7 +256,7 @@ func parseContextRef(ref string) (string, int64, error) {
 	return parts[0], id, nil
 }
 func (t *ToolSet) contextGet() actool.CoreTool {
-	item := obj(map[string]any{"ref": str("node:探索节点ID 或 activity:活动ID；不能使用独立finding_id或资产ID"), "view": map[string]any{"type": "string", "description": "默认detail；output/parents仅意图节点，members仅摘要节点；activity仅detail", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("detail的JSON Pointer；节点从payload根取，如/evidence、/report；activity可取/detail或/summary；省略先看字段目录"), "index": intp("detail集合的next_index，默认0"), "offset": intp("detail/output文本的next_offset，按Unicode字符计，默认0"), "before": intp("members/parents的next_before；不能与field/index/offset组合"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"}}, "ref")
+	item := obj(map[string]any{"ref": str("node:探索节点ID 或 activity:活动ID；Planner还可用planner_state:当前任务ID分页读完整待办；不能使用独立finding_id或资产ID"), "view": map[string]any{"type": "string", "description": "默认detail；output/parents仅意图节点，members仅摘要节点；activity仅detail", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("detail的JSON Pointer；节点从payload根取，如/evidence、/report；/asset_ids分页读当前节点及祖先的资产ID；activity可取/detail或/summary；省略先看字段目录"), "index": intp("detail集合的next_index，默认0"), "offset": intp("detail/output文本的next_offset，按Unicode字符计，默认0"), "before": intp("members/parents的next_before；不能与field/index/offset组合"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"}}, "ref")
 	return readTool("context_get", "批量读取1..5个引用；view选择正文、意图输出、上游事实或摘要成员。每项独立返回错误和可直接调用的next；output区分最终结果与中途进度。顶层max_chars为总预算（默认8000、最多24000），各项均分，每项max_chars只能进一步收紧；工具输出上限仍生效。", obj(map[string]any{"task_id": contextTaskSchema(), "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": item}, "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000}}, "items"), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			TaskID   contextTaskID `json:"task_id"`
@@ -298,6 +298,9 @@ func (t *ToolSet) readContextItem(ctx context.Context, task string, item context
 			return nil, fmt.Errorf("items[].max_chars 须1..24000")
 		}
 		budget = min(budget, *item.MaxChars)
+	}
+	if strings.HasPrefix(item.Ref, "planner_state:") {
+		return t.readPlannerState(ctx, task, item, budget)
 	}
 	kind, id, e := parseContextRef(item.Ref)
 	if e != nil {
@@ -347,6 +350,16 @@ func (t *ToolSet) readContextItem(ctx context.Context, task string, item context
 			offset = 0
 		}
 		out, e = target.ts.ContextNode(ctx, id, field, index, offset, budget)
+		if e == nil && out["navigation_only"] == true {
+			if next, ok := structuredInt64(out["next_index"]); ok {
+				args := map[string]any{"items": []contextRead{{Ref: item.Ref, Index: int(next)}}}
+				if task != "" {
+					args["task_id"] = task
+				}
+				out["next"] = args
+			}
+			return out, nil
+		}
 		if e == nil && item.View == "parents" {
 			if out["kind"] != "intent" {
 				return nil, fmt.Errorf("parents 仅适用于意图")

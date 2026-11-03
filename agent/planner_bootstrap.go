@@ -56,6 +56,20 @@ func (p assetContextProvider) refreshPlannerBootstrap(ctx context.Context, req l
 				req.Messages[mi].Content[bi].Text = b.Text[:start] + `{"unavailable":"引导记录无法复核，请通过 context_search 重新读取"}` + b.Text[end:]
 				continue
 			}
+			var previousAccess string
+			_ = json.Unmarshal(value["access_revision"], &previousAccess)
+			if previousAccess != "" {
+				if ts, _ := ctx.Value(taskToolSetContextKey{}).(*ToolSet); ts != nil && ts.ts != nil && ts.taskID == p.taskID {
+					current, e := ts.ts.GraphAccessRevision(ctx)
+					if e != nil {
+						return req, e
+					}
+					if current != previousAccess {
+						delete(value, "counts")
+						value["counts_access_changed"] = json.RawMessage(`true`)
+					}
+				}
+			}
 			var records []db.PlannerContextRecord
 			if json.Unmarshal(value["records"], &records) != nil {
 				// Keep a standalone query error, but never carry an unverified
@@ -158,6 +172,7 @@ func (t *ToolSet) plannerBootstrap(ctx context.Context, triggers []TriggerEvent)
 			out["task_description_omitted"] = true
 		}
 		out["counts"] = data.Counts
+		out["graph_revision"] = data.Revision
 		visibleCount := 0
 		for _, c := range data.Counts {
 			visibleCount += c.Count
@@ -166,6 +181,12 @@ func (t *ToolSet) plannerBootstrap(ctx context.Context, triggers []TriggerEvent)
 		if data.HasMore {
 			out["related_records_truncated"] = true
 		}
+	}
+	if data.AccessRevision != "" {
+		out["access_revision"] = data.AccessRevision
+	} else {
+		delete(out, "counts")
+		out["counts_unavailable"] = "审批范围版本读取失败"
 	}
 	marshal := func() []byte { b, _ := json.Marshal(out); return b }
 	for _, record := range data.Records {

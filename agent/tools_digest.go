@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/neouks/series/db"
@@ -86,55 +85,16 @@ func (t *ToolSet) authorizedCoveredMembers(store *db.ExplorationStore, ownerTask
 // coldDigestsRecent keeps the newest authorized digests and returns older IDs.
 // Memberships and authorization are batched; no per-digest database reads.
 func (t *ToolSet) coldDigestsRecent(store *db.ExplorationStore, ownerTaskID int64, limit int) ([]map[string]any, []int64, error) {
-	ads, err := store.ToolActiveDigests()
-	if err != nil || len(ads) == 0 {
-		return nil, nil, err
-	}
-	ids := make([]int64, 0, len(ads))
-	for _, d := range ads {
-		ids = append(ids, d.ID)
-	}
-	allowed, members, err := t.digestAuthorizationBatch(store, ownerTaskID, ids)
+	return t.coldDigestsRecentContext(context.Background(), store, ownerTaskID, limit)
+}
+func (t *ToolSet) coldDigestsRecentContext(ctx context.Context, store *db.ExplorationStore, ownerTaskID int64, limit int) ([]map[string]any, []int64, error) {
+	rows, more, err := store.ToolRecentDigests(ctx, limit, t.taskID)
 	if err != nil {
 		return nil, nil, err
 	}
-	type entry struct {
-		node      *db.Node
-		freshness int64
-	}
-	entries := make([]entry, 0, len(ads))
-	for _, d := range ads {
-		if !allowed[d.ID] {
-			continue
-		}
-		var freshness int64
-		for _, id := range members[d.ID] {
-			if id > freshness {
-				freshness = id
-			}
-		}
-		entries = append(entries, entry{d, freshness})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].freshness == entries[j].freshness {
-			return entries[i].node.ID > entries[j].node.ID
-		}
-		return entries[i].freshness > entries[j].freshness
-	})
-	shown := make([]map[string]any, 0, min(limit, len(entries)))
-	var more []int64
-	for i, e := range entries {
-		if i >= limit {
-			more = append(more, e.node.ID)
-			continue
-		}
-		var p struct {
-			Body string `json:"body"`
-		}
-		if err := json.Unmarshal(e.node.Payload, &p); err != nil {
-			return nil, nil, err
-		}
-		shown = append(shown, map[string]any{"id": e.node.ID, "body": firstLine(p.Body, 1200), "body_is_summary": true, "member_count": len(members[e.node.ID])})
+	shown := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		shown = append(shown, map[string]any{"id": r.ID, "body": r.Body, "body_is_summary": true, "member_count": r.MemberCount, "body_truncated": r.BodyTruncated, "source_revision": r.SourceRevision, "rule_version": r.RuleVersion, "source_task_id": ownerTaskID, "read": map[string]any{"tool": "context_get", "args": map[string]any{"items": []contextRead{{Ref: fmt.Sprintf("node:%d", r.ID), Field: "/body"}}}}})
 	}
 	return shown, more, nil
 }

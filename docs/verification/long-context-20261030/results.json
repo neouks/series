@@ -1,0 +1,410 @@
+{
+  "date": "2026-10-30",
+  "scope": "探索图增量维护与 Planner/Worker 长任务上下文；保留此前未提交的分步报告功能。",
+  "source_base": "335bd2e082ff8096c6611b550b589bfeec7f8e7b",
+  "environment": {
+    "go": "1.26.3 darwin/arm64",
+    "database": "disposable PostgreSQL 17; independent database per test package; no business DB",
+    "models": "local in-process and HTTP mock providers only",
+    "temporary_database_container": "removed after verification"
+  },
+  "implementation": {
+    "storage": [
+      "graph_revisions",
+      "graph_node_projection",
+      "graph_dirty_nodes",
+      "graph_hot_reach",
+      "graph_repair_seen",
+      "graph_count_cache",
+      "planner_working_state"
+    ],
+    "maintenance": {
+      "bootstrap_page": 256,
+      "dirty_page": 128,
+      "reach_frontier_page": 128,
+      "neighbors_per_frontier_per_direction": 128,
+      "quiet_cooling_seconds": 600,
+      "stale_retirement_page": 64,
+      "full_payloads_transferred_to_go": false,
+      "epoch_seed_at_startup": "exploration IDs only; bodies backfilled later; does not trigger a business revision"
+    },
+    "summary": {
+      "members_max": 32,
+      "input_characters_max": 24000,
+      "output_tokens_max": 1500,
+      "blocks_per_job": 4,
+      "job_seconds": 120,
+      "cooldown_seconds": 60,
+      "per_task_concurrency": 1,
+      "global_concurrency": 2,
+      "publication": "model outside transaction; live source versions/fingerprints, permissions and task mode rechecked; busy source rows abort publication without waiting; retain provenance edges for stale navigation"
+    },
+    "planner": {
+      "guide_records": 8,
+      "guide_characters": 8000,
+      "todo_preview_characters": 3000,
+      "full_todos_reference": "context_get items=[{ref:planner_state:<current task ID>,field:/todos,index:0,offset:0}]; Planner current task only",
+      "unchanged_heartbeat_model_requests": 0,
+      "query_proof_gate": false
+    },
+    "worker": {
+      "mandate_preview_characters": 1600,
+      "parents_records": 8,
+      "parents_characters": 4000,
+      "asset_records": 10,
+      "asset_characters": 3000,
+      "memory_records": 3,
+      "memory_characters": 2000,
+      "progress": "bounded dynamic preview; full task-owned todo file; SDK full-list auto reminders disabled"
+    },
+    "request": {
+      "planner_soft_characters": 32000,
+      "planner_soft_bytes": 131072,
+      "worker_soft_characters": 48000,
+      "worker_soft_bytes": 196608,
+      "read_body_characters": 24000,
+      "reference_directory_characters": 4000,
+      "latest_complete_tool_batches": 2,
+      "over_budget": "warn at most once per task/role/5 min, then continue; preserve required constraints",
+      "preserved": [
+        "raw audit/transcripts/archives",
+        "current instructions/goals/constraints",
+        "latest error and incomplete batches",
+        "all mixed per-item failure results and non-text results"
+      ],
+      "receipt_safety": [
+        "only known domain-tool IDs become saved graph references",
+        "identical old diagnostics merged with counts",
+        "persisted output verified against actual file in host run directory, length and head bytes",
+        "live authorization before history projection; rereads checked again"
+      ]
+    }
+  },
+  "tests": {
+    "all_packages": [
+      {
+        "package": "github.com/neouks/series/agent",
+        "exit_code": 0,
+        "elapsed_seconds": 55.6
+      },
+      {
+        "package": "github.com/neouks/series/cmd/series",
+        "exit_code": 0,
+        "elapsed_seconds": 4.053
+      },
+      {
+        "package": "github.com/neouks/series/config",
+        "exit_code": 0,
+        "elapsed_seconds": 0.165
+      },
+      {
+        "package": "github.com/neouks/series/db",
+        "exit_code": 0,
+        "elapsed_seconds": 53.229
+      },
+      {
+        "package": "github.com/neouks/series/enrich",
+        "exit_code": 0,
+        "elapsed_seconds": 0.646
+      },
+      {
+        "package": "github.com/neouks/series/evidence",
+        "exit_code": 0,
+        "elapsed_seconds": 3.685
+      },
+      {
+        "package": "github.com/neouks/series/guard",
+        "exit_code": 0,
+        "elapsed_seconds": 0.827
+      },
+      {
+        "package": "github.com/neouks/series/intercept",
+        "exit_code": 0,
+        "elapsed_seconds": 0.407
+      },
+      {
+        "package": "github.com/neouks/series/llmpool",
+        "exit_code": 0,
+        "elapsed_seconds": 0.234
+      },
+      {
+        "package": "github.com/neouks/series/llmrec",
+        "exit_code": 0,
+        "elapsed_seconds": 0.735
+      },
+      {
+        "package": "github.com/neouks/series/mcphttp",
+        "exit_code": 0,
+        "elapsed_seconds": 0.309
+      },
+      {
+        "package": "github.com/neouks/series/report",
+        "exit_code": 0,
+        "elapsed_seconds": 0.362
+      },
+      {
+        "package": "github.com/neouks/series/server",
+        "exit_code": 0,
+        "elapsed_seconds": 41.576
+      },
+      {
+        "package": "github.com/neouks/series/sidequestion",
+        "exit_code": 0,
+        "elapsed_seconds": 0.538
+      },
+      {
+        "package": "github.com/neouks/series/traffic",
+        "exit_code": 0,
+        "elapsed_seconds": 6.563
+      }
+    ],
+    "all_packages_passed": true,
+    "frontend_typecheck": "passed",
+    "frontend_mock_ui": {
+      "passed": 56,
+      "failed": 0
+    },
+    "race_checks": [
+      "HTTP streaming/non-streaming with noa on/off",
+      "Worker todos and tool projection",
+      "summary publication vs source deletion, concurrent publication, busy-row nonblocking behavior",
+      "payload-asset metadata and legacy fallback, hot frontier fanout/resume"
+    ],
+    "late_source_checks": "final focused runs cover lifecycle gate, escaped summary inputs, legacy epoch seed, nonblocking publication and task-ID normalization",
+    "known_test_harness_issues": [
+      "Parallel packages sharing schema produce startup DDL/DML conflicts; used isolated databases per package.",
+      "Repeated full runs in a reused database can restore leftover fake tasks and race TempDir cleanup; final isolated package run passed."
+    ],
+    "whole_project_build": "passed",
+    "count_snapshot_provenance": "Counts keep the access epoch observed before the read; a newer live approval epoch cannot relabel old counts as current."
+  },
+  "measurements": {
+    "units": "Unicode characters and UTF-8 bytes of vendor-neutral CompletionRequest JSON. Vendor serialization may add/remove envelope fields. These are not model tokens. SQL counts are client statements, not SQL executed inside triggers/functions.",
+    "revision_before_after": [
+      {
+        "after_mean_ms": 0.7536,
+        "before_mean_ms": 3.8682,
+        "client_sql_per_check": 1,
+        "nodes": 10,
+        "samples": 5
+      },
+      {
+        "after_mean_ms": 0.4268,
+        "before_mean_ms": 9.5828,
+        "client_sql_per_check": 1,
+        "nodes": 1000,
+        "samples": 5
+      },
+      {
+        "after_mean_ms": 0.8994,
+        "before_mean_ms": 68.1674,
+        "client_sql_per_check": 1,
+        "nodes": 10000,
+        "samples": 5
+      },
+      {
+        "after_mean_ms": 0.4866,
+        "before_mean_ms": 601.0412,
+        "client_sql_per_check": 1,
+        "nodes": 100000,
+        "samples": 5
+      }
+    ],
+    "scale": [
+      {
+        "nodes": "10",
+        "write": "15.3255ms",
+        "repair": "28.61775ms",
+        "repair_client_sql": "51",
+        "repair_go_alloc_bytes": "80408",
+        "go_heap_after": "676392",
+        "unchanged_revision_avg": "547.433µs",
+        "revision_client_sql_per_check": "1.0"
+      },
+      {
+        "nodes": "1000",
+        "write": "225.943834ms",
+        "repair": "113.536708ms",
+        "repair_client_sql": "184",
+        "repair_go_alloc_bytes": "727216",
+        "go_heap_after": "1336280",
+        "unchanged_revision_avg": "527.329µs",
+        "revision_client_sql_per_check": "1.0"
+      },
+      {
+        "nodes": "10000",
+        "write": "2.087707167s",
+        "repair": "1.173246708s",
+        "repair_client_sql": "1572",
+        "repair_go_alloc_bytes": "6786112",
+        "go_heap_after": "1644144",
+        "unchanged_revision_avg": "694.979µs",
+        "revision_client_sql_per_check": "1.0"
+      },
+      {
+        "nodes": "100000",
+        "write": "16.900542417s",
+        "repair": "22.453317417s",
+        "repair_client_sql": "15277",
+        "repair_go_alloc_bytes": "67206496",
+        "go_heap_after": "820208",
+        "unchanged_revision_avg": "502.993µs",
+        "revision_client_sql_per_check": "1.0"
+      }
+    ],
+    "bootstrap": [
+      {
+        "nodes": "10",
+        "mode": "previous_overview",
+        "chars": "3420",
+        "bytes": "3628",
+        "sql": "18.0",
+        "elapsed_avg": "144.532819ms",
+        "allocated_avg": "289501B"
+      },
+      {
+        "nodes": "10",
+        "mode": "bootstrap_startup",
+        "chars": "1210",
+        "bytes": "1360",
+        "sql": "6.3",
+        "elapsed_avg": "8.660291ms",
+        "allocated_avg": "51893B"
+      },
+      {
+        "nodes": "10",
+        "mode": "bootstrap_event",
+        "chars": "1918",
+        "bytes": "2086",
+        "sql": "6.0",
+        "elapsed_avg": "7.333375ms",
+        "allocated_avg": "88210B"
+      },
+      {
+        "nodes": "1000",
+        "mode": "previous_overview",
+        "chars": "12168",
+        "bytes": "12370",
+        "sql": "18.0",
+        "elapsed_avg": "1.358199736s",
+        "allocated_avg": "1116949B"
+      },
+      {
+        "nodes": "1000",
+        "mode": "bootstrap_startup",
+        "chars": "1220",
+        "bytes": "1370",
+        "sql": "6.3",
+        "elapsed_avg": "10.098153ms",
+        "allocated_avg": "43530B"
+      },
+      {
+        "nodes": "1000",
+        "mode": "bootstrap_event",
+        "chars": "2193",
+        "bytes": "2343",
+        "sql": "6.0",
+        "elapsed_avg": "9.875819ms",
+        "allocated_avg": "107666B"
+      },
+      {
+        "nodes": "10000",
+        "mode": "previous_overview",
+        "chars": "12201",
+        "bytes": "12403",
+        "sql": "18.0",
+        "elapsed_avg": "2.348838208s",
+        "allocated_avg": "1116840B"
+      },
+      {
+        "nodes": "10000",
+        "mode": "bootstrap_startup",
+        "chars": "1225",
+        "bytes": "1375",
+        "sql": "6.3",
+        "elapsed_avg": "33.768666ms",
+        "allocated_avg": "43909B"
+      },
+      {
+        "nodes": "10000",
+        "mode": "bootstrap_event",
+        "chars": "2198",
+        "bytes": "2348",
+        "sql": "6.0",
+        "elapsed_avg": "28.880027ms",
+        "allocated_avg": "110685B"
+      }
+    ],
+    "history": {
+      "pages": 300,
+      "original_characters": 1342824,
+      "read_window_only_characters": 126015,
+      "projected_characters": 13910,
+      "projected_bytes": 30267,
+      "original_audit_unchanged": true
+    },
+    "startup_fixed_fixtures": {
+      "completed_todos_100x600_chars": {
+        "before_characters": 60645,
+        "after_characters": 200
+      },
+      "worker_intent_24000_chars": {
+        "before_system_block_characters": 24113,
+        "after_mandate_characters": 1770
+      }
+    },
+    "scenario": {
+      "nodes": 1000,
+      "tools": 2,
+      "mock_model_requests": 3,
+      "client_sql": 39,
+      "summed_message_text_characters": 8338,
+      "summed_message_text_bytes": 17926,
+      "duration_ms": 964.090792,
+      "go_allocated_bytes": 1380264,
+      "note": "mock query-then-create scenario; text-only sums are separate from full request schemas and envelopes",
+      "latest_raw_metrics": {
+        "nodes": "1000",
+        "baseline": "false",
+        "text_chars": "8338",
+        "text_bytes": "17926",
+        "sql": "39",
+        "tools": "2",
+        "mock_model_requests": "3",
+        "elapsed": "964.090792ms",
+        "allocated": "1380264B"
+      }
+    },
+    "actual_paid_model_usage": null,
+    "mock_usage_values": "123 input/3 output in HTTP fixtures; 100/30 in summary fixtures; protocol/usage plumbing only, not token savings evidence"
+  },
+  "limits": [
+    "Soft targets do not guarantee staying within a model window or eliminating hallucinations.",
+    "100k stress covers mixed facts/findings; separate cycle/deep-chain test uses 270 nodes and fanout test 2050 children, not a claim of a completed 100k-node deep-chain benchmark.",
+    "Summary navigation is not evidence; publication rejects invented references but does not prove natural-language factual truth.",
+    "Normal reads add no summary model request; bounded background summaries and existing SDK compression can still call the model.",
+    "Raw SDK/history memory is not a new hard resident-memory cap; SDK compression and persisted audit remain in use."
+  ],
+  "rollout": "Rebuild and start backend to apply idempotent startup schema/index/function updates. No raw body relocation, no SDK source edits, no business restart or automatic git commit.",
+  "source_sha256": {
+    "agent/compaction.go": "d9e9b46751f032bc9b0101863dd39b7b3101c679ac595974a8b0349a36dbaff5",
+    "agent/incremental_compaction.go": "1e4969f925d6244ab0e969a54ff96b4d9fdf3beef46ed08f685807c360ae77a6",
+    "agent/planner.go": "c1772c97a6ed37273b61cf064f1ee403f55e2573ae8e01b4483f0e8389ddc596",
+    "agent/worker.go": "b9fc89faf65abdfbc8394d1e4f0d718de7e6f8d4ede08bf42b7f5f8cb9b1cc6d",
+    "agent/planner_state.go": "a4bff149f924542569e316684628a2f0eaeb4bdd571a96ecb8bdb673eb9c3155",
+    "agent/worker_todos.go": "c04bc539d4d3cf764b8afe5376ca4b60e2d05ce4c69c92b524f0f3caca431017",
+    "agent/request_budget.go": "3ac942e811e4660d987f441aa7e50d0589dfaf2cc1657982b9ba8ada8ff5b48a",
+    "agent/tool_history.go": "5adba723abe6ff141b0ac119b6e0c6a08fe5c71361f0448b67bd5e18f48362c4",
+    "db/graph_maintenance.sql": "ea3ddcd14e32d15747ec0c39e569cc6b1bac70af0281282a7460e1861fbcb218",
+    "db/graph_maintenance.go": "4f97789ee46a851a80907a34424b6726d6a4368b026e965762331c1854386c1b",
+    "db/graph_hot_reach.go": "9cb6b857163cac8d788bc37bdbef1c97735fe44a34262e10e48e80891e93268c",
+    "db/graph_overview_reads.go": "58fc83091eb2c296c0eb990eecc5e2dfc3a51b638f582a3e2e816723cc2d0ef3",
+    "db/planner_context.go": "ffb772bd0baa09d00085bc0dc4675e44cde6289f6e6574ae900e9626d9c40a17",
+    "agent/planner_bootstrap.go": "c34852752d679868e4f9f3066bf61ad57cc1fb4d86c37e8de9b196e8bfc29fef",
+    "db/context_reads.go": "22f65a54c3f267bd43d18d28a5d797698317635ef3dd16d581b571cfb055a1c2",
+    "db/asset_context.go": "19848560e0d3a8837b3d5b27f4447fc0fc2998588705891d3135b8feb47b4452",
+    "db/tool_reads.go": "dce685216f17e6ce995b699d79a7854af90f9c6b5a81c615fa0d404d546c63fa",
+    "db/performance_indexes.go": "f3feca3467441bb4827a99f25e3336554485742eaeee54335a5b5f2caa70126e",
+    "guard/assets.go": "3ef2b02f0ff0a50b7d0d4fd755751c4f661770c1e8a8d90199d476e86010ccb0"
+  }
+}

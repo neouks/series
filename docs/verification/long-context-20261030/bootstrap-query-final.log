@@ -1,0 +1,19 @@
+=== RUN   TestPlannerOnDemandContextMetrics
+=== RUN   TestPlannerOnDemandContextMetrics/10
+    planner_context_metrics_test.go:86: nodes=10 mode=previous_overview chars=3444 bytes=3652 sql=18.0 elapsed_avg=225.126888ms allocated_avg=292949B
+    planner_context_metrics_test.go:86: nodes=10 mode=bootstrap_startup chars=1215 bytes=1365 sql=7.3 elapsed_avg=12.574042ms allocated_avg=59397B
+    planner_context_metrics_test.go:86: nodes=10 mode=bootstrap_event chars=1935 bytes=2103 sql=7.0 elapsed_avg=10.486653ms allocated_avg=90842B
+=== RUN   TestPlannerOnDemandContextMetrics/1000
+    planner_context_metrics_test.go:86: nodes=1000 mode=previous_overview chars=12381 bytes=12583 sql=18.0 elapsed_avg=209.185292ms allocated_avg=1110634B
+    planner_context_metrics_test.go:86: nodes=1000 mode=bootstrap_startup chars=1225 bytes=1375 sql=7.3 elapsed_avg=11.16618ms allocated_avg=42456B
+    planner_context_metrics_test.go:86: nodes=1000 mode=bootstrap_event chars=2214 bytes=2364 sql=7.0 elapsed_avg=14.271625ms allocated_avg=112293B
+=== RUN   TestPlannerOnDemandContextMetrics/10000
+    planner_context_metrics_test.go:86: nodes=10000 mode=previous_overview chars=12414 bytes=12616 sql=18.0 elapsed_avg=1.306685166s allocated_avg=1122442B
+    planner_context_metrics_test.go:86: nodes=10000 mode=bootstrap_startup chars=1230 bytes=1380 sql=7.3 elapsed_avg=32.967263ms allocated_avg=45922B
+    planner_context_metrics_test.go:86: nodes=10000 mode=bootstrap_event chars=2219 bytes=2369 sql=7.0 elapsed_avg=245.498472ms allocated_avg=112794B
+--- PASS: TestPlannerOnDemandContextMetrics (21.25s)
+    --- PASS: TestPlannerOnDemandContextMetrics/10 (0.82s)
+    --- PASS: TestPlannerOnDemandContextMetrics/1000 (2.09s)
+    --- PASS: TestPlannerOnDemandContextMetrics/10000 (18.19s)
+PASS
+ok  	github.com/neouks/series/agent	21.290s

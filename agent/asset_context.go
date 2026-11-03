@@ -7,6 +7,7 @@ import (
 	"iter"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/neouks/series/db"
@@ -81,7 +82,10 @@ func (p assetContextProvider) Complete(ctx context.Context, req llm.CompletionRe
 	if err != nil {
 		return llm.Message{}, "", llm.Usage{}, err
 	}
-	return p.Provider.Complete(ctx, filtered)
+	started := time.Now()
+	msg, stop, usage, err := p.Provider.Complete(ctx, filtered)
+	logContextUsage(ctx, usage, time.Since(started), err != nil)
+	return msg, stop, usage, err
 }
 
 func (p assetContextProvider) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
@@ -91,7 +95,15 @@ func (p assetContextProvider) Stream(ctx context.Context, req llm.CompletionRequ
 			yield(llm.StreamEvent{}, err)
 			return
 		}
+		started := time.Now()
+		var usage llm.Usage
+		failed := false
+		defer func() { logContextUsage(ctx, usage, time.Since(started), failed) }()
 		for event, err := range p.Provider.Stream(ctx, filtered) {
+			usage.MergeEcho(event.Usage)
+			if err != nil {
+				failed = true
+			}
 			if !yield(event, err) {
 				return
 			}

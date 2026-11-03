@@ -268,6 +268,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if err = d.RevokeFindingSuppression(t.Context(), task.ID, rules[0].ID); err != nil {
 		t.Fatal(err)
 	}
+	if err = d.Exploration(task.ExplorationID).SavePlannerTodos(t.Context(), []map[string]any{{"content": "archive planner todo", "status": "pending"}}); err != nil {
+		t.Fatal(err)
+	}
 	archive, err := d.QueueTaskArchive(task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -283,6 +286,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	snapshot, err := d.SnapshotTaskArchiveWithLLMRecords(task.ID, &llmRecords)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rawRowCount(snapshot.Tables["planner_working_state"]) != 1 {
+		t.Fatal("planner state not archived")
 	}
 	if snapshot.StreamedTables["llm_records"] != TaskArchiveLLMRecordsPath || snapshot.DataCounts["llm_records"] != 1 {
 		t.Fatalf("unexpected streamed LLM metadata: paths=%v counts=%v", snapshot.StreamedTables, snapshot.DataCounts)
@@ -441,6 +447,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	assertArchiveGlobalStats(t, d, profileName, skillName, toolName, vulnclass)
 	if err := d.CompleteTaskArchiveRestore(archive.ID); err != nil {
 		t.Fatal(err)
+	}
+	if raw, e := d.Exploration(task.ExplorationID).PlannerTodos(t.Context()); e != nil || !strings.Contains(string(raw), "archive planner todo") {
+		t.Fatal("planner state not restored", string(raw), e)
 	}
 	if item, err := d.GetTaskArchive(archive.ID); err != nil || item != nil {
 		t.Fatalf("archive metadata must be consumed: %+v, %v", item, err)
