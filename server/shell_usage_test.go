@@ -53,7 +53,7 @@ func TestShellUsageDirectoryAttribution(t *testing.T) {
 		name, command string
 		want          []string
 	}{
-		{"background example", "cd /root/artex/data/tasks/123/i14278 && /root/pentestools/gogo_linux_amd64 -i 221.2.93.248 -p 1-65535 --http -j -o gogo_full.json --timeout 3 --retry 1 2>&1 | tail -50", []string{"gogo"}},
+		{"background example", "cd /root/series/data/tasks/123/i14278 && /root/pentestools/gogo_linux_amd64 -i 221.2.93.248 -p 1-65535 --http -j -o gogo_full.json --timeout 3 --retry 1 2>&1 | tail -50", []string{"gogo"}},
 		{"quoted path", "'/root/pentestools/gogo_linux_amd64' -i target", []string{"gogo"}},
 		{"same basename elsewhere", "/opt/other/gogo_linux_amd64 target", []string{"elsewhere"}},
 		{"unconfigured program in directory", "/root/pentestools/unknown target", nil},
@@ -95,7 +95,7 @@ func TestShellUsageMeterAndFailure(t *testing.T) {
 	}})
 	ri := agent.RunInfo{TaskID: 7, ExplorationID: 8, IntentID: 9, SessionID: "s"}
 	tool := &shellMeteredTool{CoreTool: meterTool(base, recorder, "Bash", "worker", ri), recorder: recorder, declarations: []*db.Tool{{Key: "gogo", Executable: "gogo_linux_amd64", Directory: "/root/pentestools", Kind: "shell", Enabled: true, Agents: []string{"worker"}}}, agentKey: "worker", ri: ri}
-	r, e := tool.Call(t.Context(), json.RawMessage(`{"command":"cd /root/artex/data/tasks/123/i14278 && /root/pentestools/gogo_linux_amd64 -i 221.2.93.248 -p 1-65535 --http -j -o gogo_full.json --timeout 3 --retry 1 2>&1 | tail -50; /root/pentestools/gogo_linux_amd64 --version","run_in_background":true}`), nil)
+	r, e := tool.Call(t.Context(), json.RawMessage(`{"command":"cd /root/series/data/tasks/123/i14278 && /root/pentestools/gogo_linux_amd64 -i 221.2.93.248 -p 1-65535 --http -j -o gogo_full.json --timeout 3 --retry 1 2>&1 | tail -50; /root/pentestools/gogo_linux_amd64 --version","run_in_background":true}`), nil)
 	if e != nil || !r.IsError || len(recorder.rows) != 2 {
 		t.Fatal(r, e, recorder.rows)
 	}
@@ -141,7 +141,7 @@ func TestShellUsagePersistedAttribution(t *testing.T) {
 		return actool.Text("submitted"), nil
 	}})
 	tool := &shellMeteredTool{CoreTool: meterTool(base, s.m.pg, "Bash", "worker", ri), recorder: s.m.pg, declarations: []*db.Tool{declaration}, agentKey: "worker", ri: ri}
-	command := fmt.Sprintf(`{"command":"cd /root/artex/data/tasks/%s/i14278 && /root/pentestools/gogo_linux_amd64 -i 221.2.93.248 2>&1 | tail -50","run_in_background":true}`, task.ID)
+	command := fmt.Sprintf(`{"command":"cd /root/series/data/tasks/%s/i14278 && /root/pentestools/gogo_linux_amd64 -i 221.2.93.248 2>&1 | tail -50","run_in_background":true}`, task.ID)
 	if result, err := tool.Call(t.Context(), json.RawMessage(command), nil); err != nil || result.IsError {
 		t.Fatal(result, err)
 	}

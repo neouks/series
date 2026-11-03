@@ -13,7 +13,7 @@
 统计“包含该工具明确调用的 Bash 执行请求”，不是实际进程次数。支持串联、管道、环境变量赋值及常见 env/sudo/command 包装；不计注释、普通字符串和函数定义；不展开动态变量、不读取脚本内容、不解析 bash -c 字符串。条件分支中的命令按提交请求计数，不推断是否实际执行。旧 Shell 历史不猜测回填。
 
 ## 验证
-使用独立 PostgreSQL 测试容器 artex-sync-20260919 的 mode_db、mode_server 库，未使用业务库。
+使用独立 PostgreSQL 测试容器 series-sync-20260919 的 mode_db、mode_server 库，未使用业务库。
 
 | 验证 | 结果 |
 | --- | --- |

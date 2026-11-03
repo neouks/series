@@ -20,7 +20,7 @@
 
 ## 验证结果
 
-使用 Docker 独立测试实例 artex-sync-20260919 的 mode_db、mode_server、mode_browser，未连接业务数据库。
+使用 Docker 独立测试实例 series-sync-20260919 的 mode_db、mode_server、mode_browser，未连接业务数据库。
 
 | 验证 | 结果 |
 | --- | --- |
@@ -37,7 +37,7 @@
 
 ### 回归命令
 
-分别设置独立测试库的 `ARTEX_PG_DSN` 后运行：
+分别设置独立测试库的 `SERIES_PG_DSN` 后运行：
 
 ```sh
 GOSUMDB=sum.golang.org go test ./db -run 'TestActivity(Search|Window|Page)|TestAssetOrigin|TestInheritedActivity' -count=1
@@ -53,6 +53,6 @@ tsx --test src/lib/mock/activity-search.test.ts src/lib/mock/asset-origins.test.
 - 资产来源展开与高亮（旧品牌截图已移除）
 - 长代码块段落定位（旧品牌截图已移除）
 - 动作审批来源兼容（旧品牌截图已移除）
-- 测试脚本及原始日志：`/tmp/artex-search-check/`。
+- 测试脚本及原始日志：`/tmp/series-search-check/`。
 
 重新构建前后端并重启后端后部署生效。本次仅启动并关闭独立测试服务，保留原有 3000 端口的 Mock 服务。

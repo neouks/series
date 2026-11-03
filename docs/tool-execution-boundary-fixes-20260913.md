@@ -32,13 +32,13 @@
 
 六项问题均有对应验收场景，不意味着所有包、所有分支或全部工具业务场景覆盖率为 100%。SDK 包整体覆盖率明显低于 100%，不得以本表混称。
 
-覆盖文件保存在本机 `/tmp/artex-policy-sdk-final.cover` 与 `/tmp/artex-policy-agent-final.cover`，可用 `go tool cover -func=...` 核对。
+覆盖文件保存在本机 `/tmp/series-policy-sdk-final.cover` 与 `/tmp/series-policy-agent-final.cover`，可用 `go tool cover -func=...` 核对。
 
 ## 验证记录与限制
 
 - Agent 全包、独立 Server 全包、SDK harness/tool/agentcore 测试已执行。
 - SDK 三包及 Agent、Server 定向 race 已执行。
-- 数据库测试使用临时容器 `artex-deep-tool-policy-test`，独立端口 55439；不使用业务库 5432。
+- 数据库测试使用临时容器 `series-deep-tool-policy-test`，独立端口 55439；不使用业务库 5432。
 - 全项目共享库测试曾失败：并行运行出现事务/夹具状态冲突；串行运行的 `TestCoreTaskLifecyclePG` 仍出现其他测试遗留任务的后台写入与临时目录清理冲突。不能将共享库全包命令标记为通过。
 - 生命周期测试已改成本地确定性模型，避免外部模型重试延迟影响三秒目标生成断言；保留生命周期业务断言。
 - 最终全包编译与 `git diff --check` 通过；最新独立 Server 全包通过（42.298s），SDK 全模块 `go test -race ./...` 通过。未提交或推送代码。
