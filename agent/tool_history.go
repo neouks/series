@@ -25,7 +25,7 @@ func normalizedReadQuery(name string, raw json.RawMessage) string {
 	}
 	defaults := map[string]any{}
 	switch name {
-	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
+	case "RecallMemory", "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
 		// New contracts have explicit continuation positions. Never deduplicate writes.
 		var v map[string]any
 		dec := json.NewDecoder(bytes.NewReader(raw))

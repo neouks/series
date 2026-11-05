@@ -1,11 +1,15 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // TaskScope is one row of a task's test scope — the coverage denominator and the
@@ -513,8 +517,12 @@ type CoverageGraphEdge struct {
 
 // CoverageGraphData is the whole graph for one task.
 type CoverageGraphData struct {
-	Nodes []CoverageGraphNode `json:"nodes"`
-	Edges []CoverageGraphEdge `json:"edges"`
+	Nodes     []CoverageGraphNode `json:"nodes"`
+	Edges     []CoverageGraphEdge `json:"edges"`
+	HasMore   bool                `json:"has_more"`
+	NextAfter int64               `json:"next_after,omitempty"`
+	Upper     int64               `json:"upper"`
+	Partial   bool                `json:"partial"`
 }
 
 func assetKey(id int64) string   { return "a:" + strconv.FormatInt(id, 10) }
@@ -542,18 +550,45 @@ func hostPortOf(n *CoverageGraphNode) (string, int) {
 // with current-or-source fact anchors reflected in Tested. The legacy expID
 // argument is retained for API compatibility; the task registry is authoritative.
 func (s *AssetStore) BuildCoverageGraph(taskID, _ int64) (*CoverageGraphData, error) {
+	return s.buildCoverageGraph(context.Background(), taskID, 0, 0, 0)
+}
+
+// CoverageGraphWindow limits SQL rows before loading identity fields.
+func (s *AssetStore) CoverageGraphWindow(ctx context.Context, taskID, after, upper int64, limit int) (*CoverageGraphData, error) {
+	if after < 0 || upper < 0 || limit < 1 || limit > 200 || (after > 0 && upper == 0) {
+		return nil, fmt.Errorf("invalid coverage window")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return s.buildCoverageGraph(ctx, taskID, after, upper, limit)
+}
+
+func (s *AssetStore) buildCoverageGraph(ctx context.Context, taskID, after, upper int64, limit int) (*CoverageGraphData, error) {
 	g := &CoverageGraphData{Nodes: []CoverageGraphNode{}, Edges: []CoverageGraphEdge{}}
 	if taskID <= 0 {
 		return g, nil
 	}
-	rows, err := s.db.Query(`WITH `+contextCoverageCTE+`
+	if limit > 0 && upper == 0 {
+		if err := s.db.QueryRowContext(ctx, `WITH `+contextCoverageCTE+` SELECT COALESCE(max(id),0) FROM target`, taskID).Scan(&upper); err != nil {
+			return nil, err
+		}
+	}
+	g.Upper = upper
+	g.Partial = limit > 0
+	rows, err := s.db.QueryContext(ctx, `WITH `+contextCoverageCTE+`
 SELECT a.id, a.type, COALESCE(a.company_id,0),
-       COALESCE(a.domain,''), COALESCE(a.root_domain,''), COALESCE(a.ip,''),
-       COALESCE(a.url,''), COALESCE(a.port,0), COALESCE(a.service_type,''),
-       COALESCE(a.app_name,''), COALESCE(a.page_title,''), COALESCE(a.status_code,0),
+       left(COALESCE(a.domain,''),253), left(COALESCE(a.root_domain,''),253), left(COALESCE(a.ip,''),64),
+       left(COALESCE(a.url,''),512), COALESCE(a.port,0), left(COALESCE(a.service_type,''),80),
+       left(COALESCE(a.app_name,''),160), left(COALESCE(a.page_title,''),160), COALESCE(a.status_code,0),
        (a.id IN (SELECT asset_id FROM tested)) AS tested
 FROM assets a JOIN target t ON t.id = a.id
-ORDER BY a.id`, taskID)
+WHERE ($2::bigint=0 OR a.id>$2) AND ($3::bigint=0 OR a.id<=$3)
+ORDER BY a.id LIMIT NULLIF($4::int,0)`, taskID, after, upper, func() int {
+		if limit == 0 {
+			return 0
+		}
+		return limit + 1
+	}())
 	if err != nil {
 		return nil, err
 	}
@@ -567,9 +602,17 @@ ORDER BY a.id`, taskID)
 	svcByHost := map[string]string{}
 	companyIDs := map[int64]bool{} // referenced company ids (need a node)
 
+	connectorBytes := 0
 	add := func(n CoverageGraphNode) *CoverageGraphNode {
 		if _, ok := byKey[n.Key]; ok {
 			return byKey[n.Key]
+		}
+		encoded, _ := json.Marshal(n)
+		if limit > 0 && !n.InScope && connectorBytes+len(encoded) > 48<<10 {
+			return &n
+		}
+		if !n.InScope {
+			connectorBytes += len(encoded)
 		}
 		g.Nodes = append(g.Nodes, n)
 		p := &g.Nodes[len(g.Nodes)-1]
@@ -577,6 +620,7 @@ ORDER BY a.id`, taskID)
 		return p
 	}
 
+	graphBytes := 0
 	for rows.Next() {
 		var n CoverageGraphNode
 		var companyID int64
@@ -585,6 +629,20 @@ ORDER BY a.id`, taskID)
 			&n.AppName, &n.PageTitle, &n.StatusCode, &n.Tested); err != nil {
 			return nil, err
 		}
+		if limit > 0 && len(g.Nodes) >= limit {
+			g.HasMore = true
+			break
+		}
+		n.Label = coverageNodeLabel(&n)
+		n.Key = assetKey(n.AssetID)
+		raw, _ := json.Marshal(n)
+		// Bound escaped JSON too; continuation starts after the last kept asset.
+		if limit > 0 && graphBytes+len(raw) > 64<<10 && len(g.Nodes) > 0 {
+			g.HasMore = true
+			break
+		}
+		graphBytes += len(raw)
+		g.NextAfter = n.AssetID
 		n.Key = assetKey(n.AssetID)
 		n.CompanyID = companyID
 		n.InScope = true
@@ -617,6 +675,7 @@ ORDER BY a.id`, taskID)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	rows.Close()
 
 	// Connector root domains: any subdomain whose root domain is not itself an
 	// in-scope node. Pull the real asset row if one exists (so the drawer shows
@@ -629,36 +688,36 @@ ORDER BY a.id`, taskID)
 			}
 		}
 	}
+	// Connectors are navigation context only: never fetch another task's
+	// asset row merely because it shares a root-domain name.
 	for root := range missingRoots {
-		var id, companyID int64
-		err := s.db.QueryRow(`SELECT id, COALESCE(company_id,0) FROM assets
-WHERE type='root_domain' AND domain=$1 LIMIT 1`, root).Scan(&id, &companyID)
-		var node CoverageGraphNode
-		if err == nil && id > 0 {
-			node = CoverageGraphNode{Key: assetKey(id), Kind: "root_domain", AssetID: id,
-				CompanyID: companyID, Domain: root, Label: root}
-			if companyID > 0 {
-				companyIDs[companyID] = true
-			}
-		} else {
-			node = CoverageGraphNode{Key: "r:" + root, Kind: "root_domain", Domain: root, Label: root}
-		}
+		node := CoverageGraphNode{Key: "r:" + root, Kind: "root_domain", Domain: root, Label: root}
 		add(node)
 		rootByDomain[root] = node.Key
 	}
-
-	// Company nodes for every referenced company id — always gray context.
+	ids := []int64{}
 	for id := range companyIDs {
-		key := companyKey(id)
-		if _, ok := byKey[key]; ok {
-			continue
+		ids = append(ids, id)
+	}
+	if len(ids) > 0 {
+		cr, err := s.db.QueryContext(ctx, `SELECT id,left(name,160) FROM companies WHERE id=ANY($1::bigint[]) ORDER BY id`, ids)
+		if err != nil {
+			return nil, err
 		}
-		var name string
-		if err := s.db.QueryRow(`SELECT name FROM companies WHERE id=$1`, id).Scan(&name); err != nil {
-			continue
+		for cr.Next() {
+			var id int64
+			var name string
+			if err = cr.Scan(&id, &name); err != nil {
+				cr.Close()
+				return nil, err
+			}
+			add(CoverageGraphNode{Key: companyKey(id), Kind: "company", CompanyID: id, Label: name})
 		}
-		add(CoverageGraphNode{Key: key, Kind: "company", CompanyID: id,
-			Label: name, AssetID: 0})
+		err = cr.Err()
+		cr.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Derived containment edges (only when the parent node exists).
@@ -700,6 +759,16 @@ WHERE type='root_domain' AND domain=$1 LIMIT 1`, root).Scan(&id, &companyID)
 				rootByDomain[n.RootDomain])
 			link(n.Key, parent)
 		}
+	}
+	sort.Slice(g.Nodes, func(i, j int) bool { return g.Nodes[i].Key < g.Nodes[j].Key })
+	sort.Slice(g.Edges, func(i, j int) bool {
+		if g.Edges[i].Src == g.Edges[j].Src {
+			return g.Edges[i].Dst < g.Edges[j].Dst
+		}
+		return g.Edges[i].Src < g.Edges[j].Src
+	})
+	if !g.HasMore {
+		g.NextAfter = 0
 	}
 	return g, nil
 }

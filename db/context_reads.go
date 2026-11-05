@@ -80,6 +80,10 @@ const contextNodeFields = `VALUES
  ('/summary',COALESCE(n.payload->>'summary','')),
  ('/name',COALESCE(n.payload->>'name','')),
  ('/detail',COALESCE(n.payload->>'detail','')),
+ ('/endpoint',CASE WHEN jsonb_typeof(n.payload->'endpoint')='string' THEN n.payload->>'endpoint' ELSE '' END),
+ ('/url',CASE WHEN jsonb_typeof(n.payload->'url')='string' THEN n.payload->>'url' ELSE '' END),
+ ('/phase',CASE WHEN jsonb_typeof(n.payload->'phase')='string' THEN n.payload->>'phase' ELSE '' END),
+ ('/claim_key',CASE WHEN jsonb_typeof(n.payload->'claim_key')='string' THEN n.payload->>'claim_key' ELSE '' END),
  ('/evidence',COALESCE(n.payload->>'evidence','')),
  ('/text',COALESCE(n.payload->>'text','')),
  ('/body',COALESCE(n.payload->>'body','')),
@@ -107,7 +111,7 @@ func (s *ExplorationStore) ContextUpper(ctx context.Context, activity bool) (int
 
 // Both search modes share the same visibility CTE and field projections. Mixed
 // queries add keyset conditions before LIMIT; never filter a limited page later.
-func (s *ExplorationStore) contextSearchSQL(activity, mixed bool) string {
+func (s *ExplorationStore) contextSearchSQL(activity, mixed bool, indexed ...bool) string {
 	upper, before, order, extra := "$11", "", "", ""
 	if mixed {
 		upper = "(SELECT node_upper FROM bounds)"
@@ -139,11 +143,32 @@ func (s *ExplorationStore) contextSearchSQL(activity, mixed bool) string {
  AND ($10::bigint=0 OR n.id=$10 OR EXISTS(SELECT 1 FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.src_id=$10 AND e.dst_id=n.id AND e.rel='yields'))
  AND ($3='' OR EXISTS(SELECT 1 FROM (` + contextNodeFields + `) f(path,body) WHERE strpos(lower(f.body),lower($3))>0))`
 	}
+	if activity && len(indexed) > 0 && indexed[0] {
+		// Narrow Worker roots before the shared authorization walk. Filtering only
+		// the final activity page would still traverse every intent's ancestors.
+		roots += ` AND n.id IN(SELECT ai.node_id FROM activity ai WHERE ai.exploration_id IN(SELECT exp FROM contexts) AND ai.node_id IS NOT NULL AND ai.kind NOT IN ('thinking','usage')
+	 AND ai.id<=` + upper + ` AND ($6::bigint=0 OR ai.id<$6)` + strings.ReplaceAll(before, "a.", "ai.") + `
+	 AND lower(COALESCE(ai.detail,'')||chr(10)||COALESCE(ai.summary,'')) LIKE series_context_literal_pattern_v1($3) ESCAPE chr(92))`
+	}
+	if !activity && len(indexed) > 0 && indexed[0] {
+		// Materialize the cheap candidate set before extracting every exact
+		// field. A plain AND permits the optimizer to run the expensive field
+		// subquery on every node before applying the trigram semi-join.
+		roots = `WITH text_candidates AS MATERIALIZED(SELECT n.* FROM exploration_nodes n
+		 WHERE n.exploration_id IN(SELECT exp FROM contexts) AND n.id<=` + upper + `
+		 AND ($6::bigint=0 OR n.id<$6)` + before + ` AND ` + typeFilter + contextNodeTextCandidates + `)
+		 ` + strings.Replace(roots, "FROM exploration_nodes n JOIN contexts", "FROM text_candidates n JOIN contexts", 1)
+	}
 	sql := contextVisibility(roots, s.workerRead)
 	if activity {
+		activityTable := "activity"
+		if len(indexed) > 0 && indexed[0] {
+			sql += `, text_activities AS MATERIALIZED(SELECT a.* FROM activity a WHERE a.exploration_id IN(SELECT exp FROM contexts) AND a.id<=` + upper + ` AND ($6::bigint=0 OR a.id<$6)` + before + contextActivityTextCandidates + `)`
+			activityTable = "text_activities"
+		}
 		sql += ` SELECT 'activity:'||a.id,a.id,'activity',n.id AS node_id,n.owner,n.exploration_id<>$1,n.state,
  left(COALESCE(a.summary,''),240),COALESCE(hit.path,''),COALESCE(hit.snippet,''),hit.match_offset,0::bigint` + extra + `
- FROM visible n JOIN activity a ON a.node_id=n.id AND a.exploration_id=n.exploration_id
+ FROM visible n JOIN ` + activityTable + ` a ON a.node_id=n.id AND a.exploration_id=n.exploration_id
  LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet,strpos(lower(body),lower($3))-1 match_offset FROM (VALUES ('/detail',COALESCE(a.detail,'')),('/summary',COALESCE(a.summary,''))) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
  WHERE a.kind NOT IN ('thinking','usage') AND NOT ` + contextCheckpointNoteSQL + ` AND a.id<=` + upper + ` AND ($6::bigint=0 OR a.id<$6)` + before + `
  AND ($3='' OR hit.path IS NOT NULL)
@@ -168,7 +193,11 @@ func (s *ExplorationStore) SearchContext(ctx context.Context, q ContextSearch) (
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	activity := len(q.Types) == 1 && q.Types[0] == "activity"
-	rows, err := s.contextQuery(ctx, s.contextSearchSQL(activity, false), s.expID, q.Types, q.Query, q.Severity, q.AssetID, q.Before, q.Limit+1, true, q.State, q.IntentID, q.Upper)
+	indexed, err := s.contextTextIndexed(ctx, q.Query)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.contextQuery(ctx, s.contextSearchSQL(activity, false, indexed), s.expID, q.Types, q.Query, q.Severity, q.AssetID, q.Before, q.Limit+1, true, q.State, q.IntentID, q.Upper)
 	if err != nil {
 		return nil, err
 	}

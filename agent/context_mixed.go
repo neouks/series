@@ -30,6 +30,9 @@ func (t *ToolSet) searchMixedContext(ctx context.Context, a contextSearchInput, 
 	}
 	t.addContextHitReads(ctx, a, hits, cross)
 	out := map[string]any{"items": hits, "has_more": more}
+	if a.Navigation {
+		out["navigation"] = t.contextNavigation(ctx, a, hits, cross)
+	}
 	if more {
 		envelope.Signature, envelope.Position = signature, next
 		b, err := json.Marshal(envelope)
@@ -38,5 +41,5 @@ func (t *ToolSet) searchMixedContext(ctx context.Context, a contextSearchInput, 
 		}
 		out["next_cursor"] = base64.RawURLEncoding.EncodeToString(b)
 	}
-	return contextJSON(ctx, out)
+	return contextSearchResult(ctx, out)
 }

@@ -83,9 +83,9 @@ func contextDependencyVisibility(scope, roots string, worker, allowStaleRoot, re
 // rather than disappear because a join silently dropped the bad dependency.
 const contextDependencySteps = `
  WITH cached AS MATERIALIZED (
- SELECT p.node_id,p.generation,p.revision FROM graph_dependency_state p JOIN graph_revisions v ON v.exploration_id=p.exploration_id
- WHERE p.node_id=r.id AND p.exploration_id=r.exp AND p.generation=v.dependency_generation AND p.rule_version=1 AND p.projected_revision=p.revision
- AND p.projected_count=(SELECT count(*) FROM graph_dependencies check_rows WHERE check_rows.node_id=p.node_id AND check_rows.generation=p.generation AND check_rows.revision=p.revision)
+ SELECT p.node_id,p.generation,p.projected_set revision FROM graph_dependency_state p JOIN graph_revisions v ON v.exploration_id=p.exploration_id
+ WHERE p.node_id=r.id AND p.exploration_id=r.exp AND p.generation=v.dependency_generation AND p.rule_version=1 AND p.projected_revision=p.revision AND p.projected_set>0
+ AND p.projected_count=(SELECT count(*) FROM graph_dependencies check_rows WHERE check_rows.node_id=p.node_id AND check_rows.generation=p.generation AND check_rows.revision=p.projected_set)
  ) SELECT d.dependency_id id FROM cached c JOIN graph_dependencies d ON d.node_id=c.node_id AND d.generation=c.generation AND d.revision=c.revision
  UNION SELECT live.id FROM (` + liveContextDependencySteps + `)live WHERE NOT EXISTS(SELECT 1 FROM cached)`
 

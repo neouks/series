@@ -22,7 +22,7 @@ const contextReadRule = "\n读取规则：按本轮工具Schema选择类型和�
 func deferredSystem(sysText string, def DeferredInfo) (system []string, boundary int) {
 	sysText += toolAvailabilityRule
 	if def.ContextReads {
-		sysText += contextReadRule
+		sysText += contextReadRule + evidenceNavigationRule
 	}
 	sysText += def.FindingGuidance
 	sysText += def.AssetGuidance

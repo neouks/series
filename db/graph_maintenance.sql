@@ -154,6 +154,7 @@ BEGIN
  OR (NOT derived AND graph_revisions.content_tx<>txid_current())
  OR (topology AND NOT derived AND graph_revisions.topology_tx<>txid_current())
  OR (access_change AND graph_revisions.access_tx<>txid_current());
+ IF n>0 AND topology AND NOT derived THEN PERFORM series_graph_hot_enqueue(e,n); END IF;
  IF n>0 AND NOT derived THEN
   INSERT INTO graph_dirty_nodes(exploration_id,node_id,propagate) VALUES(e,n,topology)
   ON CONFLICT(exploration_id,node_id) DO UPDATE SET propagate=true WHERE NOT graph_dirty_nodes.propagate AND EXCLUDED.propagate;
@@ -209,10 +210,11 @@ BEGIN
  INSERT INTO graph_revisions(exploration_id) VALUES(e) ON CONFLICT DO NOTHING;
  SELECT dependency_generation INTO g FROM graph_revisions WHERE exploration_id=e;
  INSERT INTO graph_dependency_state(node_id,exploration_id,generation) VALUES(n,e,g)
- ON CONFLICT(node_id) DO UPDATE SET exploration_id=e,generation=g,revision=graph_dependency_state.revision+1,work=true,rule_version=1;
+ ON CONFLICT(node_id) DO UPDATE SET exploration_id=e,generation=g,revision=graph_dependency_state.revision+1,full_revision=graph_dependency_state.full_revision+1,work=true,rule_version=1;
 END $$;
 
 CREATE OR REPLACE FUNCTION series_graph_dependency_node_changed() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e BIGINT;
 BEGIN
  IF TG_OP='DELETE' THEN
   -- Cleanup follows the same graph->projection lock order as builders. A node
@@ -224,6 +226,10 @@ BEGIN
  END IF;
  IF TG_OP='UPDATE' AND (NEW.exploration_id,NEW.kind,CASE WHEN NEW.kind='digest' THEN NEW.payload->'anchor_ids' END)
  IS NOT DISTINCT FROM (OLD.exploration_id,OLD.kind,CASE WHEN OLD.kind='digest' THEN OLD.payload->'anchor_ids' END) THEN RETURN NEW; END IF;
+ IF TG_OP='UPDATE' AND NEW.exploration_id IS DISTINCT FROM OLD.exploration_id THEN
+  FOR e IN SELECT x FROM unnest(ARRAY[OLD.exploration_id,NEW.exploration_id])x ORDER BY x
+  LOOP PERFORM pg_advisory_xact_lock(e+8100000000); END LOOP;
+ END IF;
  PERFORM series_graph_dependency_invalidate(NEW.exploration_id,NEW.id);
  RETURN NEW;
 END $$;
@@ -240,10 +246,10 @@ BEGIN
  CASE WHEN TG_OP<>'DELETE' THEN NEW.exploration_id END])x WHERE x IS NOT NULL ORDER BY x
  LOOP PERFORM pg_advisory_xact_lock(e+8100000000); END LOOP;
  IF TG_OP<>'INSERT' THEN
-  PERFORM series_graph_dependency_invalidate(OLD.exploration_id,CASE WHEN OLD.rel='covers' THEN OLD.src_id ELSE OLD.dst_id END);
+  PERFORM series_graph_dependency_patch(OLD.exploration_id,CASE WHEN OLD.rel='covers' THEN OLD.src_id ELSE OLD.dst_id END,CASE WHEN OLD.rel='covers' THEN OLD.dst_id ELSE OLD.src_id END);
  END IF;
  IF TG_OP<>'DELETE' THEN
-  PERFORM series_graph_dependency_invalidate(NEW.exploration_id,CASE WHEN NEW.rel='covers' THEN NEW.src_id ELSE NEW.dst_id END);
+  PERFORM series_graph_dependency_patch(NEW.exploration_id,CASE WHEN NEW.rel='covers' THEN NEW.src_id ELSE NEW.dst_id END,CASE WHEN NEW.rel='covers' THEN NEW.dst_id ELSE NEW.src_id END);
  END IF;
  IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW;
 END $$;
@@ -269,7 +275,7 @@ SELECT e.id FROM explorations e WHERE NOT EXISTS(SELECT 1 FROM graph_revisions r
 ON CONFLICT DO NOTHING;
 
 CREATE OR REPLACE FUNCTION series_graph_node_changed() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE r BIGINT; source_referenced BOOLEAN; access_changed BOOLEAN;
+DECLARE r BIGINT; e BIGINT; source_referenced BOOLEAN; access_changed BOOLEAN;
 BEGIN
  IF TG_OP='DELETE' THEN
   source_referenced:=false;
@@ -284,8 +290,16 @@ BEGIN
   DELETE FROM graph_hot_reach WHERE exploration_id=OLD.exploration_id AND node_id=OLD.id;
   RETURN OLD;
  END IF;
- IF TG_OP='UPDATE' AND (NEW.kind,NEW.state,NEW.payload,NEW.priority,NEW.owner,NEW.blocked_reason)
-   IS NOT DISTINCT FROM (OLD.kind,OLD.state,OLD.payload,OLD.priority,OLD.owner,OLD.blocked_reason) THEN RETURN NEW; END IF;
+ IF TG_OP='UPDATE' AND (NEW.exploration_id,NEW.kind,NEW.state,NEW.payload,NEW.priority,NEW.owner,NEW.blocked_reason)
+   IS NOT DISTINCT FROM (OLD.exploration_id,OLD.kind,OLD.state,OLD.payload,OLD.priority,OLD.owner,OLD.blocked_reason) THEN RETURN NEW; END IF;
+ IF TG_OP='UPDATE' AND NEW.exploration_id IS DISTINCT FROM OLD.exploration_id THEN
+  FOR e IN SELECT x FROM unnest(ARRAY[OLD.exploration_id,NEW.exploration_id])x ORDER BY x
+  LOOP PERFORM pg_advisory_xact_lock(e+8100000000); END LOOP;
+  PERFORM series_graph_touch(OLD.exploration_id,OLD.id,true,true);
+  PERFORM series_graph_count_touch(OLD.exploration_id);
+  PERFORM series_graph_count_touch(NEW.exploration_id);
+  DELETE FROM graph_hot_reach WHERE exploration_id=OLD.exploration_id AND node_id=OLD.id;
+ END IF;
  -- Insertion already changes count_rev and cannot revoke an existing readable
  -- source. Avoid a summary-key probe on the high-volume append-only path.
  source_referenced:=false;
@@ -300,7 +314,7 @@ BEGIN
  -- A new derived summary has no previous readable body to revoke. Its count
  -- epoch changes below, but publication alone must not wake the Planner.
  IF TG_OP='INSERT' AND NEW.kind='digest' THEN access_changed:=false; END IF;
- PERFORM series_graph_touch(NEW.exploration_id,NEW.id,TG_OP='INSERT' OR NEW.state IS DISTINCT FROM OLD.state,access_changed,NEW.kind='digest');
+ PERFORM series_graph_touch(NEW.exploration_id,NEW.id,TG_OP='INSERT' OR NEW.state IS DISTINCT FROM OLD.state OR NEW.kind IS DISTINCT FROM OLD.kind OR NEW.exploration_id IS DISTINCT FROM OLD.exploration_id,access_changed,NEW.kind='digest' AND (TG_OP='INSERT' OR (OLD.kind='digest' AND OLD.exploration_id=NEW.exploration_id)));
  IF TG_OP='INSERT' OR (NEW.kind,NEW.state) IS DISTINCT FROM (OLD.kind,OLD.state) THEN
   PERFORM series_graph_count_touch(NEW.exploration_id);
  END IF;
@@ -309,7 +323,7 @@ BEGIN
   INSERT INTO graph_node_projection(node_id,exploration_id,kind,state,summary,confidence,source_version,source_hash,payload_asset_ids,asset_metadata_ready)
   VALUES(NEW.id,NEW.exploration_id,NEW.kind,NEW.state,left(COALESCE(NEW.payload->>'summary',NEW.payload->>'text',''),600),
    left(COALESCE(NEW.payload->>'confidence',''),40),r,md5(NEW.payload::text||NEW.state||NEW.kind),series_graph_payload_assets(NEW.payload),true)
-  ON CONFLICT(node_id) DO UPDATE SET kind=EXCLUDED.kind,state=EXCLUDED.state,summary=EXCLUDED.summary,
+  ON CONFLICT(node_id) DO UPDATE SET exploration_id=EXCLUDED.exploration_id,kind=EXCLUDED.kind,state=EXCLUDED.state,summary=EXCLUDED.summary,
    confidence=EXCLUDED.confidence,source_version=EXCLUDED.source_version,source_hash=EXCLUDED.source_hash,
    payload_asset_ids=EXCLUDED.payload_asset_ids,asset_metadata_ready=true,changed_at=clock_timestamp(),hot=true,cold_since_at=NULL;
  ELSIF TG_OP='UPDATE' AND OLD.kind<>'digest' THEN

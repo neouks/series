@@ -30,8 +30,8 @@ func (s *ExplorationStore) ToolUnfoldedPage(ctx context.Context, kind string, li
  AND NOT EXISTS(SELECT 1 FROM active_children h WHERE h.id=v.id)) ORDER BY v.id DESC LIMIT $7
  ) SELECT jsonb_build_object('total',(SELECT count(*) FROM allowed_visible WHERE kind=$2),'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',n.id,'kind',n.kind,'state',n.state,'created_at',n.created_at,'priority',n.priority,'payload',jsonb_strip_nulls(jsonb_build_object(
- 'summary',left(n.payload->>'summary',360),'confidence',left(n.payload->>'confidence',80),'severity',n.payload->>'severity','text',left(n.payload->>'text',500)))) ORDER BY n.id DESC)
- FROM page p JOIN exploration_nodes n ON n.id=p.id),'[]'::jsonb))`
+ 'summary',left(` + nodeNavigationPayloadSQL + `->>'summary',360),'confidence',left(` + nodeNavigationPayloadSQL + `->>'confidence',80),'severity',CASE WHEN ` + nodeNavigationCurrentSQL + ` AND np.preview->>'severity_long'='0' THEN np.preview->>'severity' ELSE n.payload->>'severity' END,'text',left(` + nodeNavigationPayloadSQL + `->>'text',500)))) ORDER BY n.id DESC)
+ FROM page p JOIN exploration_nodes n ON n.id=p.id ` + nodeNavigationJoinSQL + `),'[]'::jsonb))`
 	var raw []byte
 	err := s.contextRow(ctx, workerReadSQL(query, s.workerRead), s.expID, kind, "", "", int64(0), int64(0), limit, false, viewer).Scan(&raw)
 	if err != nil {
@@ -61,10 +61,10 @@ func (s *ExplorationStore) ToolRecentDigests(ctx context.Context, limit int, vie
  SELECT v.id,(SELECT max(dst_id) FROM exploration_edges WHERE exploration_id=$1 AND src_id=v.id AND rel='covers') freshness
  FROM visible v WHERE $6::bigint=0 AND ($10::bigint=0 OR NOT EXISTS(SELECT 1 FROM anchors a WHERE a.root=v.id AND NOT task_asset_effectively_approved($10,a.asset_id))) ORDER BY freshness DESC,id DESC LIMIT $7
  ), numbered AS (SELECT *,row_number() OVER(ORDER BY freshness DESC,id DESC) seq FROM ranked)
- SELECT jsonb_build_object('rows',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',n.id,'body',left(n.payload->>'body',1200),
- 'body_truncated',char_length(COALESCE(n.payload->>'body',''))>1200,'source_revision',n.payload->>'source_revision','rule_version',CASE WHEN n.payload->>'summary_rule_version' ~ '^[0-9]{1,6}$' THEN (n.payload->>'summary_rule_version')::int ELSE 0 END,
+ SELECT jsonb_build_object('rows',COALESCE((SELECT jsonb_agg(jsonb_build_object('id',n.id,'body',left(` + nodeNavigationPayloadSQL + `->>'body',1200),
+ 'body_truncated',CASE WHEN ` + nodeNavigationCurrentSQL + ` THEN np.preview->>'body_truncated'='1' ELSE char_length(COALESCE(n.payload->>'body',''))>1200 END,'source_revision',CASE WHEN ` + nodeNavigationCurrentSQL + ` AND np.preview->>'source_revision_long'='0' THEN np.preview->>'source_revision' ELSE n.payload->>'source_revision' END,'rule_version',CASE WHEN ` + nodeNavigationPayloadSQL + `->>'summary_rule_version' ~ '^[0-9]{1,6}$' THEN (` + nodeNavigationPayloadSQL + `->>'summary_rule_version')::int ELSE 0 END,
  'member_count',(SELECT count(*) FROM exploration_edges WHERE exploration_id=$1 AND src_id=n.id AND rel='covers')) ORDER BY p.seq)
- FROM numbered p JOIN exploration_nodes n ON n.id=p.id WHERE p.seq<=$9),'[]'::jsonb),
+ FROM numbered p JOIN exploration_nodes n ON n.id=p.id ` + nodeNavigationJoinSQL + ` WHERE p.seq<=$9),'[]'::jsonb),
  'more',COALESCE((SELECT jsonb_agg(id ORDER BY seq) FROM numbered WHERE seq>$9),'[]'::jsonb))`
 	var raw []byte
 	err := s.contextRow(ctx, workerReadSQL(query, s.workerRead), s.expID, KindDigest, "", "", int64(0), int64(0), limit+50, false, limit, viewer).Scan(&raw)

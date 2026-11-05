@@ -458,6 +458,8 @@ func projectRequestBudget(ctx context.Context, req llm.CompletionRequest) llm.Co
 }
 
 func projectRequestBudgetAndMetrics(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, llmrec.ContextReadMetrics) {
+	req = governRequestDocs(req)
+	req = deduplicatePlainHistory(req)
 	ri := RunInfoFrom(ctx)
 	if ri.AgentKey != "planner" && ri.AgentKey != "worker" {
 		return req, contextReadMetrics(req)

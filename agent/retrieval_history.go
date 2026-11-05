@@ -19,7 +19,7 @@ const retrievalContextRule = previousRetrievalContextRule + "历史旧工具名�
 
 func retrievalTool(name string) bool {
 	switch name {
-	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview":
+	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview", "RecallMemory":
 		return true
 	}
 	return retiredRetrievalKind(name) != ""
@@ -185,6 +185,9 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 func retrievalValue(text, name string) map[string]any {
 	var value any
 	if decodeStructuredJSON([]byte(text), &value) != nil {
+		if name == "RecallMemory" {
+			return map[string]any{"preview": text, "legacy_memory": true, "legacy_scan_scope": "unknown", "is_current_evidence": false}
+		}
 		return nil
 	}
 	if m, ok := value.(map[string]any); ok {
@@ -201,7 +204,7 @@ func retrievalDirectorySize(entries []any, truncated bool) int {
 	return utf8.RuneCountInString(retrievalDirectoryPrefix) + utf8.RuneCount(b)
 }
 func retrievalHasData(m map[string]any) bool {
-	for _, key := range []string{"items", "assets", "payload", "details", "parts", "request", "response", "id", "ref", "task", "goals", "recent_facts", "frontier_open", "facts", "findings", "steps", "hits", "works", "members", "final_text", "body", "preview"} {
+	for _, key := range []string{"items", "assets", "payload", "details", "parts", "request", "response", "id", "ref", "task", "goals", "recent_facts", "frontier_open", "facts", "findings", "steps", "hits", "works", "members", "final_text", "body", "preview", "content"} {
 		if _, ok := m[key]; ok {
 			return true
 		}

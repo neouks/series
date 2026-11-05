@@ -2,30 +2,22 @@
 
 import * as React from "react";
 import type { Graph as G6Graph } from "@antv/g6";
-import {
-  AppWindow,
-  Building2,
-  Globe,
-  Link2,
-  type LucideIcon,
-  Radio,
-  RefreshCw,
-  Server,
-  Waypoints,
-} from "lucide-react";
+import { AppWindow, Building2, Globe, Link2, type LucideIcon, Radio, RefreshCw, Server, Waypoints } from "lucide-react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
-import type { CoverageAssetRef, CoverageAssetRefs, CoverageGraphEdge, CoverageGraphNode } from "@/lib/types";
+import type {
+  CoverageAssetRef,
+  CoverageAssetRefs,
+  CoverageGraphData,
+  CoverageGraphEdge,
+  CoverageGraphNode,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // 每个父节点下、同一类型的子节点默认展示的数量；超出折叠，"展示更多"每次再拉这么多。
@@ -308,22 +300,29 @@ function AssetSheet({
   const raw = node ? JSON.stringify(node, null, 2) : "";
   const [refs, setRefs] = React.useState<CoverageAssetRefs | null>(null);
 
+  const [refsBefore, setRefsBefore] = React.useState(0);
+  const [refsHistory, setRefsHistory] = React.useState<number[]>([]);
+  const [refsError, setRefsError] = React.useState("");
+  const [refsRetry, setRefsRetry] = React.useState(0);
+  React.useEffect(() => {
+    setRefsBefore(0);
+    setRefsHistory([]);
+  }, [node?.key, taskId]);
   React.useEffect(() => {
     setRefs(null);
+    setRefsError("");
     if (!node?.asset_id) return;
-    let cancelled = false;
+    const controller = new AbortController();
     api
-      .taskAssetRefs(taskId, node.asset_id)
+      .taskAssetRefs(taskId, node.asset_id, refsBefore, controller.signal)
       .then((r) => {
-        if (!cancelled) setRefs(r);
+        if (!controller.signal.aborted) setRefs(r);
       })
-      .catch(() => {
-        /* 无关联或出错：不展示该区块 */
+      .catch((e) => {
+        if (!controller.signal.aborted) setRefsError(e instanceof Error ? e.message : "关联记录加载失败");
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [node, taskId]);
+    return () => controller.abort();
+  }, [node?.asset_id, taskId, refsBefore, refsRetry]);
   return (
     <Sheet open={node !== null} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-md">
@@ -331,7 +330,9 @@ function AssetSheet({
           <>
             <SheetHeader className="border-b p-4">
               <div className="flex items-center gap-2.5 pr-8">
-                <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg shadow-sm", meta.iconBg)}>
+                <span
+                  className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg shadow-sm", meta.iconBg)}
+                >
                   <Icon className="size-4 text-white" />
                 </span>
                 <div className="min-w-0">
@@ -372,6 +373,41 @@ function AssetSheet({
                     {node.asset_id ? <span className="font-mono text-xs">{node.asset_id}</span> : undefined}
                   </DetailRow>
                 </section>
+                {refsError && (
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      {refsError}
+                      <Button size="sm" variant="link" onClick={() => setRefsRetry((n) => n + 1)}>
+                        重试
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!refsHistory.length}
+                    onClick={() => {
+                      setRefsBefore(refsHistory.at(-1)!);
+                      setRefsHistory((h) => h.slice(0, -1));
+                    }}
+                  >
+                    上一页关联
+                  </Button>
+                  {refs?.has_more && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setRefsHistory((h) => [...h.slice(-19), refsBefore]);
+                        setRefsBefore(refs.next_before!);
+                      }}
+                    >
+                      下一页关联
+                    </Button>
+                  )}
+                </div>
                 {refs && (refs.intents.length > 0 || refs.facts.length > 0 || refs.findings.length > 0) && (
                   <section className="flex flex-col gap-3 border-t pt-3">
                     <RefList title="关联意图" items={refs.intents} />
@@ -380,7 +416,7 @@ function AssetSheet({
                   </section>
                 )}
                 <section className="border-t pt-3">
-                  <h4 className="text-muted-foreground mb-1.5 text-xs font-medium">原始数据</h4>
+                  <h4 className="text-muted-foreground mb-1.5 text-xs font-medium">窗口预览（长字段可能省略）</h4>
                   <pre className="bg-muted/50 text-foreground max-w-full overflow-hidden rounded-md border p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
                     {raw}
                   </pre>
@@ -420,7 +456,7 @@ function FoldSheet({
             </SheetHeader>
             <ScrollArea className="min-h-0 flex-1">
               <div className="flex flex-col gap-1 p-3">
-                {fold.hidden.map((n) => (
+                {fold.hidden.slice(0, FOLD_STEP).map((n) => (
                   <button
                     key={n.key}
                     type="button"
@@ -457,14 +493,16 @@ function FoldSheet({
 
 // ---------------------------------------------------------------------------
 function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; coverageEnabled?: boolean }) {
-  const [data, setData] = React.useState<{
-    nodes: CoverageGraphNode[];
-    edges: CoverageGraphEdge[];
-  } | null>(null);
+  const [data, setData] = React.useState<CoverageGraphData | null>(null);
+  const [range, setRange] = React.useState({ after: 0, upper: 0 });
+  const [history, setHistory] = React.useState<Array<{ after: number; upper: number }>>([]);
+  const [error, setError] = React.useState("");
+  const request = React.useRef<AbortController | null>(null);
   const [expanded, setExpanded] = React.useState<Map<string, number>>(new Map());
   const [selectedAsset, setSelectedAsset] = React.useState<CoverageGraphNode | null>(null);
   const [selectedFoldId, setSelectedFoldId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [showLegend, setShowLegend] = React.useState(false);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const graphRef = React.useRef<G6Graph | null>(null);
@@ -475,24 +513,42 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     edges: [],
   });
 
-  const fetchGraph = React.useCallback(() => {
+  const fetchGraph = React.useCallback(async () => {
+    request.current?.abort();
+    if (document.hidden) return;
+    const controller = new AbortController();
+    request.current = controller;
     setLoading(true);
-    api
-      .taskCoverageGraph(taskId)
-      .then((g) => {
-        // 资产覆盖度功能关闭(B1)：仍出图(范围内资产/company 关联依旧可见)，但抹平
-        // tested 状态——不显示测试进度、不做已测高亮。
-        const nodes = coverageEnabled ? (g.nodes ?? []) : (g.nodes ?? []).map((n) => ({ ...n, tested: false }));
-        setData({ nodes, edges: g.edges ?? [] });
-      })
-      .catch(() => {
-        /* 保留上一次数据 */
-      })
-      .finally(() => setLoading(false));
-  }, [taskId, coverageEnabled]);
-
+    try {
+      const g = await api.taskCoverageGraph(taskId, range.after, range.upper, controller.signal);
+      if (controller.signal.aborted) return;
+      const nodes = coverageEnabled ? (g.nodes ?? []) : (g.nodes ?? []).map((n) => ({ ...n, tested: false }));
+      setData({ ...g, nodes, edges: g.edges ?? [] });
+      setError("");
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setError(e instanceof Error ? e.message : "加载失败");
+        setData(null);
+      }
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, [taskId, coverageEnabled, range]);
   React.useEffect(() => {
-    fetchGraph();
+    setData(null);
+    setExpanded(new Map());
+    setSelectedAsset(null);
+    setSelectedFoldId(null);
+    void fetchGraph();
+    const visible = () => {
+      if (document.hidden) request.current?.abort();
+      else void fetchGraph();
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      request.current?.abort();
+      document.removeEventListener("visibilitychange", visible);
+    };
   }, [fetchGraph]);
 
   const { renderNodes, renderEdges } = React.useMemo(
@@ -505,8 +561,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
 
   // 结构签名：只在可见节点/边集合变化时重建图 + 重跑布局，避免无谓抖动。
   const sig = React.useMemo(
-    () =>
-      `${renderNodes.map((n) => `${n.key}:${n.fold ? "f" : n.node.tested ? "t" : "u"}`).sort().join(",")}|${renderEdges.length}`,
+    () => JSON.stringify({ nodes: toG6Nodes(renderNodes), edges: renderEdges }),
     [renderNodes, renderEdges],
   );
 
@@ -541,6 +596,7 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
       graph = new Graph({
         container: containerRef.current,
         autoResize: true,
+        animation: false,
         autoFit: "view",
         background: "#f0f2f7",
         node: {
@@ -615,6 +671,22 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     applyData();
   }, [sig, applyData]);
 
+  React.useEffect(() => {
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const graph = graphRef.current;
+        if (graph && !graph.destroyed) void graph.fitView().catch(() => {});
+      });
+    });
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
   const showMore = React.useCallback((groupId: string) => {
     setExpanded((prev) => {
       const m = new Map(prev);
@@ -639,6 +711,16 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
 
+      {error && (
+        <Alert variant="destructive" className="absolute bottom-3 left-3 right-3">
+          <AlertDescription>
+            {error}
+            <Button variant="link" size="sm" onClick={() => void fetchGraph()}>
+              重试
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {/* 图例 + 统计 + 刷新（叠加层） */}
       <div className="bg-card/95 pointer-events-auto absolute top-3 left-3 flex max-w-[340px] flex-col gap-2.5 rounded-lg border p-3 text-xs shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-3">
@@ -656,11 +738,20 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
           ) : (
             <span className="text-muted-foreground">{loading ? "加载中…" : "暂无范围内资产（先锚定任务范围）"}</span>
           )}
-          <Button variant="ghost" size="icon" className="size-6" onClick={fetchGraph} title="刷新">
+          <Button variant="ghost" size="icon" className="size-6" onClick={() => void fetchGraph()} title="刷新">
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
           </Button>
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="sm:hidden"
+          aria-expanded={showLegend}
+          onClick={() => setShowLegend((v) => !v)}
+        >
+          图例与说明
+        </Button>
+        <div className={cn("flex flex-wrap gap-x-3 gap-y-1.5", !showLegend && "hidden sm:flex")}>
           {(Object.keys(kindMeta) as Kind[]).map((k) => {
             const m = kindMeta[k];
             const Icon = m.icon;
@@ -674,7 +765,12 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             );
           })}
         </div>
-        <div className="border-border/60 text-muted-foreground flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2">
+        <div
+          className={cn(
+            "border-border/60 text-muted-foreground flex flex-wrap gap-x-3 gap-y-1.5 border-t pt-2",
+            !showLegend && "hidden sm:flex",
+          )}
+        >
           {coverageEnabled && (
             <>
               <span className="inline-flex items-center gap-1.5">
@@ -689,7 +785,50 @@ function GraphInner({ taskId, coverageEnabled = true }: { taskId: string; covera
             <span className="size-3 rounded-full border border-dashed border-neutral-400 bg-neutral-200" /> 范围外
           </span>
         </div>
-        <p className="text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed">
+        <div className="flex flex-wrap items-center gap-2">
+          <span>当前资产窗口，关系仅覆盖已加载节点，不代表全量统计。</span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!history.length}
+            onClick={() => {
+              setRange(history.at(-1)!);
+              setHistory((h) => h.slice(0, -1));
+            }}
+          >
+            上一页
+          </Button>
+          {data?.has_more && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setHistory((h) => [...h.slice(-19), range]);
+                setRange({ after: data.next_after!, upper: data.upper! });
+              }}
+            >
+              下一页资产
+            </Button>
+          )}
+          {range.after > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRange({ after: 0, upper: 0 });
+                setHistory([]);
+              }}
+            >
+              返回首页
+            </Button>
+          )}
+        </div>
+        <p
+          className={cn(
+            "text-muted-foreground/80 border-border/60 border-t pt-2 leading-relaxed",
+            !showLegend && "hidden sm:block",
+          )}
+        >
           力导向布局，可拖拽节点、滚轮缩放；灰色「⋯」是折叠节点，点开可展开更多。
         </p>
       </div>
@@ -713,7 +852,7 @@ export function CoverageGraphTab({ taskId, coverageEnabled = true }: { taskId: s
     <Card>
       <CardContent className="p-0">
         <div className="h-[72vh] w-full overflow-hidden rounded-xl">
-          <GraphInner taskId={taskId} coverageEnabled={coverageEnabled} />
+          <GraphInner key={taskId} taskId={taskId} coverageEnabled={coverageEnabled} />
         </div>
       </CardContent>
     </Card>

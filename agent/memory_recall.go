@@ -35,12 +35,13 @@ type catalogRecallTool struct {
 }
 
 func (t *catalogRecallTool) Description() string {
-	return "读取历史经验（非当前证据）：query关键词搜索；name精确读取，按next续页。"
+	return "历史经验导航（非当前证据）：query字面搜索名称/描述和正文，分批扫描，按next续页；name精确分页读取。"
 }
 
 func (t *catalogRecallTool) InputSchema() map[string]any {
 	t.schemaOnce.Do(func() {
 		t.schema = obj(map[string]any{
+			"cursor":    str("query扫描续页，只使用next中的值；目录或内容变化时重查"),
 			"query":     map[string]any{"type": "string", "description": "关键词搜索，与name二选一"},
 			"name":      map[string]any{"type": "string", "description": "预览中的确切.md文件名"},
 			"offset":    map[string]any{"type": "integer", "minimum": 0, "description": "name续页UTF-8字节位置，沿用next，默认0"},
@@ -57,6 +58,7 @@ func (t *catalogRecallTool) Call(ctx context.Context, raw json.RawMessage, tc *a
 	}
 	var in struct {
 		Query    string `json:"query"`
+		Cursor   string `json:"cursor"`
 		Name     string `json:"name"`
 		Offset   int64  `json:"offset"`
 		MaxChars *int   `json:"max_chars"`
@@ -70,6 +72,9 @@ func (t *catalogRecallTool) Call(ctx context.Context, raw json.RawMessage, tc *a
 	if err := d.Decode(new(any)); err != io.EOF {
 		return actool.Errorf("记忆参数必须是单个JSON对象"), nil
 	}
+	if tc != nil && tc.MaxOutputChars > 0 {
+		ctx = context.WithValue(ctx, readBudgetKey{}, min(readOutputBudget(ctx), tc.MaxOutputChars))
+	}
 	if in.Name == "" {
 		if strings.TrimSpace(in.Query) == "" || in.Offset != 0 || in.MaxChars != nil || in.Version != "" {
 			return actool.Errorf("请提供query，或使用name精确读取及其续页参数"), nil
@@ -77,9 +82,9 @@ func (t *catalogRecallTool) Call(ctx context.Context, raw json.RawMessage, tc *a
 		if err := ctx.Err(); err != nil {
 			return actool.Result{}, err
 		}
-		return t.CoreTool.Call(ctx, raw, tc)
+		return t.search(ctx, strings.TrimSpace(in.Query), in.Cursor)
 	}
-	if strings.TrimSpace(in.Query) != "" || (in.Offset > 0 && in.Version == "") {
+	if in.Cursor != "" || strings.TrimSpace(in.Query) != "" || (in.Offset > 0 && in.Version == "") {
 		return actool.Errorf("name精确读取不与query混用；续读请使用next返回的offset和version"), nil
 	}
 	limit := 4000

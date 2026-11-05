@@ -40,12 +40,16 @@ func (s *ExplorationStore) SearchMixedContext(ctx context.Context, q ContextSear
 		nodeUpper, activityUpper, beforeTime = cursor.NodeUpper, cursor.ActivityUpper, cursor.Time
 		beforeID, beforeSource = cursor.ID, cursor.Source
 	}
+	indexed, err := s.contextTextIndexed(ctx, q.Query)
+	if err != nil {
+		return nil, nil, err
+	}
 	query := contextScopeSQL + `, bounds AS MATERIALIZED (
  SELECT COALESCE($12::bigint,(SELECT max(id) FROM exploration_nodes WHERE exploration_id IN (SELECT exp FROM contexts)),0) node_upper,
  COALESCE($13::bigint,(SELECT max(id) FROM activity WHERE exploration_id IN (SELECT exp FROM contexts)),0) activity_upper
  ) SELECT hits.*,bounds.node_upper,bounds.activity_upper FROM (
- SELECT * FROM (` + s.contextSearchSQL(false, true) + `) nodes
- UNION ALL SELECT * FROM (` + s.contextSearchSQL(true, true) + `) activities
+ SELECT * FROM (` + s.contextSearchSQL(false, true, indexed) + `) nodes
+ UNION ALL SELECT * FROM (` + s.contextSearchSQL(true, true, indexed) + `) activities
  ) hits CROSS JOIN bounds WHERE $11::bigint=0
  ORDER BY hits.created_at DESC,hits.id DESC,hits.source DESC LIMIT $7`
 	rows, err := s.contextQuery(ctx, query, s.expID, q.Types, q.Query, q.Severity, q.AssetID, int64(0), q.Limit+1, true, q.State, q.IntentID, int64(0), nodeUpper, activityUpper, beforeTime, beforeID, beforeSource)

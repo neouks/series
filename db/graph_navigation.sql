@@ -1,15 +1,19 @@
 -- Navigation only, not evidence or authorization. Source row identity is read
 -- from heap metadata, so a valid prefix does not detoast the original payload.
-CREATE OR REPLACE FUNCTION series_graph_navigation_rule() RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT 1 $$;
+CREATE OR REPLACE FUNCTION series_graph_navigation_rule() RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT 3 $$;
 CREATE OR REPLACE FUNCTION series_graph_navigation_preview(p JSONB) RETURNS JSONB LANGUAGE sql IMMUTABLE AS $$
  SELECT jsonb_build_object('name',left(p->>'name',500),'summary',left(p->>'summary',600),
- 'text',left(p->>'text',600),'description',left(p->>'description',500),'body',left(p->>'body',1200))
+ 'text',left(p->>'text',600),'description',left(p->>'description',500),'body',left(p->>'body',1200),
+ 'confidence',left(p->>'confidence',80),'severity',left(p->>'severity',80),'severity_long',CASE WHEN char_length(p->>'severity')>80 THEN '1' ELSE '0' END,
+ 'body_truncated',CASE WHEN char_length(COALESCE(p->>'body',''))>1200 THEN '1' ELSE '0' END,
+ 'source_revision',left(p->>'source_revision',500),'source_revision_long',CASE WHEN char_length(p->>'source_revision')>500 THEN '1' ELSE '0' END,
+ 'summary_rule_version',left(p->>'summary_rule_version',7))
 $$;
 CREATE OR REPLACE FUNCTION series_graph_navigation_valid(p JSONB) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
- SELECT CASE WHEN jsonb_typeof(p)='object' THEN p ?& ARRAY['name','summary','text','description','body']
- AND NOT EXISTS(SELECT 1 FROM jsonb_each(p) x WHERE x.key NOT IN ('name','summary','text','description','body')
+ SELECT CASE WHEN jsonb_typeof(p)='object' THEN p ?& ARRAY['name','summary','text','description','body','confidence','severity','severity_long','body_truncated','source_revision','source_revision_long','summary_rule_version']
+ AND NOT EXISTS(SELECT 1 FROM jsonb_each(p) x WHERE x.key NOT IN ('name','summary','text','description','body','confidence','severity','severity_long','body_truncated','source_revision','source_revision_long','summary_rule_version')
  OR jsonb_typeof(x.value) NOT IN ('string','null')
- OR char_length(x.value#>>'{}')>CASE x.key WHEN 'name' THEN 500 WHEN 'summary' THEN 600 WHEN 'text' THEN 600 WHEN 'description' THEN 500 ELSE 1200 END) ELSE false END
+ OR char_length(x.value#>>'{}')>CASE x.key WHEN 'name' THEN 500 WHEN 'summary' THEN 600 WHEN 'text' THEN 600 WHEN 'description' THEN 500 WHEN 'body' THEN 1200 WHEN 'source_revision' THEN 500 WHEN 'confidence' THEN 80 WHEN 'severity' THEN 80 WHEN 'summary_rule_version' THEN 7 ELSE 1 END) ELSE false END
 $$;
 CREATE TABLE IF NOT EXISTS graph_navigation_projection (
  node_id BIGINT PRIMARY KEY,

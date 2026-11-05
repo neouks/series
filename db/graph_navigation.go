@@ -9,8 +9,8 @@ import (
 // The cache never grants access. The fallback is the same bounded field prefix,
 // computed from the live payload when a row/rule/physical layout is stale.
 const nodeNavigationJoinSQL = ` LEFT JOIN graph_navigation_projection np ON np.node_id=n.id AND np.exploration_id=n.exploration_id `
-const nodeNavigationPayloadSQL = `(CASE WHEN np.rule_version=series_graph_navigation_rule()
- AND np.source_stamp=n.xmin::text||':'||n.ctid::text THEN np.preview ELSE n.payload END)`
+const nodeNavigationCurrentSQL = `np.rule_version=series_graph_navigation_rule() AND np.source_stamp=n.xmin::text||':'||n.ctid::text`
+const nodeNavigationPayloadSQL = `(CASE WHEN ` + nodeNavigationCurrentSQL + ` THEN np.preview ELSE n.payload END)`
 const nodeNavigationDisplaySQL = `COALESCE(NULLIF(` + nodeNavigationPayloadSQL + `->>'name',''),NULLIF(` + nodeNavigationPayloadSQL + `->>'summary',''),
  NULLIF(` + nodeNavigationPayloadSQL + `->>'text',''),NULLIF(` + nodeNavigationPayloadSQL + `->>'description',''),NULLIF(` + nodeNavigationPayloadSQL + `->>'body',''),'')`
 const nodeNavigationContextSQL = `COALESCE(` + nodeNavigationPayloadSQL + `->>'summary',` + nodeNavigationPayloadSQL + `->>'text',` + nodeNavigationPayloadSQL + `->>'body','')`

@@ -269,6 +269,13 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
 	s.restoreTaskRuntimes()
+	if m.pg != nil {
+		go func() {
+			if err := m.pg.BuildContextSearchIndexes(s.ctx); err != nil && s.ctx.Err() == nil {
+				log.Printf("[context-search] 后台索引未完成，继续使用原检索路径: %v", err)
+			}
+		}()
+	}
 	go s.workerFeedbackLoop()
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
@@ -1940,7 +1947,18 @@ func (s *Server) taskCoverageGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
-	g, err := as.BuildCoverageGraph(taskID, t.ExpID)
+	after, e1 := graphUint(r.URL.Query().Get("after"))
+	upper, e2 := graphUint(r.URL.Query().Get("upper"))
+	limit := int64(100)
+	var e3 error
+	if r.URL.Query().Has("limit") {
+		limit, e3 = graphUint(r.URL.Query().Get("limit"))
+	}
+	if e1 != nil || e2 != nil || e3 != nil || limit < 1 || limit > 200 || (after > 0 && upper == 0) {
+		writeErr(w, 400, "invalid coverage window")
+		return
+	}
+	g, err := as.CoverageGraphWindow(r.Context(), taskID, after, upper, int(limit))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -1961,7 +1979,12 @@ func (s *Server) taskAssetRefs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "需要 asset_id")
 		return
 	}
-	refs, err := t.Store.AssetRefsWithSources(assetID)
+	before, e := graphUint(r.URL.Query().Get("before"))
+	if e != nil {
+		writeErr(w, 400, "invalid reference cursor")
+		return
+	}
+	refs, more, err := t.Store.AssetRefsWindow(r.Context(), assetID, before, 50)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -1980,7 +2003,11 @@ func (s *Server) taskAssetRefs(w http.ResponseWriter, r *http.Request) {
 			findings = append(findings, dto)
 		}
 	}
-	writeJSON(w, 200, map[string]any{"intents": intents, "facts": facts, "findings": findings})
+	next := int64(0)
+	if more && len(refs) > 0 {
+		next = refs[len(refs)-1].ID
+	}
+	writeJSON(w, 200, map[string]any{"intents": intents, "facts": facts, "findings": findings, "has_more": more, "next_before": next})
 }
 
 // taskScopeList returns a task's scope rows (coverage denominator sources).
@@ -2390,7 +2417,7 @@ func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad finding id")
 		return
 	}
-	f, err := s.m.pg.GetFinding(id)
+	f, err := s.m.pg.FindingAccessMetadata(r.Context(), id)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -2399,7 +2426,7 @@ func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "finding not found")
 		return
 	}
-	empty := map[string]any{"nodes": []any{}, "edges": []any{}}
+	empty := db.GraphViewPage{Nodes: []db.GraphViewNode{}, Edges: []db.GraphViewEdge{}, Revision: "empty", Upper: "0"}
 	if f.NodeID == nil || f.TaskID == nil {
 		writeJSON(w, 200, empty)
 		return
@@ -2409,12 +2436,23 @@ func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, empty)
 		return
 	}
-	nodes, edges, err := t.Store.FindingLineage(*f.NodeID)
+	before, e1 := graphUint(r.URL.Query().Get("before"))
+	upper, e2 := graphUint(r.URL.Query().Get("upper"))
+	limit := int64(200)
+	var e3 error
+	if r.URL.Query().Has("limit") {
+		limit, e3 = graphUint(r.URL.Query().Get("limit"))
+	}
+	if e1 != nil || e2 != nil || e3 != nil || limit < 2 || limit > 400 || (before > 0 && upper == 0) {
+		writeErr(w, 400, "invalid lineage window")
+		return
+	}
+	page, err := t.Store.GraphView(r.Context(), db.GraphViewQuery{LineageRoot: *f.NodeID, Before: before, Upper: upper, Limit: int(limit), Revision: r.URL.Query().Get("revision")})
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
+	writeGraphWindow(w, r, page, t.ID)
 }
 
 // patchFinding partially updates a finding: any subset of {status, severity}.

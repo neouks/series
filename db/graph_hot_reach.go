@@ -9,7 +9,7 @@ import (
 // Called with the graph advisory lock held. Roots and each edge list have their
 // own durable cursors, so deep chains, cycles and high fanout can resume across
 // jobs/restarts. Only IDs and lifecycle state are inspected, never payloads.
-func maintainHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool, error) {
+func maintainFullHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool, error) {
 	var topology, wave, built, cursor int64
 	var seeded, ready bool
 	if err := tx.QueryRowContext(ctx, `SELECT topology_rev,hot_build_generation,hot_wave,hot_seed_cursor,hot_seed_done,hot_ready FROM graph_revisions WHERE exploration_id=$1`, exp).Scan(&topology, &wave, &built, &cursor, &seeded, &ready); err != nil {

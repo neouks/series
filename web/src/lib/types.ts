@@ -374,6 +374,7 @@ export interface CoverageGraphEdge {
 }
 
 export interface CoverageGraphData {
+  has_more?: boolean; next_after?: number; upper?: number; partial?: boolean;
   nodes: CoverageGraphNode[];
   edges: CoverageGraphEdge[];
 }
@@ -388,6 +389,7 @@ export interface CoverageAssetRef {
   inherited?: boolean;
 }
 export interface CoverageAssetRefs {
+ has_more?: boolean; next_before?: number;
   intents: CoverageAssetRef[];
   facts: CoverageAssetRef[];
   findings: CoverageAssetRef[];
@@ -478,6 +480,8 @@ export interface GraphWindowQuery {
 }
 
 export interface GraphWindow {
+ base_revision?: string;
+ delta?: {nodes: TaskNode[]; edges: Edge[]; removed_nodes:string[]; removed_edges:Edge[];node_order:string[];edge_order:Edge[]};
   revision: string;
   unchanged?: boolean;
   nodes?: TaskNode[];

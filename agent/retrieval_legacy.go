@@ -68,6 +68,10 @@ func retrievalReplayIndex(call llm.ContentBlock, value, index map[string]any) ma
 	}
 	if retiredRetrievalKind(call.Name) == "" {
 		switch call.Name {
+		case "RecallMemory":
+			if args["name"] != nil {
+				args["max_chars"] = 2000
+			}
 		case "context_get", "asset_get":
 			args["max_chars"] = 2000
 		case "traffic_get":

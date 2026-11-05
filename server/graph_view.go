@@ -55,7 +55,7 @@ func (s *Server) explorationGraphView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, page)
+	writeGraphWindow(w, r, page, "")
 }
 
 func (s *Server) explorationGraphBody(w http.ResponseWriter, r *http.Request) {

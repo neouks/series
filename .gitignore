@@ -2,3 +2,5 @@
 /dist/
 /server/webui/dist/
 .DS_Store
+/docs/verification
+/.playwright-mcp

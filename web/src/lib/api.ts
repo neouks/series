@@ -390,7 +390,7 @@ export const api = {
       by_type: { type: string; total: number; tested: number }[];
     }>(`/tasks/${id}/coverage`),
   // 资产覆盖图：范围内全部资产 + 连接用的根域名/公司节点，含 tested/in_scope。
-  taskCoverageGraph: (id: string) => get<CoverageGraphData>(`/tasks/${id}/coverage-graph`),
+  taskCoverageGraph: (id: string, after = 0, upper = 0, signal?: AbortSignal) => get<CoverageGraphData>(`/tasks/${id}/coverage-graph?after=${after}&upper=${upper}`, { signal }),
   // 全局 llm_usage 聚合（仪表盘新版 token 视图）：按 profile 总量 + 按天分桶。
   usageStats: (days = 365) => get<UsageStats>(`/tokens/usage?days=${days}`),
   // ---- 目标管理（总览）----
@@ -430,7 +430,7 @@ export const api = {
   // 删除本任务的一条测试范围。
   deleteTaskScope: (id: string, scopeId: number) => del<{ ok: boolean }>(`/tasks/${id}/scope/${scopeId}`),
   // 某资产在本任务里关联的意图 / 事实 / 发现（覆盖图节点抽屉用）。
-  taskAssetRefs: (id: string, assetId: number) => get<CoverageAssetRefs>(`/tasks/${id}/asset-refs?asset_id=${assetId}`),
+  taskAssetRefs: (id: string, assetId: number, before = 0, signal?: AbortSignal) => get<CoverageAssetRefs>(`/tasks/${id}/asset-refs?asset_id=${assetId}&before=${before}`,{signal}),
 
   // ---- assets ----
   // Server-side paginated: pass limit/offset, get back the page + full match total.
@@ -676,7 +676,7 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   // 漏洞链路:该漏洞节点回溯到任务初始节点的子图(节点 + 关系)。
-  findingLineage: (id: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/findings/${id}/lineage`),
+  findingLineage: (id: string, query: GraphWindowQuery = {}, signal?: AbortSignal) => get<GraphWindow & {task_id?: string}>(`/exploration/findings/${id}/lineage?${new URLSearchParams(Object.entries(query).filter(([,v]) => v !== undefined).map(([k,v]) => [k,String(v)]))}`, {signal}),
   setFindingStatus: (id: string, status: FindingStatus) => patch<Finding>(`/exploration/findings/${id}`, { status }),
   setFindingSeverity: (id: string, severity: Severity) => patch<Finding>(`/exploration/findings/${id}`, { severity }),
   // 一次保存漏洞的名称/类别/严重等级(发现列表行内编辑用),只传出现的字段。

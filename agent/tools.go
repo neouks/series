@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -1981,6 +1982,10 @@ func (t *ToolSet) addFinding() actool.CoreTool {
 // must NOT be stuffed into the asset graph via upsert_asset.
 // factItem 是 record_fact 批量/单条的一条事实。
 type factItem struct {
+	Endpoint   string            `json:"endpoint"`
+	Phase      string            `json:"phase"`
+	ClaimKey   string            `json:"claim_key"`
+	Outcome    string            `json:"outcome"`
 	Summary    string            `json:"summary"`
 	Detail     string            `json:"detail"`
 	Evidence   string            `json:"evidence"`   // 一行关键证据（命令+关键输出行），支撑结论、便于事后核对
@@ -1995,7 +2000,25 @@ func (t *ToolSet) recordOneFact(it factItem, defaultIntent int64) (int64, error)
 	if strings.TrimSpace(it.Summary) == "" {
 		return 0, fmt.Errorf("summary 不能为空")
 	}
+	it.Endpoint = strings.TrimSpace(it.Endpoint)
+	it.Phase = strings.TrimSpace(it.Phase)
+	it.ClaimKey = strings.TrimSpace(it.ClaimKey)
+	it.Outcome = strings.TrimSpace(it.Outcome)
+	if utf8.RuneCountInString(it.Endpoint) > 200 || utf8.RuneCountInString(it.Phase) > 80 || utf8.RuneCountInString(it.ClaimKey) > 200 {
+		return 0, fmt.Errorf("endpoint/phase/claim_key超长")
+	}
+	if (it.ClaimKey == "") != (it.Outcome == "") {
+		return 0, fmt.Errorf("claim_key与outcome须同时提供")
+	}
+	if it.Outcome != "" && it.Outcome != "confirmed" && it.Outcome != "refuted" && it.Outcome != "inconclusive" {
+		return 0, fmt.Errorf("outcome须为confirmed/refuted/inconclusive")
+	}
 	payload := map[string]any{"summary": it.Summary}
+	for k, v := range map[string]string{"endpoint": it.Endpoint, "phase": it.Phase, "claim_key": it.ClaimKey, "outcome": it.Outcome} {
+		if v != "" {
+			payload[k] = v
+		}
+	}
 	if it.Detail != "" {
 		payload["detail"] = it.Detail
 	}
@@ -2070,6 +2093,10 @@ const factWriteContract = "单条和批量事实均调用 record_fact；批量�
 
 func factFields() map[string]any {
 	return map[string]any{
+		"endpoint":   str("可选，实际验证接口/入口，最多200字符；保留身份/权限等条件，不推测"),
+		"phase":      str("可选，当前验证阶段，最多80字符"),
+		"claim_key":  str("可选，相同目标和验证条件下待验证的明确命题，最多200字符；与outcome一起提供"),
+		"outcome":    map[string]any{"type": "string", "enum": []string{"confirmed", "refuted", "inconclusive"}, "description": "对claim_key的本次观测；不代表平台已裁决事实。与既有结果冲突时保留双方证据"},
 		"summary":    str("对本次探索结论的【总结性一句话】（是对 detail 的概括）"),
 		"intent_id":  idp("产生本事实的意图 id（你领到的意图；批量时作为各条默认）"),
 		"detail":     str("本事实的相关细节：把这次探索的多个观察事实都写进这里"),
@@ -2086,13 +2113,7 @@ func factSchema() map[string]any {
 }
 
 func (t *ToolSet) recordFact() actool.CoreTool {
-	return t.writeExpTool("record_fact", factWriteContract+"\n把探索【事实/结论】写入探索图，连到产生它的意图（intent_id）。用于记录探索结果——包括指纹/枚举等【正向结论】，和'端口关闭'/'参数不可注入'/'未发现登录入口'等【否定结论】。\n"+
-		"⚠️一次探索的多个观察要【汇总成一条事实】，不要拆成多条，可以合并成一条事实的就尽量用一条事实表示：summary=对本次结论的总结性一句话，detail=相关细节（可含多个具体项）。例：指纹意图→一条事实 {summary:'识别了 X 站点的技术栈与响应特征', detail:'nginx 1.25 / Vue3 / 200 / title=.. / body_len=..'}，而不是状态码、指纹、标题各记一条。一条意图通常只产出一条事实，拆太碎会让图谱无限膨胀。\n"+
-		"★facts 数组用于一次写多条【彼此不同】的结论（每条可省略 intent_id，默认用顶层 intent_id）。返回 ids 数组，与 facts 等长同序。\n"+
-		"⚠️只写你在工具输出里【真实看到】的结论，不要脑补。evidence 与 confidence 用来防止不准确的结论污染图谱：\n"+
-		"  · evidence=支撑本结论的【一行】关键证据（命令+最能证明的那一两行输出），**务必简洁**——细节已在 detail，这里不要再粘大段输出。\n"+
-		"  · confidence=observed（输出里直接看到）| inferred（据现象推断）。\n"+
-		"  · **否定类结论**（不可注入/端口关闭/未发现入口等）只写\"观察 + 试探性读法\"——陈述你实际看到什么，方向是否放弃由规划者综合全局定；务必给 evidence，手段没穷尽或证据弱（含只探一次、看起来像）标 inferred，确已穷尽且直接看到才标 observed。",
+	return t.writeExpTool("record_fact", factWriteContract+"\n写回当前意图的真实观察（含否定结论）。相关观察汇总为一条summary/detail，facts仅批量独立结论；evidence保留关键原文，confidence区分observed/inferred。否定结果不等于永久放弃方向。endpoint/phase用于导航；claim_key+outcome记录明确命题及本次观测，冲突保留双方证据，不覆盖旧事实。Worker仅写当前意图；资产仍按执行角色校验。",
 		factSchema(),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -49,11 +50,15 @@ type GraphViewNode struct {
 
 type GraphViewQuery struct {
 	Focus, Before, Upper int64
-	Limit                int
-	Revision             string
+	// LineageRoot is host-only: constrain the window to this local finding.
+	LineageRoot int64
+	Limit       int
+	Revision    string
 }
 
 type GraphViewPage struct {
+	Delta          *GraphDelta     `json:"delta,omitempty"`
+	BaseRevision   string          `json:"base_revision,omitempty"`
 	Revision       string          `json:"revision"`
 	Unchanged      bool            `json:"unchanged,omitempty"`
 	Nodes          []GraphViewNode `json:"nodes,omitempty"`
@@ -89,7 +94,7 @@ func scanGraphUINode(scan interface{ Scan(...any) error }) (GraphViewNode, error
 // revision avoids all node/body/edge reads. No exact whole-graph count is needed.
 func (s *ExplorationStore) GraphView(ctx context.Context, q GraphViewQuery) (GraphViewPage, error) {
 	out := GraphViewPage{}
-	if q.Limit < 2 || q.Limit > 400 || q.Focus < 0 || q.Before < 0 || q.Upper < 0 || (q.Before > 0 && q.Upper == 0) {
+	if q.Limit < 2 || q.Limit > 400 || q.LineageRoot < 0 || q.Focus < 0 || q.Before < 0 || q.Upper < 0 || (q.Before > 0 && q.Upper == 0) {
 		return out, fmt.Errorf("invalid graph window")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -112,7 +117,7 @@ func (s *ExplorationStore) GraphView(ctx context.Context, q GraphViewQuery) (Gra
 	if err = tx.QueryRowContext(ctx, `SELECT r.revision||':navigation:'||series_graph_navigation_rule()::text FROM (`+graphRevisionSQL+`) r(revision)`, s.expID, true).Scan(&revision); err != nil {
 		return out, err
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("graph-ui-v1:%d:%d:%d:%d:%d:%s", s.expID, q.Focus, q.Before, q.Upper, q.Limit, revision)))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("graph-ui-v2:%d:%d:%d:%d:%d:%d:%s", s.expID, q.LineageRoot, q.Focus, q.Before, q.Upper, q.Limit, revision)))
 	out.Revision, out.Upper = hex.EncodeToString(sum[:]), strconv.FormatInt(q.Upper, 10)
 	if out.Revision == q.Revision {
 		out.Unchanged = true
@@ -161,7 +166,24 @@ func (s *ExplorationStore) GraphView(ctx context.Context, q GraphViewQuery) (Gra
  ORDER BY (i.id=$2) DESC,i.id DESC LIMIT $5
  ) SELECT ` + graphUIColumns + ` FROM page v ` + graphUIPageRowSQL + ` ORDER BY (v.id=$2) DESC,v.id DESC`
 	}
-	rows, err := tx.QueryContext(ctx, pageSQL, s.expID, q.Focus, q.Before, q.Upper, q.Limit+1)
+	if q.LineageRoot > 0 {
+		// UNION deduplicates cycles. Only IDs participate in recursion; raw
+		// bodies are projected after LIMIT. Scope is the finding's own graph.
+		pageSQL = strings.Replace(graphUIScopeSQL, "WITH scope", "WITH RECURSIVE scope", 1) + `, anc(id) AS (
+ SELECT id FROM exploration_nodes WHERE id=$2 AND exploration_id=$1
+ UNION SELECT e.src_id FROM anc JOIN exploration_edges e ON e.dst_id=anc.id
+ JOIN exploration_nodes n ON n.id=e.src_id AND n.exploration_id=$1
+ WHERE e.exploration_id=$1
+ ), page AS MATERIALIZED (
+ SELECT v.* FROM visible v JOIN anc ON anc.id=v.id WHERE v.exploration_id=$1
+ AND v.id<=$4 AND ($3::bigint=0 OR v.id<$3) ORDER BY v.id DESC LIMIT $5
+ ) SELECT ` + graphUIColumns + ` FROM page v ` + graphUIPageRowSQL + ` ORDER BY v.id DESC`
+	}
+	anchor := q.Focus
+	if q.LineageRoot > 0 {
+		anchor = q.LineageRoot
+	}
+	rows, err := tx.QueryContext(ctx, pageSQL, s.expID, anchor, q.Before, q.Upper, q.Limit+1)
 	if err != nil {
 		return out, err
 	}

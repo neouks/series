@@ -8,6 +8,30 @@ export function mergeGraphWindow(previous: GraphWindow | null, incoming: GraphWi
     if (!previous || previous.revision !== incoming.revision) throw new Error("图版本未命中，请重试");
     return previous;
   }
+  if (incoming.delta) {
+    if (!previous || previous.revision !== incoming.base_revision) throw new Error("图增量版本不匹配，请刷新");
+    const d = incoming.delta;
+    const nodes = new Map((previous.nodes ?? []).map((n) => [n.id, n]));
+    for (const id of d.removed_nodes) nodes.delete(id);
+    for (const n of d.nodes) nodes.set(n.id, n);
+    const edgeKey = (e: { src: string; dst: string; rel: string }) => JSON.stringify([e.src, e.dst, e.rel]);
+    const edges = new Map((previous.edges ?? []).map((e) => [edgeKey(e), e]));
+    for (const e of d.removed_edges) edges.delete(edgeKey(e));
+    for (const e of d.edges) edges.set(edgeKey(e), e);
+    if (
+      d.node_order.length > 400 ||
+      d.edge_order.length > 800 ||
+      d.node_order.some((id) => !nodes.has(id)) ||
+      d.edge_order.some((e) => !edges.has(edgeKey(e)))
+    )
+      throw new Error("图增量不完整");
+    incoming = {
+      ...incoming,
+      delta: undefined,
+      nodes: d.node_order.map((id) => nodes.get(id)!),
+      edges: d.edge_order.map((e) => edges.get(edgeKey(e))!),
+    };
+  }
   const old = new Map((previous?.nodes ?? []).map((n) => [n.id, n]));
   const fields: Array<keyof TaskNode> = [
     "id",
