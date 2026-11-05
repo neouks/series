@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -28,6 +29,14 @@ func (s *Server) constraintInjectPlanner() bool {
 
 func (s *Server) constraintInjectWorker() bool {
 	return s.m.pg.GetBool(settingConstraintsInjectWorker, true)
+}
+
+func (s *Server) constraintInjectPlannerContext(ctx context.Context) (bool, error) {
+	return s.m.pg.GetBoolContext(ctx, settingConstraintsInjectPlanner, true)
+}
+
+func (s *Server) constraintInjectWorkerContext(ctx context.Context) (bool, error) {
+	return s.m.pg.GetBoolContext(ctx, settingConstraintsInjectWorker, true)
 }
 
 // listConstraints 返回本任务的全部操作约束(allow 在前、deny 在后)。

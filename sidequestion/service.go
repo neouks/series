@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // SideQuestionService has no harness, tool executor, transcript writer or model
@@ -22,7 +23,7 @@ type Answer struct {
 func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionRequest, streaming bool, update func(Answer)) (out Answer, err error) {
 	if streaming {
 		complete := false
-		for ev, streamErr := range s.Provider.Stream(ctx, req) {
+		for ev, streamErr := range s.Provider.Stream(runtimebudget.WithModelPhase(ctx, "side_answer"), req) {
 			if streamErr != nil {
 				err = streamErr
 				break
@@ -50,7 +51,7 @@ func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionReque
 		}
 	} else {
 		var msg llm.Message
-		msg, _, out.Usage, err = s.Provider.Complete(ctx, req)
+		msg, _, out.Usage, err = s.Provider.Complete(runtimebudget.WithModelPhase(ctx, "side_answer"), req)
 		out.Text, out.ToolUse = msg.Text(), len(msg.ToolUses()) > 0
 	}
 	if ctx.Err() != nil {

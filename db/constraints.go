@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -19,7 +20,15 @@ type Constraint struct {
 // ListConstraints returns this exploration's constraints, allow before deny, oldest
 // first within each group (stable render order for the prompt block + UI).
 func (s *ExplorationStore) ListConstraints() ([]Constraint, error) {
-	rows, err := s.db.Query(`
+	return s.ListConstraintsContext(context.Background())
+}
+
+// ListConstraintsContext never treats an unavailable read as an empty policy.
+// Cap the read even for legacy callers without an operation deadline.
+func (s *ExplorationStore) ListConstraintsContext(ctx context.Context) ([]Constraint, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `
 SELECT id, kind, text, COALESCE(origin,''), created_at
 FROM task_constraints WHERE exploration_id=$1
 ORDER BY (kind='deny'), id`, s.expID)

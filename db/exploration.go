@@ -1056,7 +1056,7 @@ func (s *ExplorationStore) NodesPageContext(ctx context.Context, f NodeFilter, p
 	}
 	offset := (page - 1) * size
 
-	conds := []string{"exploration_id=$1"}
+	conds := []string{"n.exploration_id=$1"}
 	args := []any{s.expID}
 	addIn := func(column string, values []string) {
 		if len(values) == 0 {
@@ -1069,21 +1069,21 @@ func (s *ExplorationStore) NodesPageContext(ctx context.Context, f NodeFilter, p
 		}
 		conds = append(conds, column+" IN ("+strings.Join(marks, ",")+")")
 	}
-	addIn("kind", f.Kinds)
-	addIn("state", f.States)
+	addIn("n.kind", f.Kinds)
+	addIn("n.state", f.States)
 	if q := strings.TrimSpace(f.Query); q != "" {
 		if id, err := strconv.ParseInt(strings.TrimPrefix(q, "#"), 10, 64); err == nil && id > 0 {
 			args = append(args, id)
-			conds = append(conds, "id=$"+fmt.Sprint(len(args)))
+			conds = append(conds, "n.id=$"+fmt.Sprint(len(args)))
 		} else {
 			args = append(args, "%"+strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(q)+"%")
-			conds = append(conds, "(payload::text || ' ' || COALESCE(origin,'')) ILIKE $"+fmt.Sprint(len(args)))
+			conds = append(conds, "(n.payload::text || ' ' || COALESCE(n.origin,'')) ILIKE $"+fmt.Sprint(len(args)))
 		}
 	}
 	where := " WHERE " + strings.Join(conds, " AND ")
 
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exploration_nodes`+where, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exploration_nodes n`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	if countOnly {
@@ -1094,8 +1094,8 @@ func (s *ExplorationStore) NodesPageContext(ctx context.Context, f NodeFilter, p
 		order = "ASC"
 	}
 	args = append(args, size, offset)
-	rows, err := s.db.QueryContext(ctx, `SELECT `+broadcastNodeCols+` FROM exploration_nodes`+where+
-		` ORDER BY id `+order+
+	rows, err := s.db.QueryContext(ctx, `SELECT `+broadcastNodeCols+` FROM exploration_nodes n `+nodeNavigationJoinSQL+where+
+		` ORDER BY n.id `+order+
 		` LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, 0, err

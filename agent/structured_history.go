@@ -19,7 +19,7 @@ func redactUnverifiableStructuredHistory(req llm.CompletionRequest) llm.Completi
 				calls[b.ID] = assetContextCall(b).Name
 			}
 			name := calls[b.ToolUseID]
-			if b.Type != llm.BlockToolResult || b.IsError || (!assetStructuredTool(name) && name != "traffic_get" && name != "traffic_search") {
+			if b.Type != llm.BlockToolResult || b.IsError || (!assetStructuredTool(name) && name != "traffic_get" && name != "traffic_search" && name != "traffic_blob") {
 				continue
 			}
 			for ci, c := range b.Content {

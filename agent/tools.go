@@ -133,9 +133,10 @@ type ToolSet struct {
 	// notify, if set, wakes the task's planner after a graph change that should be
 	// re-planned promptly (currently: a new hint). nil = no wake (the hint is still
 	// stored and read on the next round triggered by other events). debounced.
-	notify            func()
-	plannerReadAccess *ContextAccess
-	notifyNodes       func(string, []int64)
+	notify               func()
+	plannerReadAccess    *ContextAccess
+	checkpointReadAccess *ContextAccess // actual context_get binding for automatic notes
+	notifyNodes          func(string, []int64)
 	// notifyFinding, if set, wakes the task's planner when this run reports a finding,
 	// carrying (intentID, summary) so the round can spell out which intent found what.
 	// Wired for workers; nil elsewhere → falls back to notify (bare wake).

@@ -15,6 +15,7 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/mcphttp"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // mcpClient is the shared surface of a connected MCP server (stdio, Streamable HTTP,
@@ -143,7 +144,20 @@ func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
 	}
 	switch m.Transport {
 	case "stdio":
-		return mcp.NewStdioClient(ctx, m.Name, m.Command, jsonStrMap(m.Env), jsonStrSlice(m.Args)...)
+		release, _, err := runtimebudget.AcquireProcess(ctx, externalProcessKey(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if err = ctx.Err(); err != nil {
+			release()
+			return nil, err
+		}
+		client, err := mcp.NewStdioClient(ctx, m.Name, m.Command, jsonStrMap(m.Env), jsonStrSlice(m.Args)...)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		return &admittedMCPClient{mcpClient: client, release: release}, nil
 	case "http":
 		// env map doubles as HTTP headers (e.g. Authorization).
 		return mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure)

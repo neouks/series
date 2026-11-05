@@ -101,6 +101,9 @@ func (h assetPolicyHooks) PreToolUse(ctx context.Context, name string, input []b
 // RecheckToolInput validates hook-rewritten arguments without running action
 // approval a second time. The original call still has exactly one approval.
 func (h assetPolicyHooks) RecheckToolInput(ctx context.Context, name string, input []byte) string {
+	if h.policy.Store != nil {
+		h.policy.Store = h.policy.Store.WithReadContext(ctx)
+	}
 	h.policy.Scope = AssetSkipScope(ctx)
 	ri := llmrec.RunInfoFrom(ctx)
 	if ri.TaskID != h.policy.TaskID || (ri.AgentKey != "mainagent" && ri.AgentKey != "planner" && !(ri.AgentKey == "worker" && ri.IntentID > 0)) {

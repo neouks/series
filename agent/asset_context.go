@@ -12,6 +12,8 @@ import (
 	"github.com/Autumn-27/norma/llm"
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
+	"github.com/neouks/series/llmrec"
+	"github.com/neouks/series/runtimebudget"
 )
 
 func (t *ToolSet) authorizedScope(rows []db.TaskScope) []db.TaskScope {
@@ -78,28 +80,43 @@ func FilterTaskAssetRequest(ctx context.Context, assets *db.AssetStore, taskID i
 }
 
 func (p assetContextProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-	filtered, err := p.filter(ctx, req)
+	ctx, release, err := acquireModelRequest(ctx, runtimebudget.ModelGate(), false)
 	if err != nil {
 		return llm.Message{}, "", llm.Usage{}, err
 	}
+	defer release()
+	filtered, metrics, err := p.filterWithMetrics(ctx, req)
+	if err != nil {
+		return llm.Message{}, "", llm.Usage{}, modelRequestError(ctx, err)
+	}
+	ctx = llmrec.WithContextReadMetrics(ctx, metrics)
 	started := time.Now()
 	msg, stop, usage, err := p.Provider.Complete(ctx, filtered)
+	err = modelRequestError(ctx, err)
 	logContextUsage(ctx, usage, time.Since(started), err != nil)
 	return msg, stop, usage, err
 }
 
 func (p assetContextProvider) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
 	return func(yield func(llm.StreamEvent, error) bool) {
-		filtered, err := p.filter(ctx, req)
+		ctx, release, err := acquireModelRequest(ctx, runtimebudget.ModelGate(), false)
 		if err != nil {
 			yield(llm.StreamEvent{}, err)
 			return
 		}
+		defer release()
+		filtered, metrics, err := p.filterWithMetrics(ctx, req)
+		if err != nil {
+			yield(llm.StreamEvent{}, modelRequestError(ctx, err))
+			return
+		}
+		ctx = llmrec.WithContextReadMetrics(ctx, metrics)
 		started := time.Now()
 		var usage llm.Usage
 		failed := false
 		defer func() { logContextUsage(ctx, usage, time.Since(started), failed) }()
 		for event, err := range p.Provider.Stream(ctx, filtered) {
+			err = modelRequestError(ctx, err)
 			usage.MergeEcho(event.Usage)
 			if err != nil {
 				failed = true
@@ -107,6 +124,13 @@ func (p assetContextProvider) Stream(ctx context.Context, req llm.CompletionRequ
 			if !yield(event, err) {
 				return
 			}
+			if err != nil {
+				return
+			}
+		}
+		if err := modelRequestError(ctx, nil); err != nil && !failed {
+			failed = true
+			yield(llm.StreamEvent{}, err)
 		}
 	}
 }
@@ -187,12 +211,19 @@ func structuredNodeIDs(row map[string]any) []int64 {
 }
 
 func filterStructuredRows(value any, states map[int64]string, collect map[int64]bool, rowIDs func(map[string]any) []int64) (any, bool) {
+	return filterStructuredRowsChanged(value, states, collect, rowIDs, nil)
+}
+
+func filterStructuredRowsChanged(value any, states map[int64]string, collect map[int64]bool, rowIDs func(map[string]any) []int64, changed *bool) (any, bool) {
 	switch row := value.(type) {
 	case map[string]any:
 		for _, id := range rowIDs(row) {
 			if collect != nil {
 				collect[id] = true
 			} else if states[id] != db.ApprovalApproved {
+				if changed != nil {
+					*changed = true
+				}
 				return nil, false
 			}
 		}
@@ -202,7 +233,7 @@ func filterStructuredRows(value any, states map[int64]string, collect map[int64]
 			if field, ok := row["field"].(string); key == "value" && ok && strings.HasPrefix(field, "/") {
 				continue
 			}
-			filtered, keep := filterStructuredRows(child, states, collect, rowIDs)
+			filtered, keep := filterStructuredRowsChanged(child, states, collect, rowIDs, changed)
 			if collect == nil {
 				if keep {
 					row[key] = filtered
@@ -214,7 +245,7 @@ func filterStructuredRows(value any, states map[int64]string, collect map[int64]
 	case []any:
 		out := make([]any, 0, len(row))
 		for _, child := range row {
-			if filtered, keep := filterStructuredRows(child, states, collect, rowIDs); keep {
+			if filtered, keep := filterStructuredRowsChanged(child, states, collect, rowIDs, changed); keep {
 				out = append(out, filtered)
 			}
 		}
@@ -285,23 +316,28 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 		message, block, content int
 		value                   any
 		host                    string
+		requiredNodes           []int64
+		tool                    string
 	}
 	var results []result
 	hosts := map[string]bool{}
 	ids := make(map[int64]bool)
 	nodeIDs := make(map[int64]bool)
 	toolNames := make(map[string]string)
+	toolCalls := make(map[string]llm.ContentBlock)
 	for mi, message := range req.Messages {
 		for bi, block := range message.Content {
 			if block.Type == llm.BlockToolUse {
-				toolNames[block.ID] = assetContextCall(block).Name
+				call := assetContextCall(block)
+				toolNames[block.ID] = call.Name
+				toolCalls[block.ID] = call
 			}
 			if block.Type != llm.BlockToolResult {
 				continue
 			}
 			// Only SERIES structured tools: arbitrary shell/HTTP JSON may use the
 			// same field names for unrelated application data.
-			trafficRead := toolNames[block.ToolUseID] == "traffic_search" || toolNames[block.ToolUseID] == "traffic_get"
+			trafficRead := toolNames[block.ToolUseID] == "traffic_search" || toolNames[block.ToolUseID] == "traffic_get" || toolNames[block.ToolUseID] == "traffic_blob"
 			if !trafficRead && !assetStructuredTool(toolNames[block.ToolUseID]) {
 				continue
 			}
@@ -316,13 +352,20 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 						host, _ = row["target_host"].(string)
 					}
 					if host == "" {
+						if toolNames[block.ToolUseID] == "traffic_blob" {
+							results = append(results, result{message: mi, block: bi, content: ci, value: map[string]any{"context_unavailable": true, "message": "历史流量块缺少可复核的主机身份，不能恢复正文；请使用当前流量检索工具定位原始记录"}})
+						}
 						continue
 					}
 					hosts[host] = true
 				}
 				filterStructuredAssets(value, nil, ids)
 				filterStructuredRows(value, nil, nodeIDs, structuredNodeIDs)
-				results = append(results, result{mi, bi, ci, value, host})
+				required := legacyReadAnchors(toolCalls[block.ToolUseID])
+				for _, id := range required {
+					nodeIDs[id] = true
+				}
+				results = append(results, result{mi, bi, ci, value, host, required, toolNames[block.ToolUseID]})
 			}
 		}
 	}
@@ -385,9 +428,15 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 		req.Messages[i].Content = append([]llm.ContentBlock(nil), req.Messages[i].Content...)
 	}
 	for _, r := range results {
-		value, keep := filterStructuredAssets(r.value, states, nil)
+		restricted := false
+		value, keep := filterStructuredRowsChanged(r.value, states, nil, structuredAssetIDs, &restricted)
 		if keep {
-			value, keep = filterStructuredRows(value, nodeStates, nil, structuredNodeIDs)
+			value, keep = filterStructuredRowsChanged(value, nodeStates, nil, structuredNodeIDs, &restricted)
+		}
+		for _, id := range r.requiredNodes {
+			if nodeStates[id] != db.ApprovalApproved {
+				keep = false
+			}
 		}
 		if r.host != "" && hostStates[r.host] != db.ApprovalApproved && !((worker || main) && hostStates[r.host] == db.ApprovalPending) {
 			keep = false
@@ -396,6 +445,9 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 			value = map[string]any{"message": "该结果已从可执行上下文移除，等待用户授权"}
 		}
 		if row, ok := value.(map[string]any); ok {
+			if restricted && retrievalTool(r.tool) {
+				invalidateHistoricalPageMetadata(row)
+			}
 			for _, key := range []string{"total", "count", "facts", "findings", "coverage", "asset_approval_counts"} {
 				if _, exists := row[key]; exists {
 					row["counts_are_snapshot"] = true
@@ -412,4 +464,27 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 		block.Content[r.content].Text = string(encoded)
 	}
 	return req, nil
+}
+
+// A historical count/cursor was calculated before the access change. Do not
+// present it as current scope, or expose a removed row ID via next_before.
+// Evidence fields inside payload/value are deliberately not visited.
+func invalidateHistoricalPageMetadata(row map[string]any) {
+	for _, key := range []string{"total", "count", "facts", "findings", "findings_total", "coverage", "asset_approval_counts", "counts", "has_more", "next_cursor", "next_offset", "next_before"} {
+		if key == "facts" || key == "findings" {
+			if _, list := row[key].([]any); list {
+				continue
+			}
+		}
+		delete(row, key)
+	}
+	row["counts_unavailable_after_access_change"] = true
+	row["pagination_unavailable_after_access_change"] = true
+	if sources, ok := row["related_tasks"].([]any); ok {
+		for _, v := range sources {
+			if source, ok := v.(map[string]any); ok {
+				invalidateHistoricalPageMetadata(source)
+			}
+		}
+	}
 }

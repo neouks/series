@@ -4,6 +4,9 @@ import { useSettingsDirty, useSettingsDraft } from "@/components/settings/settin
 
 import * as React from "react";
 import { HTTPAuthCard } from "./http-auth-card";
+import { ModelResourcesCard } from "./model-resources-card";
+import { ModelDeadlinesCard } from "./model-deadlines-card";
+import { ModelBytesCard } from "./model-bytes-card";
 
 import {
   CheckCircle2Icon,
@@ -61,6 +64,11 @@ export default function SystemSettingsPage() {
   const [pyInterp, setPyInterp] = React.useState("");
   const [workers, setWorkers] = React.useState("3");
   const [savingWorkers, setSavingWorkers] = React.useState(false);
+  const [modelResources, setModelResources] = React.useState<Pick<Settings, "model_request_limits" | "model_request_usage">>({});
+  const [modelDeadlines, setModelDeadlines] = React.useState<Settings["model_request_deadlines"]>();
+  const [modelBytes,setModelBytes]=React.useState<Settings["model_request_bytes"]>();
+  const [processResources,setProcessResources]=React.useState<Pick<Settings,"external_process_limits"|"external_process_usage">>({});
+	const [workerResources, setWorkerResources] = React.useState<Pick<Settings, "worker_execution_limits" | "worker_execution_usage">>({});
   // 操作约束注入范围(默认都开)。
   const [injectPlanner, setInjectPlanner] = React.useState(true);
   const [injectWorker, setInjectWorker] = React.useState(true);
@@ -99,8 +107,8 @@ export default function SystemSettingsPage() {
 
   const saveWorkers = () => {
     const n = Number(workers);
-    if (!Number.isInteger(n) || n <= 0) {
-      toast.error("并发数必须是大于 0 的整数");
+    if (!Number.isInteger(n) || n <= 0 || n > 128) {
+      toast.error("并发数必须是 1–128 的整数");
       return;
     }
     setSavingWorkers(true);
@@ -139,7 +147,14 @@ export default function SystemSettingsPage() {
     setLoadError("");
     api
       .settings()
-      .then(apply)
+      .then((settings) => {
+        apply(settings);
+        setModelResources({ model_request_limits: settings.model_request_limits, model_request_usage: settings.model_request_usage });
+        setModelDeadlines(settings.model_request_deadlines);
+        setModelBytes(settings.model_request_bytes);
+        setProcessResources({external_process_limits:settings.external_process_limits,external_process_usage:settings.external_process_usage});
+				setWorkerResources({ worker_execution_limits: settings.worker_execution_limits, worker_execution_usage: settings.worker_execution_usage });
+      })
       .catch((error) => setLoadError((error as Error).message || "无法读取系统配置"))
       .finally(() => setLoaded(true));
   }, [apply]);
@@ -374,6 +389,22 @@ export default function SystemSettingsPage() {
           column-gap 只管列间距，行间距要由子元素自己给。 */}
       <div className="columns-1 gap-4 md:gap-6 lg:columns-2">
         <HTTPAuthCard />
+        <ModelDeadlinesCard loaded={loaded && !loadError} deadlines={modelDeadlines} onSaved={(s) => setModelDeadlines(s.model_request_deadlines)} />
+        <ModelBytesCard loaded={loaded&&!loadError} limits={modelBytes} onSaved={(s)=>setModelBytes(s.model_request_bytes)}/>
+        <ModelResourcesCard kind="process" loaded={loaded&&!loadError} limits={processResources.external_process_limits} usage={processResources.external_process_usage} onSaved={(s)=>setProcessResources({external_process_limits:s.external_process_limits,external_process_usage:s.external_process_usage})}/>
+				<ModelResourcesCard
+					kind="worker"
+					loaded={loaded && !loadError}
+					limits={workerResources.worker_execution_limits}
+					usage={workerResources.worker_execution_usage}
+					onSaved={(s) => setWorkerResources({ worker_execution_limits: s.worker_execution_limits, worker_execution_usage: s.worker_execution_usage })}
+				/>
+        <ModelResourcesCard
+          loaded={loaded && !loadError}
+          limits={modelResources.model_request_limits}
+          usage={modelResources.model_request_usage}
+          onSaved={(s) => setModelResources({ model_request_limits: s.model_request_limits, model_request_usage: s.model_request_usage })}
+        />
 
         <Card className="mb-4 break-inside-avoid md:mb-6">
           <CardHeader>
@@ -898,7 +929,7 @@ export default function SystemSettingsPage() {
               工作并发 · Work Agent 数
             </CardTitle>
             <CardDescription>
-              每个任务并发运行的工作 agent 数量（默认 3）。数值越大并发探测越多、消耗也越高。修改后
+              每个任务并发运行的工作 agent 数量（默认 3，范围 1–128），包含人工恢复。所有任务还共享 Worker 执行资源上限。数值越大并发探测越多、消耗也越高。修改后
               <b>对之后启动的任务生效</b>，正在运行的任务不受影响。
             </CardDescription>
           </CardHeader>
@@ -908,6 +939,7 @@ export default function SystemSettingsPage() {
                 type="number"
                 min={1}
                 className="w-32 font-mono text-sm"
+                max={128}
                 placeholder="3"
                 value={workers}
                 disabled={!loaded || savingWorkers}

@@ -19,13 +19,9 @@ func feedbackRoleAllowed(role string) bool {
 func (p assetContextProvider) refreshFindingFeedback(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, error) {
 	// Drop any prior projection, even if the caller changed task/role. This never
 	// edits the SDK transcript or original messages.
-	system := make([]string, 0, len(req.System))
-	for _, s := range req.System {
-		if s != findingDeletionFeedbackRule && !strings.HasPrefix(s, findingFeedbackPrefix) {
-			system = append(system, s)
-		}
-	}
-	req.System = system
+	req = withoutSystemSegments(req, func(s string) bool {
+		return s == findingDeletionFeedbackRule || strings.HasPrefix(s, findingFeedbackPrefix)
+	})
 	ri := RunInfoFrom(ctx)
 	if !feedbackRoleAllowed(ri.AgentKey) || ri.TaskID != p.taskID || p.taskID <= 0 {
 		return projectFindingFeedbackHistory(req, false), nil

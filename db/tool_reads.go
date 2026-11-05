@@ -28,7 +28,7 @@ type ToolDigestIndexPage struct {
 
 func (s *ExplorationStore) ToolDigestIndexPage(ctx context.Context, assetID, before int64, limit int) (ToolDigestIndexPage, error) {
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, toolNodeVisibilitySQL+`, selected AS MATERIALIZED (
+	err := s.contextRow(ctx, toolNodeVisibilitySQL+`, selected AS MATERIALIZED (
  SELECT v.id FROM visible v WHERE COALESCE((SELECT a.asset_id FROM exploration_edges e JOIN exploration_anchors a ON a.node_id=e.dst_id
  WHERE e.exploration_id=v.exploration_id AND e.src_id=v.id AND e.rel='covers' GROUP BY a.asset_id ORDER BY count(*) DESC,a.asset_id LIMIT 1),0)=$9
  ), page AS (SELECT id FROM selected WHERE $6::bigint=0 OR id<$6 ORDER BY id DESC LIMIT $7)
@@ -46,7 +46,7 @@ func (s *ExplorationStore) ToolDigestIndexPage(ctx context.Context, assetID, bef
 // ToolSearchWorkerTraces shares the authorized-node snapshot with fact and
 // finding reads; unauthorized rows never consume a result page.
 func (s *ExplorationStore) ToolSearchWorkerTraces(ctx context.Context, exclude int64, q string, before int64, limit int) ([]Activity, error) {
-	rows, err := s.db.QueryContext(ctx, toolNodeVisibilitySQL+`
+	rows, err := s.contextQuery(ctx, toolNodeVisibilitySQL+`
  SELECT a.id,a.node_id,COALESCE(a.worker,''),COALESCE(a.kind,''),COALESCE(a.tool,''),a.is_error,left(COALESCE(a.summary,''),100),v.owner,v.exploration_id<>$1
  FROM activity a JOIN visible v ON v.id=a.node_id AND v.exploration_id=a.exploration_id
  WHERE a.kind NOT IN ('thinking','usage') AND a.node_id<>$10 AND ($6::bigint=0 OR a.id<$6)
@@ -190,7 +190,7 @@ func (s *ExplorationStore) toolNodePage(ctx context.Context, kind, q, severity s
 		hidden = exclude[0]
 	}
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, workerReadSQL(toolNodeVisibilitySQL, s.workerRead)+`, page AS (SELECT v.*,n.payload FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE ($6::bigint=0 OR v.id<$6) AND NOT(v.id=ANY($9::bigint[])) ORDER BY v.id DESC LIMIT $7)
+	err := s.contextRow(ctx, workerReadSQL(toolNodeVisibilitySQL, s.workerRead)+`, page AS (SELECT v.*,n.payload FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE ($6::bigint=0 OR v.id<$6) AND NOT(v.id=ANY($9::bigint[])) ORDER BY v.id DESC LIMIT $7)
  SELECT jsonb_build_object('total',(SELECT count(*) FROM visible),'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',id,'kind',kind,'state',state,'created_at',created_at,'source_task_id',owner,
  'inherited',exploration_id<>$1,'payload',jsonb_strip_nulls(jsonb_build_object(
@@ -265,57 +265,34 @@ func (s *ExplorationStore) LatestWorkerOutput(ctx context.Context, nodeID int64,
 
 const toolIntentHistoryPredicate = `($2<>'intent' OR (n.state IN ('running','done','blocked','exhausted','stopped') AND (n.exploration_id=$1 OR n.state<>'running')))`
 
-const toolNodeVisibilitySQL = `WITH RECURSIVE current_task AS (
+const toolReadScopeSQL = `WITH RECURSIVE current_task AS (
  SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL
  ), contexts AS (
  SELECT $1::bigint exp,COALESCE((SELECT id FROM current_task),0) owner
  WHERE EXISTS(SELECT 1 FROM current_task) OR NOT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1)
  UNION SELECT t.exploration_id,t.id FROM task_relations r JOIN current_task c ON c.id=r.task_id
  JOIN tasks t ON t.id=r.source_task_id AND t.deleted_at IS NULL WHERE $8
- ), roots AS MATERIALIZED (
- SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner
+ )`
+
+const toolNodeRootsSQL = `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner
  FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
  WHERE n.kind=$2 AND ($3='' OR strpos(lower(COALESCE(n.payload->>'summary','')),lower($3))>0)
  AND ($4='' OR n.payload->>'severity'=$4)
  AND ` + toolIntentHistoryPredicate + `
- AND ($2<>'digest' OR (n.state='active' AND EXISTS(SELECT 1 FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.src_id=n.id AND e.rel='covers')))
- ), lineage(root,id,exp) AS (
- SELECT id,id,exploration_id FROM roots WHERE owner<>0 OR $5::bigint<>0 UNION
- SELECT l.root,step.id,l.exp FROM lineage l CROSS JOIN LATERAL (
- SELECT CASE WHEN e.rel='covers' THEN e.dst_id ELSE e.src_id END id FROM exploration_edges e WHERE e.exploration_id=l.exp
- AND ((e.rel='covers' AND e.src_id=l.id) OR (e.rel<>'covers' AND e.dst_id=l.id))
- UNION SELECT CASE WHEN x.value ~ '^[0-9]{1,18}$' THEN x.value::bigint ELSE 0 END
- FROM exploration_nodes dn CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(dn.payload->'anchor_ids')='array' THEN dn.payload->'anchor_ids' ELSE '[]'::jsonb END)x(value)
- WHERE dn.id=l.id AND dn.exploration_id=l.exp AND dn.kind='digest'
- )step
- ), anchors AS MATERIALIZED (
- SELECT l.root,a.asset_id FROM lineage l JOIN exploration_anchors a ON a.node_id=l.id
- UNION SELECT l.root,CASE WHEN x.value ~ '^[0-9]{1,18}$' THEN x.value::bigint ELSE 0 END
- FROM lineage l JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp
- CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN EXISTS(SELECT 1 FROM graph_node_projection gp WHERE gp.node_id=n.id AND gp.asset_metadata_ready) THEN to_jsonb((SELECT gp.payload_asset_ids FROM graph_node_projection gp WHERE gp.node_id=n.id)) ELSE CASE WHEN jsonb_typeof(n.payload->'asset_ids')='array' THEN n.payload->'asset_ids' ELSE '[]'::jsonb END END) x(value)
- ), permission_keys AS MATERIALIZED (
- SELECT DISTINCT r.owner,a.asset_id FROM anchors a JOIN roots r ON r.id=a.root WHERE r.owner<>0
- ), permissions AS MATERIALIZED (
- SELECT owner,asset_id,task_asset_effectively_approved(owner,asset_id)
- AND task_asset_effectively_approved((SELECT id FROM current_task),asset_id) allowed FROM permission_keys
- ), visible AS MATERIALIZED (
- SELECT r.* FROM roots r WHERE ($5::bigint=0 OR EXISTS(SELECT 1 FROM anchors a WHERE a.root=r.id AND a.asset_id=$5))
- AND NOT EXISTS(SELECT 1 FROM lineage l LEFT JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp WHERE l.root=r.id AND n.id IS NULL)
- AND NOT EXISTS(SELECT 1 FROM lineage l JOIN exploration_nodes n ON n.id=l.id AND n.exploration_id=l.exp WHERE l.root=r.id AND n.kind='digest' AND NOT series_digest_sources_current(n.payload))
- AND NOT EXISTS(SELECT 1 FROM anchors a JOIN permissions p ON p.owner=r.owner AND p.asset_id=a.asset_id WHERE a.root=r.id AND NOT p.allowed)
- )`
+ AND ($2<>'digest' OR (n.state='active' AND EXISTS(SELECT 1 FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.src_id=n.id AND e.rel='covers')))`
+
+var toolNodeVisibilitySQL = contextDependencyVisibility(toolReadScopeSQL, toolNodeRootsSQL, false, false, false, dependencyFilterAssets)
+var toolNodeVisibilityAssetsSQL = contextDependencyVisibility(toolReadScopeSQL, toolNodeRootsSQL, false, false, false, dependencyAllAssets)
 
 // ToolOpenIntentPage counts and limits within the same authorized snapshot.
 // Priority ordering matches Frontier, without exposing hidden pending intents.
 func (s *ExplorationStore) ToolOpenIntentPage(ctx context.Context, limit int) (ToolNodePage, error) {
 	// History reads deliberately exclude open intents. Replace only that fixed
 	// predicate; task, lineage, asset, and role checks remain identical.
-	visibility := strings.Replace(toolNodeVisibilitySQL, toolIntentHistoryPredicate, "(n.exploration_id=$1 AND n.state='open')", 1)
-	if !s.workerRead {
-		visibility = strings.Replace(visibility, "AND n.id IS NULL)", "AND (n.id IS NULL OR (n.kind='digest' AND NOT EXISTS(SELECT 1 FROM exploration_edges de WHERE de.exploration_id=n.exploration_id AND de.src_id=n.id AND de.rel='covers'))))", 1)
-	}
+	roots := strings.Replace(toolNodeRootsSQL, toolIntentHistoryPredicate, "(n.exploration_id=$1 AND n.state='open')", 1)
+	visibility := contextDependencyVisibility(toolReadScopeSQL, roots, s.workerRead, false, !s.workerRead, dependencyFilterAssets)
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, workerReadSQL(visibility, s.workerRead)+`, selected AS (
+	err := s.contextRow(ctx, workerReadSQL(visibility, s.workerRead)+`, selected AS (
  SELECT n.* FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE n.state='open' AND $6::bigint=0
  ), page AS (SELECT * FROM selected ORDER BY priority DESC,id ASC LIMIT $7)
  SELECT jsonb_build_object('total',(SELECT count(*) FROM selected),'nodes',COALESCE((SELECT jsonb_agg(jsonb_build_object(

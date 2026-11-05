@@ -14,6 +14,7 @@ import (
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
 	"github.com/neouks/series/intercept"
+	"github.com/neouks/series/llmrec"
 )
 
 // ChatAgent is the generic, task-independent conversational runner behind the chat
@@ -49,7 +50,7 @@ func (c *ChatAgent) WithTaskPolicy(as *db.AssetStore, taskID int64, proxy, ca st
 }
 
 func NewChatAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window int) *ChatAgent {
-	return &ChatAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window}
+	return &ChatAgent{prov: WithModelRequestScope(prov), model: model, workDir: workDir, tx: tx, window: window}
 }
 
 // SetNonStreaming wires a resolver deciding whether chat runs use the
@@ -129,8 +130,11 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	// Pure assistant: DefaultTools as the base; AugmentTools layers in the key's
 	// visible skills/MCP and lets the DB tools table filter/override. DefaultTools
 	// have no tools-table rows, so they always pass through.
-	base := actool.DefaultTools()
+	base := admittedDefaultTools()
 	ctx = WithRunInfo(ctx, RunInfo{SessionID: sessionID, AgentKey: agentKey, TaskID: c.taskID, Trigger: "human_message"})
+	if agentKey == "reporter" {
+		ctx = llmrec.WithRunInfo(ctx, llmrec.RunInfo{Phase: "finding_report"})
+	}
 	tools, def, cleanup, err := AugmentTools(ctx, agentKey, base)
 	defer cleanup()
 	if err != nil {
@@ -194,11 +198,15 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	// reload prior conversation so the agent has context across turns (each Chat is
 	// a fresh session). First turn: no file yet → Resume loads nothing and proceeds.
 	if c.tx != nil {
-		_ = s.Resume(sessionID)
+		if err := restoreConversationContext(ctx, s, sessionID); err != nil {
+			return "", err
+		}
 	}
 	// re-unlock skill-gated MCPs from prior Skill() calls in the reloaded history so
 	// revealed tools stay callable across the fresh session.
-	seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
+	if err = seedSessionUnlock(ctx, s, def.UnlockSkill); err != nil {
+		return "", err
+	}
 	text, _, err := captureRunSession(ctx, s, message, func(r db.Activity) {
 		if emit != nil {
 			r.Worker = agentKey

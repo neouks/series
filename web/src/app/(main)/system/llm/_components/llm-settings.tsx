@@ -656,8 +656,8 @@ function ProfileSheet({
             </div>
           </div>
           <p className="-mt-2 text-muted-foreground text-xs">
-            限速 0 = 不限，全 Agent 共享。上下文窗口单位 K（千 token），0 = 默认 200K，上限 1000（即
-            1M）；设太高会导致压缩不触发。
+            限速 0 = 不限，全 Agent 共享。上下文窗口单位 K（千 token），请按端点实际容量填写；0 沿用
+            200K 压缩估算，不代表已探测容量。支持 1–1000K，输出上限必须小于已填写的窗口。
           </p>
 
           <div className="grid gap-3 rounded-lg border p-3">

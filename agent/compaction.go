@@ -24,17 +24,15 @@ type Compactor struct {
 	cooldown time.Duration
 	mu       sync.Mutex
 	running  map[int64]bool
-	lastRun  map[int64]time.Time
 }
 
 func (c *Compactor) SetAssetStore(assets *db.AssetStore) { c.assets = assets }
 func NewCompactor(prov llm.Provider, model string) *Compactor {
 	return &Compactor{
-		prov:     prov,
+		prov:     WithModelRequestScope(prov),
 		model:    model,
 		cooldown: 60 * time.Second,
 		running:  map[int64]bool{},
-		lastRun:  map[int64]time.Time{},
 	}
 }
 
@@ -56,7 +54,7 @@ func (c *Compactor) OnPlannerRound(ctx context.Context, ts *db.ExplorationStore)
 // Keep other context values, but replace inherited attribution as one unit.
 
 func compactorRunContext(ctx context.Context, ts *db.ExplorationStore) (context.Context, error) {
-	taskID, err := ts.TaskID()
+	taskID, err := ts.TaskIDContext(ctx)
 	if err != nil || taskID <= 0 {
 		if err == nil {
 			err = fmt.Errorf("exploration has no owning task")
@@ -66,7 +64,7 @@ func compactorRunContext(ctx context.Context, ts *db.ExplorationStore) (context.
 	sessionID := fmt.Sprintf("exp%d-compactor", ts.ID())
 	ctx = llmrec.WithIndependentRunInfo(ctx, RunInfo{
 		TaskID: taskID, ExplorationID: ts.ID(), SessionID: sessionID,
-		AgentKey: "compactor", Trigger: "graph_compaction", Phase: "compaction",
+		AgentKey: "compactor", Trigger: "graph_compaction", Phase: "graph_summary",
 	})
 	return transcript.WithSessionID(ctx, sessionID), nil
 }
@@ -77,9 +75,6 @@ func (c *Compactor) tryStart(expID int64) bool {
 	if c.running[expID] {
 		return false
 	}
-	if t, ok := c.lastRun[expID]; ok && time.Since(t) < c.cooldown {
-		return false
-	}
 	c.running[expID] = true
 	return true
 }
@@ -88,14 +83,6 @@ func (c *Compactor) finish(expID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.running, expID)
-	c.lastRun[expID] = time.Now()
-	if len(c.lastRun) > 2048 {
-		for id, at := range c.lastRun {
-			if !c.running[id] && time.Since(at) > 10*time.Minute {
-				delete(c.lastRun, id)
-			}
-		}
-	}
 }
 
 // --- helpers: db ↔ coldgraph ---

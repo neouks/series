@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -69,7 +70,11 @@ func (s *AssetStore) RememberWorkerAccess(taskID, intentID int64, hosts []string
 		canonical = append(canonical, host)
 	}
 	var active bool
-	err := s.db.QueryRow(`WITH active AS MATERIALIZED (
+	ctx := s.readCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	err := s.db.QueryRowContext(ctx, `WITH active AS MATERIALIZED (
  SELECT 1 FROM tasks t JOIN exploration_nodes n ON n.exploration_id=t.exploration_id
  WHERE t.id=$1 AND t.deleted_at IS NULL AND n.id=$2 AND n.kind='intent' AND n.state='running'
  ), saved AS (INSERT INTO task_worker_asset_access(task_id,intent_id,host,asset_id)

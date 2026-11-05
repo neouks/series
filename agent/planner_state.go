@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -53,11 +54,15 @@ func refreshPlannerStateHistory(ctx context.Context, req llm.CompletionRequest) 
 						continue
 					}
 					ref, _ := row["ref"].(string)
-					if !strings.HasPrefix(ref, "planner_state:") {
+					prefix := "planner_state:"
+					if strings.HasPrefix(ref, "planner_changes:") {
+						prefix = "planner_changes:"
+					}
+					if !strings.HasPrefix(ref, prefix) {
 						continue
 					}
-					if ri.AgentKey != "planner" || ref != fmt.Sprintf("planner_state:%d", ri.TaskID) || ri.TaskID <= 0 {
-						items[i] = map[string]any{"ref": ref, "error": "planner_state unavailable"}
+					if ri.AgentKey != "planner" || ref != fmt.Sprintf("%s%d", prefix, ri.TaskID) || ri.TaskID <= 0 {
+						items[i] = map[string]any{"ref": ref, "error": strings.TrimSuffix(prefix, ":") + " unavailable"}
 						changed = true
 					}
 				}
@@ -82,7 +87,7 @@ func (t persistentPlannerTodo) Call(ctx context.Context, in json.RawMessage, tc 
 	if ri.AgentKey != "planner" || ri.ExplorationID != t.store.ID() || ri.TaskID <= 0 {
 		return actool.Errorf("规划待办需要匹配的Planner运行上下文"), nil
 	}
-	owner, ownerErr := t.store.TaskID()
+	owner, ownerErr := t.store.TaskIDContext(ctx)
 	if ownerErr != nil || owner != ri.TaskID {
 		return actool.Errorf("规划待办任务归属不匹配"), nil
 	}
@@ -90,36 +95,107 @@ func (t persistentPlannerTodo) Call(ctx context.Context, in json.RawMessage, tc 
 		return actool.Errorf(err.Error()), nil
 	}
 	var value struct {
-		Todos []actool.Todo `json:"todos"`
+		Todos json.RawMessage `json:"todos"`
 	}
 	if err := json.Unmarshal(in, &value); err != nil {
 		return actool.Errorf("无效待办参数"), nil
 	}
-	if err := t.store.SavePlannerTodos(ctx, value.Todos); err != nil {
-		return actool.Errorf(fmt.Sprintf("待办持久化失败：%v", err)), nil
+	if err := validatePlannerTodos(ctx, value.Todos); err != nil {
+		return actool.Errorf(err.Error()), nil
 	}
-	res, err := t.CoreTool.Call(ctx, in, tc)
+	// Reuse official validation/acknowledgement without retaining a full list
+	// in the tool closure for the rest of this planning round.
+	res, err := actool.NewTodoStore().Tool().Call(ctx, in, tc)
 	if err != nil || res.IsError {
 		return res, err
+	}
+	if err := t.store.SavePlannerTodos(ctx, value.Todos); err != nil {
+		return actool.Errorf(fmt.Sprintf("待办持久化失败：%v", err)), nil
 	}
 	return jsonResult(map[string]any{"message": res.Flatten(), "stored": true, "planner_state_ref": fmt.Sprintf("planner_state:%d", ri.TaskID), "semantics": "replace_whole_list"})
 }
 
-func (p *Planner) restoreTodos(ctx context.Context, ts *db.ExplorationStore) (*actool.TodoStore, error) {
-	raw, err := ts.PlannerTodos(ctx)
+// The official basic schema validator does not recurse into array item enums.
+// Validate one item at a time without retaining another complete typed list.
+func validatePlannerTodos(ctx context.Context, raw json.RawMessage) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('[') {
+		return fmt.Errorf("todos必须为数组；清空请提供[]")
+	}
+	for index := 0; d.More(); index++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var item struct {
+			Content *string
+			Status  *actool.TodoStatus
+		}
+		if err := d.Decode(&item); err != nil || item.Content == nil || item.Status == nil {
+			return fmt.Errorf("todos[%d]需要字符串content和status", index)
+		}
+		switch *item.Status {
+		case actool.TodoPending, actool.TodoInProgress, actool.TodoCompleted:
+		default:
+			return fmt.Errorf("todos[%d].status仅支持pending/in_progress/completed", index)
+		}
+	}
+	_, err = d.Token()
+	return err
+}
+
+type plannerTodoCached struct {
+	stamp, text string
+	used        uint64
+}
+
+func (p *Planner) plannerTodos(ctx context.Context, ts *db.ExplorationStore) (string, error) {
+	p.todoMu.Lock()
+	previous := p.todoPreviews[ts.ID()]
+	p.todoMu.Unlock()
+	state, err := ts.PlannerTodoSnapshot(ctx, previous.stamp)
 	if err != nil {
-		return nil, err
+		return "", err // Never use a cached preview on a failed live read.
 	}
-	var items []actool.Todo
-	if err = json.Unmarshal(raw, &items); err != nil {
-		return nil, err
+	text := previous.text
+	if !state.Unchanged {
+		rows := make([]map[string]any, 0, len(state.Items))
+		for _, item := range state.Items {
+			rows = append(rows, map[string]any{"index": item.Index, "content": item.Content, "status": item.Status, "truncated": item.TotalChars > utf8.RuneCountInString(item.Content)})
+		}
+		text = formatPlannerTodoPreview(state.Counts, rows, state.Total)
 	}
-	store := p.todoFor(ts.ID())
-	input, _ := json.Marshal(map[string]any{"todos": items})
-	if _, err = store.Tool().Call(ctx, input, nil); err != nil {
-		return nil, err
+	p.todoMu.Lock()
+	defer p.todoMu.Unlock()
+	if p.todoPreviews == nil {
+		p.todoPreviews = map[int64]plannerTodoCached{}
 	}
-	return store, nil
+	if _, exists := p.todoPreviews[ts.ID()]; !exists && len(p.todoPreviews) >= 16 {
+		var oldestID int64
+		oldest := ^uint64(0)
+		for id, item := range p.todoPreviews {
+			if item.used < oldest {
+				oldest, oldestID = item.used, id
+			}
+		}
+		delete(p.todoPreviews, oldestID)
+	}
+	p.todoPreviewClock++
+	p.todoPreviews[ts.ID()] = plannerTodoCached{stamp: state.Stamp, text: text, used: p.todoPreviewClock}
+	return text, nil
+}
+
+func formatPlannerTodoPreview(counts any, candidates []map[string]any, total int64) string {
+	selected := []map[string]any{}
+	for _, row := range candidates {
+		trial := append(append([]map[string]any{}, selected...), row)
+		raw, _ := json.Marshal(trial)
+		if utf8.RuneCount(raw) <= 2400 && len(trial) <= 12 {
+			selected = trial
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"counts": counts, "items": selected, "is_snapshot": true, "has_more": int64(len(selected)) < total, "full_replace_requires_complete_todos": true})
+	return "\n\n【规划待办预览】" + string(raw) + "\n未展示项仍保留；TodoWrite是完整替换，不能用截断预览覆盖完整清单。需要时按下面planner_state引用，携带index分页读取。"
 }
 
 func plannerTodoPreview(items []actool.Todo) string {

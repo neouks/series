@@ -26,6 +26,7 @@ import (
 	acperm "github.com/Autumn-27/norma/permission"
 	"github.com/Autumn-27/norma/transcript"
 	"github.com/neouks/series/llmrec"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // Config describes the LLM backend resolved from the environment.
@@ -99,25 +100,20 @@ type RetryConfig struct {
 	StreamInterval time.Duration
 }
 
-// compaction window resolution bounds (in K tokens). Below the floor the
-// threshold math (window − summary reserve − buffer) would go non-positive and
-// compaction would fire every turn; above the cap it would never fire.
+// Resolution bounds in K tokens. Never inflate a declared small window to fit
+// the SDK's fixed buffer; the host uses a scaled trigger for those models.
 const (
 	defaultWindowK = 200  // unset → assume a 200K window (Claude default)
-	minWindowK     = 32   // floor so effectiveWindow stays comfortably positive
 	maxWindowK     = 1000 // cap at 1M tokens (user request)
 )
 
 // CompactionWindow returns the model context window in TOKENS for compaction
 // thresholds, resolved from the user-configured size (ContextWindowK). 0/unset →
-// a 200K default; otherwise clamped to [32K, 1M] so compaction stays effective.
+// a legacy 200K fallback (not detected capacity); otherwise capped at 1M.
 func (c Config) CompactionWindow() int {
 	k := c.ContextWindowK
 	if k <= 0 {
 		k = defaultWindowK
-	}
-	if k < minWindowK {
-		k = minWindowK
 	}
 	if k > maxWindowK {
 		k = maxWindowK
@@ -254,6 +250,9 @@ func (c Config) Provider() string {
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
+	if err := c.ValidateModelCapacity(); err != nil {
+		return nil, err
+	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey)
 	if err != nil {
 		return nil, err
@@ -280,7 +279,11 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if c.RatePerSecond > 0 || c.RatePerMinute > 0 {
 		lc.RateLimit = &llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}
 	}
-	return llm.NewProvider(lc)
+	provider, err := llm.NewProvider(lc)
+	if err != nil {
+		return nil, err
+	}
+	return modelResourceProvider{Provider: newModelCapacityProvider(provider, c), gate: runtimebudget.ModelGate()}, nil
 }
 
 // IsQuotaExhaustedMessage deliberately recognizes only explicit balance,
@@ -336,6 +339,15 @@ type quotaAwareTransport struct {
 }
 
 func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	limit := modelRequestByteLimit(req)
+	if req.ContentLength > limit {
+		return nil, rejectModelHTTPSize(req, limit)
+	}
+	if req.Body != nil {
+		requestCopy := req.Clone(req.Context())
+		requestCopy.Body = &boundedModelRequestBody{ReadCloser: req.Body, request: requestCopy, left: limit, limit: limit}
+		req = requestCopy
+	}
 	// Custom session-id header: name is user-configured, value is THIS run's
 	// session id (norma stashes it on the context via transcript.WithSessionID).
 	// Stable across a session's turns and distinct across sessions — exactly what
@@ -350,7 +362,9 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// them: norma builds the request body internally and decodes the SSE response
 	// before either reaches the recorder.
 	capt := llmrec.CaptureFrom(req.Context())
-	capt.SetRequest(requestBodySnapshot(req))
+	if capt != nil && !capt.HasRequest() {
+		capt.SetRequest(requestBodySnapshot(req))
+	}
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || resp == nil {
@@ -369,6 +383,9 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	if readErr != nil {
+		if runtimebudget.StopsAutomaticReplay(readErr) {
+			return nil, readErr
+		}
 		return resp, nil
 	}
 	if IsQuotaExhaustedMessage(string(body)) {
@@ -390,8 +407,12 @@ func requestBodySnapshot(req *http.Request) string {
 		return ""
 	}
 	defer rc.Close()
-	b, err := io.ReadAll(rc)
+	limit := modelRequestByteLimit(req)
+	b, err := io.ReadAll(io.LimitReader(rc, limit+1))
 	if err != nil {
+		return ""
+	}
+	if int64(len(b)) > limit {
 		return ""
 	}
 	return string(b)
@@ -416,7 +437,7 @@ func quotaAwareHTTPClient(proxy, sessionHeaderKey string) (*http.Client, error) 
 		}
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
-	return &http.Client{Transport: quotaAwareTransport{base: transport, sessionHeaderKey: strings.TrimSpace(sessionHeaderKey)}}, nil
+	return &http.Client{Transport: quotaAwareTransport{base: timedModelTransport{base: transport}, sessionHeaderKey: strings.TrimSpace(sessionHeaderKey)}}, nil
 }
 
 // logTestConnection prints the raw HTTP status code(s) and response body of a

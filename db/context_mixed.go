@@ -48,7 +48,7 @@ func (s *ExplorationStore) SearchMixedContext(ctx context.Context, q ContextSear
  UNION ALL SELECT * FROM (` + s.contextSearchSQL(true, true) + `) activities
  ) hits CROSS JOIN bounds WHERE $11::bigint=0
  ORDER BY hits.created_at DESC,hits.id DESC,hits.source DESC LIMIT $7`
-	rows, err := s.db.QueryContext(ctx, query, s.expID, q.Types, q.Query, q.Severity, q.AssetID, int64(0), q.Limit+1, true, q.State, q.IntentID, int64(0), nodeUpper, activityUpper, beforeTime, beforeID, beforeSource)
+	rows, err := s.contextQuery(ctx, query, s.expID, q.Types, q.Query, q.Severity, q.AssetID, int64(0), q.Limit+1, true, q.State, q.IntentID, int64(0), nodeUpper, activityUpper, beforeTime, beforeID, beforeSource)
 	if err != nil {
 		return nil, nil, err
 	}

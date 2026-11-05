@@ -29,6 +29,7 @@ import (
 	"github.com/neouks/series/llmpool"
 	"github.com/neouks/series/llmrec"
 	"github.com/neouks/series/report"
+	"github.com/neouks/series/runtimebudget"
 	"github.com/neouks/series/traffic"
 )
 
@@ -436,28 +437,28 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	// traffic host tools flow through ToolAugment for every agent and are filtered by
 	// the tools-table binding (default = worker), so worker behavior is unchanged.
 	wProv, wCfg := s.providerForAgent("worker", pinID, gProv, gCfg)
-	wk := agent.NewWorker(wProv, wCfg.Model, s.m.dir, tx, wCfg.CompactionWindow(), s.agentMaxTurns("worker"))
+	wk := agent.NewWorker(wProv, wCfg.Model, s.m.dir, tx, providerCompactionWindow(wProv, wCfg), s.agentMaxTurns("worker"))
 	wk.SetFindingRecorder(s.findingRecorder())
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
 	wk.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
 	wk.SetTrafficRecording(s.m.TrafficEnabled())
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
 	wk.SetWebSearch(s.webSearchFor("worker"))
-	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开;每轮读)
-	wk.SetNonStreaming(nonStreamingResolver(wCfg))   // 该 profile 选非流式时走 Provider.Complete
-	wk.SetMaxTokens(maxTokensResolver(wCfg))         // 单次回复输出上限(0 = 不发)
-	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)       // 实验功能:noa 上下文压缩(每 run 读)
+	wk.SetConstraintInjectContext(s.constraintInjectWorkerContext) // 操作约束注入 worker(可配置,默认开;每轮读)
+	wk.SetNonStreaming(nonStreamingResolver(wCfg))                 // 该 profile 选非流式时走 Provider.Complete
+	wk.SetMaxTokens(maxTokensResolver(wCfg))                       // 单次回复输出上限(0 = 不发)
+	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)                     // 实验功能:noa 上下文压缩(每 run 读)
 	pProv, pCfg := s.providerForAgent("planner", pinID, gProv, gCfg)
-	pl := agent.NewPlanner(pProv, pCfg.Model, s.m.dir, tx, pCfg.CompactionWindow(), s.agentMaxTurns("planner"))
+	pl := agent.NewPlanner(pProv, pCfg.Model, s.m.dir, tx, providerCompactionWindow(pProv, pCfg), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.findingRecorder())
 	pl.SetKillWork(s.engine.KillWork)                       // planner kill_work → stop queued/running intent
 	pl.SetSteerWork(s.engine.SteerWork)                     // planner steer_work → inject mid-run course-correction
 	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
 	pl.SetWebSearch(s.webSearchFor("planner"))
-	pl.SetConstraintInject(s.constraintInjectPlanner) // 操作约束注入 planner(可配置,默认开;每轮读)
-	pl.SetNonStreaming(nonStreamingResolver(pCfg))    // 该 profile 选非流式时走 Provider.Complete
-	pl.SetMaxTokens(maxTokensResolver(pCfg))          // 单次回复输出上限(0 = 不发)
-	pl.SetNoaEnabled(s.m.NoaCompactionEnabled)        // 实验功能:noa 上下文压缩(每 run 读)
+	pl.SetConstraintInjectContext(s.constraintInjectPlannerContext) // 操作约束注入 planner(可配置,默认开;每轮读)
+	pl.SetNonStreaming(nonStreamingResolver(pCfg))                  // 该 profile 选非流式时走 Provider.Complete
+	pl.SetMaxTokens(maxTokensResolver(pCfg))                        // 单次回复输出上限(0 = 不发)
+	pl.SetNoaEnabled(s.m.NoaCompactionEnabled)                      // 实验功能:noa 上下文压缩(每 run 读)
 	// cold-digest §7: background cold-node compaction, on the planner's provider/
 	// model (§4 uses the running agent's model). Uses Complete (non-streaming) for
 	// the one-shot body summarization.
@@ -504,6 +505,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 		s.cfgMu.Unlock()
 		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, profName, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
 		prov = bindSideProvider(prov, cfg, 0, profName)
+		prov = agent.WithModelRequestScope(prov)
 	}
 	s.cfgMu.Lock()
 	s.llmDirect = prov
@@ -518,13 +520,13 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.engine.UseLLM(pl, wk)
 
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
-	win := cfg.CompactionWindow()
+	win := providerCompactionWindow(prov, cfg)
 	// mainagent resolves its own binding (→ global fallback); chat stays the GLOBAL
 	// fallback since one ChatAgent serves many agent keys — its per-agent binding is
 	// resolved at Chat time (runConversationSync → chatAgentForProfile).
 	mProv, mCfg := s.providerForAgent("mainagent", nil, prov, cfg)
 	s.cfgMu.Lock()
-	s.mainAgent = agent.NewMainAgent(mProv, mCfg.Model, s.m.dir, tx, mCfg.CompactionWindow(), s.agentMaxTurns("mainagent"))
+	s.mainAgent = agent.NewMainAgent(mProv, mCfg.Model, s.m.dir, tx, providerCompactionWindow(mProv, mCfg), s.agentMaxTurns("mainagent"))
 	s.mainAgent.SetFindingRecorder(s.findingRecorder())
 	s.mainAgent.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))
@@ -671,6 +673,7 @@ func (s *Server) providerForProfileContext(ctx context.Context, id int64) (llm.P
 		}
 		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
 		prov = bindSideProvider(prov, cfg, id, p.Name)
+		prov = agent.WithModelRequestScope(prov)
 		s.provCacheMu.Lock()
 		if generation != s.provCacheGen {
 			s.provCacheMu.Unlock()
@@ -746,7 +749,8 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 		return nil
 	}
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
-	ca := agent.NewChatAgent(s.poolForBinding(id, prov, cfg), cfg.Model, s.m.dir, tx, cfg.CompactionWindow())
+	bound := s.poolForBinding(id, prov, cfg)
+	ca := agent.NewChatAgent(bound, cfg.Model, s.m.dir, tx, providerCompactionWindow(bound, cfg))
 	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
@@ -908,6 +912,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/exploration/findings/{id}", s.deleteFinding)
 	mux.HandleFunc("GET /api/exploration/intents", s.intents)
 	mux.HandleFunc("GET /api/exploration/graph", s.explorationGraph)
+	mux.HandleFunc("GET /api/exploration/graph/nodes/{id}", s.explorationGraphBody)
 	mux.HandleFunc("GET /api/exploration/nodes", s.explorationNodes)
 	mux.HandleFunc("GET /api/exploration/nodes/{id}", s.explorationNodeDetail)
 	mux.HandleFunc("GET /api/exploration/activity", s.activity)
@@ -922,6 +927,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
 	mux.HandleFunc("GET /api/tokens/conversations", s.conversationTokens)
+	mux.HandleFunc("GET /api/tasks/{id}/context-usage", s.taskContextUsage)
 	mux.HandleFunc("GET /api/tokens/usage", s.pgUsageStats) // 全局 llm_usage 聚合（仪表盘新版视图）
 
 	mux.HandleFunc("GET /api/audit", s.getAudit)
@@ -2647,44 +2653,14 @@ func taskIntentHistoryPage(store *db.ExplorationStore, before int64, limit int, 
 	}
 }
 
-// explorationGraph returns the whole exploration chain (task graph) as nodes+edges.
+// explorationGraph serves a bounded navigation window. Complete node bodies
+// are available only through the explicit, versioned body reader.
 func (s *Server) explorationGraph(w http.ResponseWriter, r *http.Request) {
-	t := s.m.ResolveTask(r.URL.Query().Get("task"))
-	if t == nil {
-		writeJSON(w, 200, map[string]any{"nodes": []any{}, "edges": []any{}})
+	if view := r.URL.Query().Get("view"); view != "" && view != "compact" {
+		writeErr(w, 400, "unsupported graph view")
 		return
 	}
-	nodes, err := t.Store.Nodes(2000)
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	edges, err := t.Store.Edges(5000)
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	sources, err := t.Store.DirectSourceStores()
-	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	for _, source := range sources {
-		sourceNodes, nodeErr := source.Store.Nodes(2000)
-		if nodeErr != nil {
-			writeErr(w, 500, nodeErr.Error())
-			return
-		}
-		sourceEdges, edgeErr := source.Store.Edges(5000)
-		if edgeErr != nil {
-			writeErr(w, 500, edgeErr.Error())
-			return
-		}
-		sourceNodes, sourceEdges = inheritedGraphSnapshot(sourceNodes, sourceEdges, source.Task.TaskID)
-		nodes = append(nodes, sourceNodes...)
-		edges = append(edges, sourceEdges...)
-	}
-	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
+	s.explorationGraphView(w, r)
 }
 
 // explorationNodes serves the 播报板: this task's own exploration nodes as a
@@ -3478,7 +3454,18 @@ func (s *Server) settingsPayload() map[string]any {
 	if concLimit == 0 {
 		concLimit = defaultConcurrencyLimit // 关闭时也回显一个合理默认值给 UI
 	}
+	modelUsage := modelRequestResourceSnapshot()
+	workerUsage := runtimebudget.WorkerGate().Snapshot()
+	processUsage := runtimebudget.ProcessGate().Snapshot()
 	return map[string]any{
+		"external_process_limits":  processUsage.Limits,
+		"external_process_usage":   processUsage,
+		"worker_execution_limits":  workerUsage.Limits,
+		"model_request_deadlines":  runtimebudget.ModelDeadlineSnapshot(),
+		"model_request_bytes":      runtimebudget.ModelByteSnapshot(),
+		"worker_execution_usage":   workerUsage,
+		"model_request_limits":     modelUsage.Limits,
+		"model_request_usage":      modelUsage,
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"traffic_skip_static":      s.m.pg.GetBool(settingTrafficSkipStatic, true),
@@ -3528,8 +3515,13 @@ func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 // off, agents get no proxy config, no traffic tools, and no proxy prompt content.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TrafficCapture      *bool `json:"traffic_capture"`
-		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
+		ModelRequestLimits    *modelRequestLimits            `json:"model_request_limits"`
+		ModelRequestDeadlines *runtimebudget.ModelDeadlines  `json:"model_request_deadlines"`
+		ModelRequestBytes     *runtimebudget.ModelByteLimits `json:"model_request_bytes"`
+		WorkerExecutionLimits *runtimebudget.Limits          `json:"worker_execution_limits"`
+		ExternalProcessLimits *runtimebudget.Limits          `json:"external_process_limits"`
+		TrafficCapture        *bool                          `json:"traffic_capture"`
+		AgentTrafficBinding   *bool                          `json:"agent_traffic_binding"`
 		// 流量磁盘优化三项（静态资源过滤 + 保留期），null=不改。
 		TrafficSkipStatic    *bool   `json:"traffic_skip_static"`
 		TrafficSkipTypes     *string `json:"traffic_skip_types"`     // 逗号分隔规则清单；null=不改，""=恢复内置默认
@@ -3567,9 +3559,73 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "shell_mode 已移除；命令执行使用官方 norma 的平台默认解释器")
 		return
 	}
+	if req.ModelRequestLimits != nil {
+		if err := req.ModelRequestLimits.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	if req.WorkerExecutionLimits != nil {
+		if err := req.WorkerExecutionLimits.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	if req.Workers != nil && (*req.Workers < 1 || *req.Workers > 128) {
+		writeErr(w, 400, "workers 必须为 1..128")
+		return
+	}
+	if req.ExternalProcessLimits != nil {
+		if err := req.ExternalProcessLimits.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	if req.ModelRequestDeadlines != nil {
+		if err := req.ModelRequestDeadlines.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
+	if req.ModelRequestBytes != nil {
+		if err := req.ModelRequestBytes.Validate(); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+	}
 	if req.TrafficRetentionDays != nil && (*req.TrafficRetentionDays < 0 || *req.TrafficRetentionDays > 3650) {
 		writeErr(w, 400, "流量保留天数必须为 0 或 1–3650")
 		return
+	}
+	if req.ModelRequestLimits != nil {
+		if err := s.m.setModelRequestLimits(r.Context(), *req.ModelRequestLimits); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.WorkerExecutionLimits != nil {
+		if err := s.m.setWorkerExecutionLimits(r.Context(), *req.WorkerExecutionLimits); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.ModelRequestDeadlines != nil {
+		if err := s.m.setModelRequestDeadlines(r.Context(), *req.ModelRequestDeadlines); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.ModelRequestBytes != nil {
+		if err := s.m.setModelByteLimits(r.Context(), *req.ModelRequestBytes); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.ExternalProcessLimits != nil {
+		if err := s.m.setExternalProcessLimits(r.Context(), *req.ExternalProcessLimits); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {

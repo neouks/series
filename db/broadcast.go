@@ -7,7 +7,7 @@ import (
 )
 
 // Never load evidence bodies for collapsed rows or neighbouring nodes.
-const broadcastNodeCols = `id, kind, jsonb_build_object('summary',left(COALESCE(NULLIF(payload->>'name',''),NULLIF(payload->>'summary',''),NULLIF(payload->>'text',''),NULLIF(payload->>'description',''),NULLIF(payload->>'body',''),''),500)), priority, state, left(COALESCE(origin,''),160), '', '', created_at`
+const broadcastNodeCols = `n.id,n.kind,jsonb_build_object('summary',left(` + nodeNavigationDisplaySQL + `,500)),n.priority,n.state,left(COALESCE(n.origin,''),160),'','',n.created_at`
 const BroadcastBodyPage = 16000
 const BroadcastEdgePage = 50
 
@@ -24,7 +24,7 @@ type BroadcastDetail struct {
 // are task-scoped and canceled with the HTTP request; a hub cannot expand the
 // entire graph in one response.
 func (s *ExplorationStore) BroadcastNode(ctx context.Context, id int64, bodyOffset, edgeOffset int) (*BroadcastDetail, error) {
-	n, err := scanNode(s.db.QueryRowContext(ctx, `SELECT `+broadcastNodeCols+` FROM exploration_nodes WHERE exploration_id=$1 AND id=$2`, s.expID, id))
+	n, err := scanNode(s.db.QueryRowContext(ctx, `SELECT `+broadcastNodeCols+` FROM exploration_nodes n `+nodeNavigationJoinSQL+` WHERE n.exploration_id=$1 AND n.id=$2`, s.expID, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -80,7 +80,7 @@ func (s *ExplorationStore) BroadcastNode(ctx context.Context, id int64, bodyOffs
 			}
 		}
 		if marks != "" {
-			rows, err = s.db.QueryContext(ctx, `SELECT `+broadcastNodeCols+` FROM exploration_nodes WHERE exploration_id=$1 AND id IN (`+marks+`)`, args...)
+			rows, err = s.db.QueryContext(ctx, `SELECT `+broadcastNodeCols+` FROM exploration_nodes n `+nodeNavigationJoinSQL+` WHERE n.exploration_id=$1 AND n.id IN (`+marks+`)`, args...)
 			if err != nil {
 				return nil, err
 			}

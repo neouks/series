@@ -5,6 +5,7 @@ import (
 	"fmt"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/google/uuid"
+	"github.com/neouks/series/runtimebudget"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -78,6 +79,12 @@ func (s *Server) testShellTool(w http.ResponseWriter, r *http.Request, req testT
 		return
 	}
 	started := time.Now()
+	release, _, err := runtimebudget.AcquireProcess(ctx, externalProcessKey(ctx))
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"output": err.Error(), "is_error": true, "duration_ms": time.Since(started).Milliseconds()})
+		return
+	}
+	defer release()
 	manager, err := actool.NewManager("tool-test-" + uuid.NewString())
 	if err != nil {
 		writeErr(w, 500, err.Error())

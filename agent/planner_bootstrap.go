@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -21,8 +22,13 @@ const plannerRetrievalRule = `
 
 // Called by the trusted host during assembly, before any model/tool execution.
 // Disabled search cannot be replaced by privileged automatic preloading.
-func SetTaskContextReadAccess(ctx context.Context, p ContextAccess, searchEnabled bool) {
+func SetTaskContextReadAccess(ctx context.Context, p ContextAccess, searchEnabled bool, detailEnabled ...bool) {
 	if ts, _ := ctx.Value(taskToolSetContextKey{}).(*ToolSet); ts != nil {
+		detail := p
+		if len(detailEnabled) > 0 && !detailEnabled[0] {
+			detail.Local = nil
+		}
+		ts.checkpointReadAccess = &detail
 		copy := p
 		if !searchEnabled {
 			copy.Local = nil
@@ -114,17 +120,9 @@ func (t *ToolSet) plannerBootstrap(ctx context.Context, triggers []TriggerEvent)
 	const prefix = "\n\n【本轮图引导：按需检索，未展示不代表不存在】\n<planner_context>\n"
 	const suffix = "\n</planner_context>"
 	budget := plannerBootstrapRunes - utf8.RuneCountInString(prefix+suffix)
-	policy := ContextAccess{Local: db.DefaultContextGrants("planner").Local}
-	if t.plannerReadAccess != nil {
-		policy = *t.plannerReadAccess
-	}
-	kinds := []string{}
-	for _, k := range []string{"intent", "fact", "finding", "digest", "goal", "hint"} {
-		if slices.Contains(policy.Local, k) {
-			kinds = append(kinds, k)
-		}
-	}
-	events := map[string]int{}
+	kinds := t.plannerReadKinds(ctx)
+	events := map[string]int64{}
+	eventsTruncated := false
 	seeds := []int64{}
 	seen := map[int64]bool{}
 	for i := len(triggers) - 1; i >= 0; i-- {
@@ -133,7 +131,9 @@ func (t *ToolSet) plannerBootstrap(ctx context.Context, triggers []TriggerEvent)
 		if !slices.Contains([]string{"done", "finding", "goal", "goal_edited", "goal_deleted", "hint", "cancelled", "finding_deleted"}, kind) {
 			kind = "change"
 		}
-		events[kind]++
+		count := max(1, e.Count)
+		events[kind] = min(math.MaxInt64-count, events[kind]) + count
+		eventsTruncated = eventsTruncated || e.Truncated
 		ids := append([]int64{}, e.NodeIDs...)
 		if e.IntentID > 0 {
 			ids = append(ids, e.IntentID)
@@ -153,7 +153,10 @@ func (t *ToolSet) plannerBootstrap(ctx context.Context, triggers []TriggerEvent)
 	}
 	out := map[string]any{"scope": "current_task_and_direct_sources", "events": events, "read": reads, "records": []db.PlannerContextRecord{}, "records_limit": 8, "records_are_related_sample": true,
 		"note": "计数为当前授权可见记录；目标和战略提示未展示时按需检索，不能仅凭计数判定完成。无查询权限的类型不提供记录。"}
-	if len(seen) > len(seeds) {
+	if _, ok := ctx.Value(plannerChangeSnapshotKey{}).(db.PlannerEventSnapshot); ok && contextAllows(ctx, "detail", false) {
+		out["read_changes"] = map[string]any{"tool": "context_get", "args": map[string]any{"items": []contextRead{{Ref: fmt.Sprintf("planner_changes:%d", t.taskID)}}}}
+	}
+	if len(seen) > len(seeds) || eventsTruncated {
 		out["events_truncated"] = true
 	}
 	// The original goal remains in the fixed system prompt; do not duplicate it.

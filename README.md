@@ -83,6 +83,8 @@ docker compose up -d --no-build series
 
 镜像已含常用工具（ripgrep/curl/vim/npm/nmap…）；`./skills` 与 `./data` 以绑定挂载持久化。
 
+Compose 已启用 `init: true`，用于回收命令退出后遗留的孤儿子进程。自行使用 `docker run` 启动时加 `--init`；它不替代系统配置中的作业并发限制或操作系统内存限制。
+
 远程 MCP 可在系统设置中选择 `http`（Streamable HTTP）或 `sse`（旧版 SSE）。
 旧版 SSE 服务通常使用 `GET /sse` 建立事件流，再通过服务返回的
 `/message?sessionId=...` 接收 JSON-RPC 请求；配置时将 URL 填为 `/sse`，请求头按

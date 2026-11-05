@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"sort"
 	"strconv"
 	"time"
@@ -13,26 +14,30 @@ import (
 // only the dimensions needed to slice token spend (model / profile / task / agent),
 // never any prompt or response content.
 type LLMUsage struct {
-	TaskID               string `json:"task_id"`        // task registry id (matches llm_records.task_id)
-	ExplorationID        int64  `json:"exploration_id"` // exploration id parsed from the session (0 = unknown/non-task)
-	IntentID             int64  `json:"intent_id"`      // worker intent node; 0 for planner/main/chat
-	Worker               string `json:"worker"`         // agent lane: worker / planner / mainagent / goals
-	Trigger              string `json:"trigger"`        // edge | heartbeat | task_timeout | claim | human_message
-	RetryOrdinal         int    `json:"retry_ordinal"`  // agent-run retry, 0 for the initial attempt
-	Phase                string `json:"phase"`          // normal | compaction (settlement when explicitly supplied)
-	Model                string `json:"model"`
-	ProfileName          string `json:"profile_name"`
-	LatencyMs            int    `json:"latency_ms"`
-	InputTokens          int    `json:"input_tokens"`
-	OutputTokens         int    `json:"output_tokens"`
-	CacheRead            int    `json:"cache_read"`
-	CacheWrite           int    `json:"cache_write"`
-	SystemChars          int    `json:"system_chars"`
-	MessageChars         int    `json:"message_chars"`
-	ToolChars            int    `json:"tool_schema_chars"`
-	RequestChars         int    `json:"request_chars"`
-	EstimatedInputTokens int    `json:"estimated_input_tokens"`
-	Status               string `json:"status"` // ok | error
+	TaskID                     string `json:"task_id"`        // task registry id (matches llm_records.task_id)
+	ExplorationID              int64  `json:"exploration_id"` // exploration id parsed from the session (0 = unknown/non-task)
+	IntentID                   int64  `json:"intent_id"`      // worker intent node; 0 for planner/main/chat
+	Worker                     string `json:"worker"`         // agent lane: worker / planner / mainagent / goals
+	Trigger                    string `json:"trigger"`        // edge | heartbeat | task_timeout | claim | human_message
+	RetryOrdinal               int    `json:"retry_ordinal"`  // agent-run retry, 0 for the initial attempt
+	Phase                      string `json:"phase"`          // normal | compaction (settlement when explicitly supplied)
+	Model                      string `json:"model"`
+	ProfileName                string `json:"profile_name"`
+	LatencyMs                  int    `json:"latency_ms"`
+	InputTokens                int    `json:"input_tokens"`
+	OutputTokens               int    `json:"output_tokens"`
+	CacheRead                  int    `json:"cache_read"`
+	CacheWrite                 int    `json:"cache_write"`
+	SystemChars                int    `json:"system_chars"`
+	MessageChars               int    `json:"message_chars"`
+	ToolChars                  int    `json:"tool_schema_chars"`
+	RequestChars               int    `json:"request_chars"`
+	EstimatedInputTokens       int    `json:"estimated_input_tokens"`
+	RequestBytes               int    `json:"request_bytes"`
+	HistoryReadCalls           *int   `json:"history_read_calls,omitempty"`
+	HistoryRepeatedReads       *int   `json:"history_repeated_reads,omitempty"`
+	HistoryReadTrackingLimited bool   `json:"history_read_tracking_limited"`
+	Status                     string `json:"status"` // ok | error
 }
 
 const llmUsageSchema = `
@@ -77,6 +82,10 @@ ALTER TABLE llm_usage ALTER COLUMN message_chars DROP NOT NULL;
 ALTER TABLE llm_usage ALTER COLUMN tool_schema_chars DROP NOT NULL;
 ALTER TABLE llm_usage ALTER COLUMN request_chars DROP NOT NULL;
 ALTER TABLE llm_usage ALTER COLUMN estimated_input_tokens DROP NOT NULL;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS request_bytes INTEGER;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS history_read_calls INTEGER;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS history_repeated_reads INTEGER;
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS history_read_tracking_limited BOOLEAN;
 CREATE INDEX IF NOT EXISTS idx_llm_usage_task  ON llm_usage(task_id);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_model ON llm_usage(task_id, model);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_exp   ON llm_usage(exploration_id);
@@ -102,19 +111,25 @@ func (d *DB) EnsureLLMUsageTable() error {
 // InsertLLMUsage appends one metering row. Best-effort: callers log and continue on
 // error (a lost metering row must never break the LLM call).
 func (d *DB) InsertLLMUsage(u *LLMUsage) error {
+	return d.InsertLLMUsageContext(context.Background(), u)
+}
+
+func (d *DB) InsertLLMUsageContext(ctx context.Context, u *LLMUsage) error {
 	var expID any
 	if u.ExplorationID > 0 {
 		expID = u.ExplorationID
 	}
-	_, err := d.Exec(`
+	_, err := d.ExecContext(ctx, `
 	INSERT INTO llm_usage(task_id, exploration_id, intent_id, worker, trigger, retry_ordinal, phase,
 	                      model, profile_name, latency_ms, input_tokens, output_tokens, cache_read, cache_write,
-	                      system_chars, message_chars, tool_schema_chars, request_chars, estimated_input_tokens, status)
+	                      system_chars, message_chars, tool_schema_chars, request_chars, estimated_input_tokens, status,
+ request_bytes,history_read_calls,history_repeated_reads,history_read_tracking_limited)
 	VALUES (NULLIF($1,''),$2,$3,NULLIF($4,''),NULLIF($5,''),$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),
-	        $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+	        $10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NULLIF($21,0),$22,$23,$24)`,
 		u.TaskID, expID, nullablePositive(u.IntentID), u.Worker, u.Trigger, u.RetryOrdinal, u.Phase,
 		u.Model, u.ProfileName, u.LatencyMs, u.InputTokens, u.OutputTokens, u.CacheRead, u.CacheWrite,
-		u.SystemChars, u.MessageChars, u.ToolChars, u.RequestChars, u.EstimatedInputTokens, u.Status)
+		u.SystemChars, u.MessageChars, u.ToolChars, u.RequestChars, u.EstimatedInputTokens, u.Status,
+		u.RequestBytes, u.HistoryReadCalls, u.HistoryRepeatedReads, u.HistoryReadTrackingLimited)
 	return err
 }
 

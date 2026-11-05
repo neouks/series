@@ -441,22 +441,23 @@ func (s *Server) runSide(ctx context.Context, cancel context.CancelFunc, e sideq
 	}
 	// Deletions can race between request insertion and registration. Observe the
 	// persisted lifecycle even while a provider is blocked without emitting text.
-	go func() {
+	// Capture immutable values: ctx is enriched with the trusted role below.
+	go func(watchCtx context.Context, requestID string) {
 		tick := time.NewTicker(500 * time.Millisecond)
 		defer tick.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-watchCtx.Done():
 				return
 			case <-tick.C:
-				row, err := s.m.pg.SideRequest(ctx, e.ID)
+				row, err := s.m.pg.SideRequest(watchCtx, requestID)
 				if err == nil && (row == nil || !row.Running()) {
 					cancel()
 					return
 				}
 			}
 		}
-	}()
+	}(ctx, e.ID)
 	lastSave := time.Now()
 	persist := func() (bool, error) {
 		e.Sequence++

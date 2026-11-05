@@ -18,6 +18,7 @@ import (
 	"github.com/neouks/series/agent"
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/llmrec"
+	"github.com/neouks/series/runtimebudget"
 )
 
 type taskAgentBundle struct {
@@ -430,7 +431,7 @@ func sameProviderRetryPolicy(r agent.RetryConfig) (retries int, backoff func(int
 //   - 上下文过长:相同请求重放也没用,交给 harness 的 reactive 压缩兜底
 //   - 4xx 确定性拒绝(400/401/403/404/422):到哪个 provider 都一样会失败
 func isRetryableStreamError(err error) bool {
-	if err == nil {
+	if err == nil || runtimebudget.StopsAutomaticReplay(err) {
 		return false
 	}
 	if isQuotaExhaustedError(err) {
@@ -455,8 +456,8 @@ func isRetryableStreamError(err error) bool {
 // CompactionWindow mirrors current()'s precedence so the context window always
 // matches the provider the role will actually stream on.
 func (r *taskLLMRuntime) CompactionWindow() int {
-	if _, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
-		return cfg.CompactionWindow()
+	if prov, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
+		return providerCompactionWindow(prov, cfg)
 	}
 	taskNum, err := parseTaskID(r.taskID)
 	if err != nil {
@@ -467,8 +468,8 @@ func (r *taskLLMRuntime) CompactionWindow() int {
 		return (agent.Config{}).CompactionWindow()
 	}
 	if len(chain) == 0 {
-		if _, cfg, ok := r.s.globalProvider(); ok {
-			return cfg.CompactionWindow()
+		if prov, cfg, ok := r.s.globalProvider(); ok {
+			return providerCompactionWindow(prov, cfg)
 		}
 		return (agent.Config{}).CompactionWindow()
 	}
@@ -573,7 +574,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetTrafficRecording(s.m.TrafficEnabled())
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
 	wk.SetWebSearch(s.webSearchFor("worker"))
-	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开)
+	wk.SetConstraintInjectContext(s.constraintInjectWorkerContext) // 操作约束注入 worker(可配置,默认开)
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.findingRecorder())
 	pl.SetCompactionWindowResolver(plannerRuntime.CompactionWindow)
@@ -584,7 +585,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetSteerWork(s.engine.SteerWork)
 	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
 	pl.SetWebSearch(s.webSearchFor("planner"))
-	pl.SetConstraintInject(s.constraintInjectPlanner) // 操作约束注入 planner(可配置,默认开)
+	pl.SetConstraintInjectContext(s.constraintInjectPlannerContext) // 操作约束注入 planner(可配置,默认开)
 	// cold-digest §7: 冷节点后台压缩。引擎经权威解析器实际驱动的就是这套 per-task planner
 	// (agentsForTask),所以 Compactor 必须接在这里;buildPlannerWorker 那套全局 pair 被解析器
 	// 旁路、从不跑规划轮,接在那里等于不生效。走任务路由的 planner provider(§4:与 agent 同模型),

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,7 +38,7 @@ func captureRun(ctx context.Context, opts agentcore.Options, input string, emit 
 // captureRunSession is captureRun over an existing session, so a caller can run
 // multiple prompts on the SAME conversation (e.g. a settlement round that reuses
 // the worker's accumulated context after the main run hit max_turns).
-func captureRunSession(ctx context.Context, s *agentcore.Session, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+func captureRunSession(ctx context.Context, s conversationSession, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
 	var reason harness.TerminalReason
@@ -50,6 +51,7 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 		}
 	}
 	toolNames := map[string]string{} // tool_use id -> name, to label results
+	checkpointNotes := map[string]json.RawMessage{}
 
 	var tbuf strings.Builder
 	var tkind string
@@ -99,10 +101,13 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			flush()
 			call := assetContextCall(*ev.ToolUse)
 			toolNames[call.ID] = call.Name
+			if metadata := checkpointActivityMetadata(call); metadata != nil {
+				checkpointNotes[call.ID] = metadata
+			}
 			in := string(call.Input)
 			lastTool.start(call.ID, call.Name, in)
 			auditTrace.Start(call.ID, call.Name, call.Input)
-			rec(db.Activity{Kind: "tool_use", Tool: call.Name, ToolUseID: call.ID,
+			rec(db.Activity{Kind: "tool_use", Tool: call.Name, ToolUseID: call.ID, Metadata: checkpointNotes[call.ID],
 				Summary: call.Name + " " + firstLine(in, 200), Detail: in})
 		case harness.KindToolResult:
 			if ev.ToolResult == nil {
@@ -112,8 +117,9 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 			out := blocksText(ev.ToolResult.Content)
 			lastTool.done(ev.ToolResult.ToolUseID)
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
-			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID,
+			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID, Metadata: checkpointNotes[ev.ToolResult.ToolUseID],
 				IsError: ev.ToolResult.IsError, Summary: firstLine(out, 200), Detail: out})
+			delete(checkpointNotes, ev.ToolResult.ToolUseID)
 		case harness.KindText:
 			addDelta("text", ev.Text)
 		case harness.KindThinking:

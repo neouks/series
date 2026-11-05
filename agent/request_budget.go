@@ -19,6 +19,7 @@ import (
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noaadapter"
 	"github.com/neouks/series/db"
+	"github.com/neouks/series/llmrec"
 )
 
 type contextObserverKey struct{}
@@ -190,29 +191,35 @@ func projectCompletedBatchesAt(req llm.CompletionRequest, outputDir string) llm.
 			calls[c.ID] = call
 		}
 		for _, r := range b.results {
-			if !r.IsError && historicalResultFailed(calls[r.ToolUseID], r) {
+			partial := !r.IsError && historicalResultFailed(calls[r.ToolUseID], r)
+			if partial && !retrievalTool(calls[r.ToolUseID].Name) {
 				// Mixed successful/error items cannot be reduced to a successful
 				// receipt without losing item correspondence. Preserve the batch.
 				recoverable = false
 			}
-			entry := map[string]any{"tool": names[r.ToolUseID], "original_call_id": r.ToolUseID, "failed": r.IsError, "history_omitted": true, "original_audit_retained": true}
+			entry := map[string]any{"tool": names[r.ToolUseID], "original_call_id": r.ToolUseID, "failed": r.IsError || partial, "history_omitted": true, "original_audit_retained": true}
 			refs := []any{}
 			call := calls[r.ToolUseID]
 			domainResult := assetStructuredTool(call.Name) || durableWriteTool(call.Name)
-			if retrievalTool(call.Name) || call.Name == "Read" {
+			if (retrievalTool(call.Name) && retiredRetrievalKind(call.Name) == "") || call.Name == "Read" {
 				if utf8.RuneCount(call.Input) <= 1000 && json.Valid(call.Input) {
 					entry["reread"] = map[string]any{"tool": call.Name, "args": json.RawMessage(call.Input)}
 				}
 			}
 			var noaRefs []string
 			errorHash := sha256.New()
+			// Same text for different failed targets is not the same diagnostic.
+			fmt.Fprintf(errorHash, "%d:", len(call.Input))
+			errorHash.Write(call.Input)
+			var readDiagnostics []any
 			for _, c := range r.Content {
 				if c.Type != llm.BlockText {
 					recoverable = false // Image/audio blocks have no equivalent text receipt.
 					continue
 				}
 				plain := noaadapter.StripRefTag(c.Text)
-				if r.IsError {
+				if r.IsError || partial {
+					fmt.Fprintf(errorHash, "%d:", len(plain))
 					errorHash.Write([]byte(plain))
 				}
 				if plain != c.Text {
@@ -224,6 +231,19 @@ func projectCompletedBatchesAt(req llm.CompletionRequest, outputDir string) llm.
 						collectReceiptRefs(value, &refs)
 					}
 					if m, ok := value.(map[string]any); ok {
+						if retrievalTool(call.Name) && m["history_omitted"] == true && m["read_from_original_call"] == true {
+							entry["read_from_original_call"] = true
+						}
+						if retiredRetrievalKind(call.Name) != "" {
+							if replay := retrievalReplay(call, m); replay != nil {
+								entry["reread"] = replay
+							}
+						}
+						if partial {
+							if diag := retrievalDiagnostics(m, call.Name); len(diag) > 0 {
+								readDiagnostics = append(readDiagnostics, diag)
+							}
+						}
 						if call.Name == "TodoWrite" {
 							if path, ok := m["worker_todo_file"].(string); ok && len(path) < 4096 {
 								if info, e := os.Lstat(path); e == nil && info.Mode().IsRegular() {
@@ -235,6 +255,10 @@ func projectCompletedBatchesAt(req llm.CompletionRequest, outputDir string) llm.
 						if call.Name == "TodoWrite" {
 							if ref, ok := m["planner_state_ref"].(string); ok && strings.HasPrefix(ref, "planner_state:") {
 								entry["reread"] = map[string]any{"tool": "context_get", "args": map[string]any{"items": []any{map[string]any{"ref": ref, "field": "/todos"}}}}
+							}
+							if m["checkpoint_ref"] == checkpointRef {
+								entry["reread"] = map[string]any{"tool": "context_get", "args": map[string]any{"items": []contextRead{{Ref: checkpointRef}}}}
+								entry["checkpoint_version"] = m["version"]
 							}
 						}
 
@@ -266,8 +290,17 @@ func projectCompletedBatchesAt(req llm.CompletionRequest, outputDir string) llm.
 					entry["occurrences"] = 1
 				}
 			}
-			if r.IsError {
+			if partial {
+				raw, _ := json.Marshal(readDiagnostics)
+				if len(readDiagnostics) == 0 || len(raw) > 1200 {
+					recoverable = false
+				} else {
+					entry["read_diagnostics"] = readDiagnostics
+				}
+			}
+			if r.IsError || partial {
 				entry["diagnostic_key"] = fmt.Sprintf("%x", errorHash.Sum(nil))
+				entry["occurrences"] = 1
 			}
 			if len(refs) > 0 {
 				entry["saved_refs"] = refs[:min(12, len(refs))]
@@ -275,7 +308,7 @@ func projectCompletedBatchesAt(req llm.CompletionRequest, outputDir string) llm.
 			if len(noaRefs) > 0 {
 				entry["noa_refs"] = noaRefs
 			}
-			if len(refs) == 0 && entry["reread"] == nil && entry["output_file"] == nil && entry["ids"] == nil && len(noaRefs) == 0 && !r.IsError {
+			if len(refs) == 0 && entry["reread"] == nil && entry["output_file"] == nil && entry["ids"] == nil && len(noaRefs) == 0 && entry["read_from_original_call"] != true && !r.IsError {
 				recoverable = false
 			}
 			receipts = append(receipts, entry)
@@ -372,6 +405,12 @@ func mergeReceiptDiagnostics(entries []map[string]any) []map[string]any {
 			prior := out[pos]
 			prior["occurrences"] = prior["occurrences"].(int) + 1
 			prior["last_original_call_id"] = entry["original_call_id"]
+			// Each execution may have a different noa source ID even when its
+			// diagnostic is byte-identical. Do not discard the later references.
+			if refs, ok := entry["noa_refs"].([]string); ok {
+				old, _ := prior["noa_refs"].([]string)
+				prior["noa_refs"] = append(append([]string(nil), old...), refs...)
+			}
 		} else {
 			seen[key] = len(out)
 			out = append(out, entry)
@@ -414,45 +453,32 @@ func collectReceiptRefs(v any, out *[]any) {
 }
 
 func projectRequestBudget(ctx context.Context, req llm.CompletionRequest) llm.CompletionRequest {
+	out, _ := projectRequestBudgetAndMetrics(ctx, req)
+	return out
+}
+
+func projectRequestBudgetAndMetrics(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, llmrec.ContextReadMetrics) {
 	ri := RunInfoFrom(ctx)
 	if ri.AgentKey != "planner" && ri.AgentKey != "worker" {
-		return req
+		return req, contextReadMetrics(req)
 	}
 	started := time.Now()
-	reads, repeated := 0, 0
-	queries := map[string]bool{}
-	for _, m := range req.Messages {
-		for _, b := range m.Content {
-			if b.Type != llm.BlockToolUse {
-				continue
-			}
-			call := assetContextCall(b)
-			if !retrievalTool(call.Name) {
-				continue
-			}
-			reads++
-			key := normalizedReadQuery(call.Name, call.Input)
-			if key != "" {
-				if queries[key] {
-					repeated++
-				}
-				queries[key] = true
-			}
-		}
-	}
+	readMetrics := contextReadMetrics(req)
 	before := measureRequest(req)
 	chars, bytes := 32000, 128*1024
 	if ri.AgentKey == "worker" {
 		chars, bytes = 48000, 192*1024
 	}
+	after := before
 	if before.Characters > chars || before.Bytes > bytes {
 		dir, _ := ctx.Value(contextOutputDirectoryKey{}).(string)
 		req = projectCompletedBatchesAt(req, dir)
+		after = measureRequest(req)
+		readMetrics = contextReadMetrics(req)
 	}
-	after := measureRequest(req)
-	log.Printf("[context-input] task=%d role=%s chars=%d bytes=%d system_bytes=%d tool_schema_bytes=%d history_bytes=%d before_chars=%d history_retrieval_calls=%d repeated_queries=%d projection_ms=%d", ri.TaskID, ri.AgentKey, after.Characters, after.Bytes, after.SystemBytes, after.ToolsBytes, after.HistoryBytes, before.Characters, reads, repeated, time.Since(started).Milliseconds())
+	log.Printf("[context-input] task=%d role=%s chars=%d bytes=%d system_bytes=%d tool_schema_bytes=%d history_bytes=%d before_chars=%d history_retrieval_calls=%d repeated_queries=%d history_tracking_limited=%t projection_ms=%d", ri.TaskID, ri.AgentKey, after.Characters, after.Bytes, after.SystemBytes, after.ToolsBytes, after.HistoryBytes, before.Characters, readMetrics.Calls, readMetrics.Repeated, readMetrics.Limited, time.Since(started).Milliseconds())
 	if after.Characters <= chars && after.Bytes <= bytes {
-		return req
+		return req, readMetrics
 	}
 	key := fmt.Sprintf("%d:%s:soft_budget", ri.TaskID, ri.AgentKey)
 	now := time.Now()
@@ -487,7 +513,7 @@ func projectRequestBudget(ctx context.Context, req llm.CompletionRequest) llm.Co
 			emit(event)
 		}
 	}
-	return req
+	return req, readMetrics
 }
 
 func logContextUsage(ctx context.Context, usage llm.Usage, elapsed time.Duration, failed bool) {

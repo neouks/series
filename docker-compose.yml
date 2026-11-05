@@ -16,6 +16,8 @@ services:
 
   series:
     image: series:${SERIES_TAG:-local}
+    # Reap orphaned descendants after canceled shell/process groups exit.
+    init: true
     build:
       context: .
     pull_policy: never

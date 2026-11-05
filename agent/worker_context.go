@@ -38,27 +38,33 @@ func (t *ToolSet) workerLaunchContext(ctx context.Context, intentID int64) strin
 	return "\n【当前意图的上游事实/漏洞摘要】仅执行当前意图；需要证据时用 context_get，其他上下文按需检索。\n" + string(b)
 }
 
-func workerMemoryPreview(store *memory.Store, query string) string {
+func workerMemoryPreview(ctx context.Context, store *memory.Store, query string) string {
 	if store == nil {
 		return ""
 	}
-	items := store.Relevant(query, 3)
-	if len(items) == 0 {
+	previewCtx, cancel := memoryPreviewContext(ctx)
+	defer cancel()
+	selection, err := selectMemoryPreviews(previewCtx, store, query)
+	if err != nil {
+		return "\n【经验预览暂不可用】未加载经验不代表没有任务事实；已保存记忆仍可用RecallMemory按需读取。"
+	}
+	if len(selection.items) == 0 && !selection.more {
 		return ""
 	}
 	budget := 1600
-	var text string
-	for _, m := range items {
+	text := fmt.Sprintf("\n【相关经验预览：非当前目标事实】按名称/描述字面匹配；索引%d条，待更新%d条，不可读%d条，仍有未展示=%t。正文未参与自动搜索，未匹配不等于没有经验。", selection.indexed, selection.pending, selection.unreadable, selection.more)
+	budget -= utf8.RuneCountInString(text)
+	for i, m := range selection.items {
 		if budget <= 0 {
 			break
 		}
 		preview := firstLine(m.Content, min(500, budget))
-		line := fmt.Sprintf("\n记忆 %s（非实时证据，完整内容用RecallMemory）：%s", firstLine(m.Name, 80), preview)
+		line := fmt.Sprintf("\n记忆 %s；原文入口 %s：%s", firstLine(m.Name, 80), memoryPreviewRead(selection.files[i], selection.versions[i]), preview)
 		if utf8.RuneCountInString(line) > budget {
 			continue
 		}
 		text += line
 		budget -= utf8.RuneCountInString(line)
 	}
-	return "\n【相关经验预览：不代表当前目标事实】" + text
+	return text
 }

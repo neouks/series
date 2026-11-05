@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"slices"
 	"strings"
 
@@ -19,6 +20,9 @@ func cloneToolMessages(req llm.CompletionRequest) llm.CompletionRequest {
 
 // Only side-effect-free reads are eligible; writes and failed calls are excluded.
 func normalizedReadQuery(name string, raw json.RawMessage) string {
+	if len(raw) > historicalReadInputBytes {
+		return ""
+	}
 	defaults := map[string]any{}
 	switch name {
 	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview", "get_worker_trace", "search_all_worker_traces", "get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces":
@@ -26,7 +30,7 @@ func normalizedReadQuery(name string, raw json.RawMessage) string {
 		var v map[string]any
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.UseNumber()
-		if dec.Decode(&v) != nil {
+		if dec.Decode(&v) != nil || v == nil || dec.Decode(new(any)) != io.EOF {
 			return ""
 		}
 		// These tools accept the same task ID as a JSON integer or decimal
@@ -102,12 +106,14 @@ func normalizedReadQuery(name string, raw json.RawMessage) string {
 			defaults["index"] = json.Number("0")
 		}
 	default:
-		return ""
+		if retiredRetrievalKind(name) == "" {
+			return ""
+		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var input map[string]any
-	if dec.Decode(&input) != nil || input == nil {
+	if dec.Decode(&input) != nil || input == nil || dec.Decode(new(any)) != io.EOF {
 		return ""
 	}
 	for k, v := range input {
@@ -132,47 +138,26 @@ func normalizedReadQuery(name string, raw json.RawMessage) string {
 }
 
 func deduplicateToolHistory(req llm.CompletionRequest) llm.CompletionRequest {
-	type position struct{ m, b int }
-	calls := map[string]string{}
-	latest := map[string]position{}
-	var replaced []position
-	for mi, m := range req.Messages {
-		for bi, b := range m.Content {
-			if b.Type == llm.BlockToolUse {
-				call := assetContextCall(b)
-				calls[b.ID] = normalizedReadQuery(call.Name, call.Input)
-			}
-			if b.Type != llm.BlockToolResult || b.IsError || partialReadFailure(calls[b.ToolUseID], b) {
-				continue
-			}
-			key := calls[b.ToolUseID]
-			if key == "" {
-				continue
-			}
-			if old, ok := latest[key]; ok {
-				replaced = append(replaced, old)
-			}
-			latest[key] = position{mi, bi}
-		}
-	}
-	if len(replaced) == 0 {
-		return req
-	}
-	req = cloneToolMessages(req)
-	for _, pos := range replaced {
-		req.Messages[pos.m].Content[pos.b].Content = []llm.ContentBlock{{Type: llm.BlockText, Text: `{"message":"同一查询页已有后续结果，此历史正文已在模型视图中省略"}`}}
-	}
-	return req
+	return deduplicateReadHistory(req, 1024, 1024)
 }
 
 // Batched reads intentionally report per-item errors without failing valid
 // siblings. Such a response cannot replace an older successful batch in the
 // model view. Live authorization still revalidates the retained history.
 func partialReadFailure(key string, block llm.ContentBlock) bool {
+	name, _, _ := strings.Cut(key, ":")
 	for _, c := range block.Content {
-		if c.Type == llm.BlockText && strings.HasPrefix(key, "graph_overview:") {
+		if c.Type == llm.BlockText && (name == "graph_overview" || name == "get_task_graph") {
 			var status map[string]any
 			if json.Unmarshal([]byte(c.Text), &status) == nil && overviewHasFailure(status) {
+				return true
+			}
+		}
+		if c.Type == llm.BlockText && retiredRetrievalKind(name) != "" {
+			var status struct {
+				Error string `json:"error"`
+			}
+			if json.Unmarshal([]byte(c.Text), &status) == nil && status.Error != "" {
 				return true
 			}
 		}

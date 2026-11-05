@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/neouks/series/db"
+	"github.com/neouks/series/runtimebudget"
 )
 
 const maxWorkerMessageBytes = 64 << 10
@@ -31,8 +33,8 @@ func validWorkerMessageRequestID(id string) bool {
 // resume-from-transcript path the worker uses on a normal resume (ExecuteWithMessage),
 // so this reuses the existing pause/resume machinery rather than a bespoke protocol.
 // The run happens in a dedicated goroutine outside the worker pool (runDetachedIntent),
-// so the message is picked up immediately even when every pool slot is busy — the same
-// way the main-agent chat handler starts its run directly. In-memory only: a process
+// using the same task/global execution budget. Waiting is finite and belongs to the
+// HTTP request; only an admitted execution is accepted. In-memory only: a process
 // restart re-runs the intent from its transcript without the message, which is
 // acceptable for this rare interrupt-then-continue action.
 func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
@@ -127,8 +129,15 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 	// runDetachedIntent transitions paused->running, emits the user turn and starts a
 	// dedicated run. Root the run at s.ctx so a disconnected browser cannot strand it
 	// while task pause/delete/shutdown still stop it.
-	if err := s.engine.runDetachedIntent(s.ctx, t, iid, requestID, message, agentMessage); err != nil {
+	if err := s.engine.runDetachedIntent(s.ctx, r.Context(), t, iid, requestID, message, agentMessage); err != nil {
 		switch {
+		case runtimebudget.IsLocalError(err):
+			w.Header().Set("Retry-After", "1")
+			writeErr(w, http.StatusTooManyRequests, err.Error())
+		case errors.Is(err, context.DeadlineExceeded):
+			writeErr(w, http.StatusRequestTimeout, err.Error())
+		case errors.Is(err, context.Canceled):
+			writeErr(w, http.StatusConflict, "请求或任务已取消，消息未下发")
 		case errors.Is(err, db.ErrIntentStateConflict):
 			writeErr(w, http.StatusConflict, err.Error())
 		default:

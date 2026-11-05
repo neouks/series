@@ -20,13 +20,9 @@ func (p assetContextProvider) refreshTargetAccess(ctx context.Context, req llm.C
 	if ri.TaskID != p.taskID || (ri.AgentKey != "planner" && ri.AgentKey != "mainagent") {
 		return req, nil, nil
 	}
-	system := []string{}
-	for _, part := range req.System {
-		if !strings.HasPrefix(part, "当前候选审批：") && part != targetAccessRule && part != mainAssetExecutionRule {
-			system = append(system, part)
-		}
-	}
-	req.System = system
+	req = withoutSystemSegments(req, func(s string) bool {
+		return strings.HasPrefix(s, "当前候选审批：") || s == targetAccessRule || s == mainAssetExecutionRule
+	})
 	type key struct {
 		node bool
 		id   int64

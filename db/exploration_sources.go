@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"sort"
 )
@@ -43,8 +44,18 @@ ORDER BY relation.created_at, source.id`, s.expID)
 // TaskID returns the live task bound to this exploration. Explorations created
 // directly in tests or maintenance code have no task and return zero.
 func (s *ExplorationStore) TaskID() (int64, error) {
+	return scanExplorationTaskID(s.db.QueryRow(`SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL`, s.expID))
+}
+
+func (s *ExplorationStore) TaskIDContext(ctx context.Context) (int64, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
+	return scanExplorationTaskID(s.db.QueryRowContext(ctx, `SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL`, s.expID))
+}
+
+func scanExplorationTaskID(row *sql.Row) (int64, error) {
 	var id int64
-	err := s.db.QueryRow(`SELECT id FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL`, s.expID).Scan(&id)
+	err := row.Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, nil

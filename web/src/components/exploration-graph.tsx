@@ -26,10 +26,13 @@ import { Bug, Compass, Flag, FlaskConical, Layers, Lightbulb, type LucideIcon, T
 
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { type Tone, toneClasses } from "@/lib/status";
-import type { Edge, ExploreKind, TaskNode } from "@/lib/types";
+import type { Edge, ExploreKind, GraphNodeBody, TaskNode } from "@/lib/types";
+import { api } from "@/lib/api";
 import { collapseDigestGraph } from "@/lib/exploration-graph";
 import { cn } from "@/lib/utils";
 
@@ -135,6 +138,7 @@ const summaryFields: Record<ExploreKind, string[]> = {
 };
 
 function nodeSummary(n: TaskNode): string {
+  if (n.preview) return n.summary ?? "";
   const raw = n.payload ?? "";
   const fields = summaryFields[viewKind(n)] ?? [];
   if (fields.length && raw.trim()) {
@@ -378,16 +382,41 @@ function NodeDetailSheet({
   nodesById,
   onSelect,
   onOpenChange,
+  taskId,
+  onExplore,
 }: {
   node: TaskNode | null;
   nodesById: Map<string, TaskNode>;
   onSelect: (n: TaskNode) => void;
   onOpenChange: (open: boolean) => void;
+  taskId?: string;
+  onExplore?: (node: TaskNode) => void;
 }) {
   const [copied, setCopied] = React.useState(false);
+  const [body, setBody] = React.useState<GraphNodeBody | null>(null);
+  const [bodyError, setBodyError] = React.useState("");
+  const [page, setPage] = React.useState({ offset: 0, version: "", retry: 0 });
+  const [bodyHistory, setBodyHistory] = React.useState<number[]>([]);
+  const lazy = Boolean(taskId && node?.preview);
+  const id = node?.id;
+  React.useEffect(() => {
+    if (!lazy || !taskId || !id) return;
+    const controller = new AbortController();
+    setBody(null);
+    setBodyError("");
+    api
+      .explorationGraphBody(taskId, id, page.offset, page.version, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setBody(result);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setBodyError(error instanceof Error ? error.message : "正文加载失败");
+      });
+    return () => controller.abort();
+  }, [id, taskId, lazy, page]);
   const meta = node ? (typeMeta[viewKind(node)] ?? typeMeta.intent) : null;
   const Icon = meta?.icon;
-  const raw = node ? JSON.stringify(node, null, 2) : "";
+  const raw = lazy ? (body?.payload ?? "") : node ? JSON.stringify(node, null, 2) : "";
   const memberIds = node ? digestMemberIds(node) : [];
   const members = memberIds.map((id) => nodesById.get(id)).filter((m): m is TaskNode => !!m);
 
@@ -400,7 +429,10 @@ function NodeDetailSheet({
 
   return (
     <Sheet open={node !== null} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-md">
+      <SheetContent
+        side="right"
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+      >
         {node && meta && Icon && (
           <>
             <SheetHeader className="border-b p-4">
@@ -412,6 +444,9 @@ function NodeDetailSheet({
                 </span>
                 <div className="min-w-0">
                   <SheetTitle className="leading-tight">{meta.label}</SheetTitle>
+                  <SheetDescription className="sr-only">
+                    节点属性与原始数据；摘要仅用于导航，正文按需读取。
+                  </SheetDescription>
                   <span className="text-muted-foreground font-mono text-xs">{node.id}</span>
                 </div>
                 {node.inherited && node.source_task_id && (
@@ -422,7 +457,7 @@ function NodeDetailSheet({
               </div>
             </SheetHeader>
 
-            <ScrollArea className="min-h-0 flex-1">
+            <ScrollArea className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:!w-full">
               <div className="flex w-full min-w-0 flex-col gap-4 p-4">
                 <section>
                   <h4 className="text-muted-foreground mb-1 text-xs font-medium">属性</h4>
@@ -453,7 +488,24 @@ function NodeDetailSheet({
                   <DetailRow label="时间">{new Date(node.ts).toLocaleString("zh-CN")}</DetailRow>
                 </section>
 
-                {node.type === "digest" && (
+                {onExplore && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      onExplore(node);
+                      onOpenChange(false);
+                    }}
+                  >
+                    查看相邻节点
+                  </Button>
+                )}
+                {node.preview && (
+                  <p className="text-muted-foreground text-sm">
+                    {node.summary || "此节点无摘要。"} 摘要仅用于导航，以下正文按页读取。
+                  </p>
+                )}
+
+                {node.type === "digest" && !node.preview && (
                   <>
                     {nodeSummary(node) && (
                       <section className="border-t pt-3">
@@ -509,18 +561,82 @@ function NodeDetailSheet({
 
                 <section className="border-t pt-3">
                   <div className="mb-1.5 flex items-center justify-between">
-                    <h4 className="text-muted-foreground text-xs font-medium">原始数据</h4>
-                    <button
-                      type="button"
-                      onClick={copy}
-                      className="text-muted-foreground hover:text-foreground text-xs transition-colors"
-                    >
-                      {copied ? "已复制" : "复制"}
-                    </button>
+                    <h4 className="text-muted-foreground text-xs font-medium">
+                      {lazy ? `节点正文 · 字符位置 ${page.offset}` : "原始数据"}
+                    </h4>
+                    <Button variant="ghost" size="sm" disabled={!raw} onClick={copy}>
+                      {copied ? "已复制" : lazy ? "复制本页" : "复制"}
+                    </Button>
                   </div>
-                  <pre className="bg-muted/50 text-foreground max-w-full overflow-hidden rounded-md border p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
-                    {raw}
-                  </pre>
+                  {bodyError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        {bodyError}
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={() => {
+                            setBodyHistory([]);
+                            setPage((p) => ({ offset: 0, version: "", retry: p.retry + 1 }));
+                          }}
+                        >
+                          从头重试
+                        </Button>
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  {lazy && !body && !bodyError && (
+                    <p className="text-muted-foreground text-sm" role="status">
+                      正在读取正文…
+                    </p>
+                  )}
+                  {raw && (
+                    <pre className="bg-muted/50 text-foreground max-w-full overflow-x-auto rounded-md border p-3 font-mono text-xs leading-relaxed whitespace-pre">
+                      {raw}
+                    </pre>
+                  )}
+                  {lazy && body && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={bodyHistory.length === 0}
+                        onClick={() => {
+                          const offset = bodyHistory.at(-1);
+                          if (offset !== undefined) {
+                            setBodyHistory((h) => h.slice(0, -1));
+                            setPage({ offset, version: body.body_version, retry: 0 });
+                          }
+                        }}
+                      >
+                        上一页
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={body.next_offset < 0}
+                        onClick={() => {
+                          setBodyHistory((h) => [...h, page.offset]);
+                          setPage({ offset: body.next_offset, version: body.body_version, retry: 0 });
+                        }}
+                      >
+                        下一页
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setBodyHistory([]);
+                          setPage((p) => ({ offset: 0, version: "", retry: p.retry + 1 }));
+                        }}
+                      >
+                        刷新正文
+                      </Button>
+                      <span className="text-muted-foreground text-xs">
+                        {body.next_offset >= 0 ? "正文尚未读完" : "已到正文末尾"}；分页替换本页，不累积全文。
+                      </span>
+                    </div>
+                  )}
                 </section>
               </div>
             </ScrollArea>
@@ -538,10 +654,16 @@ function ExplorationGraphInner({
   nodes,
   edges,
   emptyHint = "暂无探索数据",
+  taskId,
+  onExplore,
+  unfold = false,
 }: {
   nodes: TaskNode[];
   edges: Edge[];
   emptyHint?: string;
+  taskId?: string;
+  onExplore?: (node: TaskNode) => void;
+  unfold?: boolean;
 }) {
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<ExploreRFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
@@ -550,11 +672,14 @@ function ExplorationGraphInner({
   // covered members even though they are not rendered on the canvas.
   const nodesById = React.useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   // Collapsed view: folded members removed, their edges rewired onto the digest.
-  const { viewNodes, viewEdges } = React.useMemo(() => collapseDigestGraph(nodes, edges), [nodes, edges]);
+  const { viewNodes, viewEdges } = React.useMemo(
+    () => (unfold ? { viewNodes: nodes, viewEdges: edges } : collapseDigestGraph(nodes, edges)),
+    [nodes, edges, unfold],
+  );
   const isEmpty = viewNodes.length === 0;
 
   React.useEffect(() => {
-    setSelected((cur) => (cur ? (nodesById.get(cur.id) ?? cur) : cur));
+    setSelected((cur) => (cur ? (nodesById.get(cur.id) ?? null) : cur));
     const liveTargets = new Set(
       viewNodes.filter((n) => !n.inherited && n.type === "intent" && n.state === "running").map((n) => n.id),
     );
@@ -658,10 +783,13 @@ function ExplorationGraphInner({
         </Panel>
       </ReactFlow>
       <NodeDetailSheet
+        key={`${taskId ?? ""}:${selected?.id ?? "none"}`}
         node={selected}
         nodesById={nodesById}
         onSelect={setSelected}
         onOpenChange={(o) => !o && setSelected(null)}
+        taskId={taskId}
+        onExplore={onExplore}
       />
     </>
   );
@@ -674,16 +802,29 @@ export function ExplorationGraph({
   edges,
   className,
   emptyHint,
+  taskId,
+  onExplore,
+  unfold,
 }: {
   nodes: TaskNode[];
   edges: Edge[];
   className?: string;
   emptyHint?: string;
+  taskId?: string;
+  onExplore?: (node: TaskNode) => void;
+  unfold?: boolean;
 }) {
   return (
     <div className={cn("w-full overflow-hidden rounded-xl", className)}>
       <ReactFlowProvider>
-        <ExplorationGraphInner nodes={nodes} edges={edges} emptyHint={emptyHint} />
+        <ExplorationGraphInner
+          nodes={nodes}
+          edges={edges}
+          emptyHint={emptyHint}
+          taskId={taskId}
+          onExplore={onExplore}
+          unfold={unfold}
+        />
       </ReactFlowProvider>
     </div>
   );

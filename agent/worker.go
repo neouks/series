@@ -81,9 +81,9 @@ type Worker struct {
 	// the worker's graph write-back tools.
 	extraTools []actool.CoreTool
 	// injectConstraints resolves whether this task's operation constraints get
-	// injected into the worker system prompt. Read per run so the settings toggle
+	// injected into the worker system prompt. Read per request so the settings toggle
 	// takes effect without rebuilding the agent. nil = inject (default).
-	injectConstraints func() bool
+	injectConstraints func(context.Context) (bool, error)
 	// nonStreamingFn resolves whether this run uses the non-streaming (Complete)
 	// path. Read per run so a profile/task toggle takes effect without rebuilding
 	// the agent. nil = streaming (default).
@@ -122,25 +122,33 @@ func hasWorkerChatMessage(messages []llm.Message, requestID string) bool {
 		// Branding is presentation; the persisted request ID defines delivery.
 		// Read complete comment records so resumed sessions survive a rebrand
 		// without rewriting their transcript or matching prose/substrings.
-		text := message.Text()
-		for {
-			_, rest, ok := strings.Cut(text, "<!-- ")
-			if !ok {
-				break
-			}
-			record, tail, ok := strings.Cut(rest, " -->")
-			if !ok {
-				break
-			}
-			kind, id, ok := strings.Cut(record, ":")
-			if ok && strings.HasSuffix(kind, "_WORKER_CHAT") && id == requestID &&
-				!strings.ContainsAny(kind, " \t\r\n<>") {
-				return true
-			}
-			text = tail
+		found := false
+		walkWorkerChatIDs(message.Text(), func(id string) bool { found = id == requestID; return !found })
+		if found {
+			return true
 		}
 	}
 	return false
+}
+
+func walkWorkerChatIDs(text string, visit func(string) bool) {
+	for {
+		_, rest, ok := strings.Cut(text, "<!-- ")
+		if !ok {
+			return
+		}
+		record, tail, ok := strings.Cut(rest, " -->")
+		if !ok {
+			return
+		}
+		kind, id, ok := strings.Cut(record, ":")
+		if ok && strings.HasSuffix(kind, "_WORKER_CHAT") && !strings.ContainsAny(kind, " \t\r\n<>") {
+			if !visit(id) {
+				return
+			}
+		}
+		text = tail
+	}
 }
 
 // SetNonStreaming wires a resolver deciding whether runs use the non-streaming
@@ -168,10 +176,25 @@ func (w *Worker) maxTokens() int {
 
 // SetConstraintInject wires a resolver deciding whether this task's operation
 // constraints get injected into the worker system prompt. nil = inject (default).
-func (w *Worker) SetConstraintInject(fn func() bool) { w.injectConstraints = fn }
+func (w *Worker) SetConstraintInject(fn func() bool) {
+	if fn == nil {
+		w.injectConstraints = nil
+		return
+	}
+	w.injectConstraints = func(context.Context) (bool, error) { return fn(), nil }
+}
+
+func (w *Worker) SetConstraintInjectContext(fn func(context.Context) (bool, error)) {
+	w.injectConstraints = fn
+}
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
-func (w *Worker) wantConstraints() bool { return w.injectConstraints == nil || w.injectConstraints() }
+func (w *Worker) wantConstraints(ctx context.Context) (bool, error) {
+	if w.injectConstraints == nil {
+		return true, nil
+	}
+	return w.injectConstraints(ctx)
+}
 
 // SetRunTimeout configures the per-intent wall-clock budget for the main
 // exploration (0 = unlimited). When it fires, the SDK settlement phase still runs
@@ -188,7 +211,7 @@ const settleWrapUpPrompt = "你即将因预算耗尽被终止。不要再运行�
 func (w *Worker) SetMemory(m *memory.Store) { w.mem = m }
 
 func NewWorker(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int, extra ...actool.CoreTool) *Worker {
-	return &Worker{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, extraTools: extra}
+	return &Worker{prov: WithModelRequestScope(prov), model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, extraTools: extra}
 }
 
 func (w *Worker) SetCompactionWindowResolver(fn func() int) { w.windowFn = fn }
@@ -485,6 +508,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	ctx = context.WithValue(ctx, contextOutputDirectoryKey{}, cmdOutDir(runDir))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID, AgentKey: "worker"})
 	ctx = WithTaskToolSet(ctx, tsx)
+	ctx = withExecutionCheckpoint(ctx, tsx, "worker", intent.ID)
+	ctx = withOperationConstraints(ctx, ts, w.wantConstraints)
 	tools, def, cleanup, err := AugmentTools(ctx, "worker", base)
 	tools = tsx.StripCoverageParams(tools) // 覆盖度关闭时隐藏 insert_assets 的 related 入参
 	defer cleanup()
@@ -501,16 +526,14 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := tsx.workerLaunchContext(ctx, intent.ID)
-	overview += workerMemoryPreview(w.mem, nodeSummary(intent))
+	overview += workerMemoryPreview(ctx, w.mem, nodeSummary(intent))
 	runProxyAddr := TaskProxyAddr(w.proxyAddr, w.proxyCACert, taskID, guard.AssetSkipScope(ctx))
 	promptCACert := ""
 	if w.trafficRecording {
 		promptCACert = w.proxyCACert
 	}
 	sysBody := workerSystem(runProxyAddr, promptCACert, w.workDir, runDir)
-	if w.wantConstraints() {
-		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,worker 执行时严格遵守
-	}
+	// Operation constraints are refreshed before every model request.
 	// 意图块 → 意图锚定资产块 → 启动指令，依次追加到 system 尾部（与 constraintBlock 同一套追加法）。
 	sysBody += renderIntentTask(intent)
 	if as != nil {
@@ -561,7 +584,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 		}
 	}
-	sysBody += "\n\n开始执行上面这条意图：只做它、只产生事实、assets、finding、做完即停。"
+	sysBody += "\n\n开始执行上面这条意图：只做它、只产生事实、assets、finding、做完即停。" + checkpointGuide
 	system, boundary := deferredSystem(sysBody, def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
@@ -575,7 +598,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		return harness.ReasonAbortedTools, tsx.Writes(), fmt.Errorf("读取执行待办: %w", todoErr)
 	}
 	ctx = context.WithValue(ctx, workerTodoKey{}, workerTodos)
-	tools = append(tools, workerTodoTool{CoreTool: workerTodos.store.Tool(), state: workerTodos})
+	tools = append(tools, checkpointTodoTool{CoreTool: workerTodoTool{CoreTool: workerTodos.store.Tool(), state: workerTodos}})
 	opts := agentcore.Options{
 		Provider:               withAssetContext(w.prov, as, taskID),
 		SystemPrompt:           system,
@@ -663,13 +686,22 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// restarting from scratch.
 	alreadyRecorded := false
 	if w.tx != nil {
-		_ = s.Resume(opts.SessionID)
-		alreadyRecorded = requestID != "" && hasWorkerChatMessage(s.Messages(), requestID)
+		if err := restoreConversationContext(ctx, s, opts.SessionID); err != nil {
+			return "", tsx.Writes(), err
+		}
+		alreadyRecorded, err = sessionHasWorkerRequest(ctx, s, requestID)
+		if err != nil {
+			return "", tsx.Writes(), fmt.Errorf("读取人工消息投递记录: %w", err)
+		}
 		if len(s.Messages()) > 0 && message == "" {
-			seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
+			if err = seedSessionUnlock(ctx, s, def.UnlockSkill); err != nil {
+				return "", tsx.Writes(), err
+			}
 			input = "继续执行。"
 		} else if len(s.Messages()) > 0 {
-			seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
+			if err = seedSessionUnlock(ctx, s, def.UnlockSkill); err != nil {
+				return "", tsx.Writes(), err
+			}
 		}
 	}
 	if message != "" {

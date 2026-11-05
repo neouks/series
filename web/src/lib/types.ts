@@ -464,6 +464,35 @@ export interface TaskNode {
   ts: string;
   source_task_id?: string;
   inherited?: boolean;
+  // Graph windows contain identity/navigation only; payload is read on demand.
+  summary?: string;
+  preview?: boolean;
+}
+
+export interface GraphWindowQuery {
+  focus?: string;
+  before?: string;
+  upper?: string;
+  limit?: number;
+  revision?: string;
+}
+
+export interface GraphWindow {
+  revision: string;
+  unchanged?: boolean;
+  nodes?: TaskNode[];
+  edges?: Edge[];
+  has_more: boolean;
+  next_before?: string;
+  upper: string;
+  edges_truncated: boolean;
+}
+
+export interface GraphNodeBody {
+  node: TaskNode;
+  payload: string;
+  next_offset: number;
+  body_version: string;
 }
 
 // 播报板列表仅返回精简摘要；edges/refs 保留兼容字段，详情由展开后的分页接口读取。
@@ -982,7 +1011,32 @@ export interface TrafficHost {
 }
 
 // ---- App settings (runtime toggles) ----
+export interface ModelRequestLimits {
+  concurrency: number;
+  queue: number;
+}
+
+export interface ModelRequestDeadlines {
+  queue_seconds: number;
+  header_seconds: number;
+  read_idle_seconds: number;
+  total_seconds: number;
+}
+
+export interface ModelRequestBytes {
+  request_mib: number;
+  response_mib: number;
+}
+
 export interface Settings {
+	 external_process_limits?: ModelRequestLimits;
+	 external_process_usage?: ModelRequestLimits & { active: number; queued: number };
+  model_request_bytes?: ModelRequestBytes;
+  model_request_deadlines?: ModelRequestDeadlines;
+	worker_execution_limits?: ModelRequestLimits;
+	worker_execution_usage?: ModelRequestLimits & { active: number; queued: number };
+  model_request_limits?: ModelRequestLimits;
+  model_request_usage?: ModelRequestLimits & { active: number; queued: number };
   traffic_capture: boolean;
   agent_traffic_binding: boolean; // Agent 自动绑定流量证据，默认关闭；不影响人工绑定
   // 流量磁盘优化：静态资源过滤（HTML/JS/CSS/图片/字体/音视频默认不录制，可关）与

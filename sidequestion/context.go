@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // Memory is independent of the main snapshot. Through is a persisted ordinal,
@@ -108,7 +109,7 @@ func (b *contextBuilder) summarize(ctx context.Context, prior, text string) (str
 			return "", ErrContextBudget
 		}
 		b.calls++
-		msg, stop, usage, err := b.service.Provider.Complete(ctx, req)
+		msg, stop, usage, err := b.service.Provider.Complete(runtimebudget.WithModelPhase(ctx, "side_summary"), req)
 		b.usage.Add(usage)
 		b.progress(b.info.Phase)
 		if ctx.Err() != nil {

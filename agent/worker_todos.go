@@ -127,13 +127,7 @@ func (t workerTodoTool) Call(ctx context.Context, input json.RawMessage, tc *act
 }
 
 func refreshWorkerTodos(ctx context.Context, req llm.CompletionRequest) llm.CompletionRequest {
-	system := make([]string, 0, len(req.System)+1)
-	for _, s := range req.System {
-		if !strings.HasPrefix(s, workerTodoPrefix) {
-			system = append(system, s)
-		}
-	}
-	req.System = system
+	req = withoutSystemSegments(req, func(s string) bool { return strings.HasPrefix(s, workerTodoPrefix) })
 	state, _ := ctx.Value(workerTodoKey{}).(*workerTodoState)
 	ri := RunInfoFrom(ctx)
 	if state == nil || ri.AgentKey != "worker" || ri.TaskID != state.taskID || ri.IntentID != state.intentID {

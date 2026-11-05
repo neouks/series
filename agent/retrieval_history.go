@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -12,25 +13,22 @@ import (
 const retrievalBodyRunes = 24000
 const retrievalDirectoryRunes = 4000
 const retrievalDirectoryPrefix = "检索历史目录（仅索引，非完整证据）："
-const retrievalContextRule = "检索结果和态势是有界窗口，未展示不代表不存在。优先按资产、意图和字段缩小范围；搜索结果的 read 可直接传给 context_get，从命中附近读取。history_omitted 仅表示历史正文被精简，可按原调用重读；不要把它当作空结果或否定结论。"
+const legacyRetrievalContextRule = "检索结果和态势是有界窗口，未展示不代表不存在。优先按资产、意图和字段缩小范围；搜索结果的 read 可直接传给 context_get，从命中附近读取。history_omitted 仅表示历史正文被精简，可按原调用重读；不要把它当作空结果或否定结论。"
+const previousRetrievalContextRule = legacyRetrievalContextRule + "较早结果是当时快照；不同结果需结合来源和原始证据核对，不把旧快照当作当前状态。"
+const retrievalContextRule = previousRetrievalContextRule + "历史旧工具名仅用于审计；重读使用reread指定的当前工具，旧ID游标不能当作当前搜索cursor。"
 
 func retrievalTool(name string) bool {
 	switch name {
 	case "context_search", "context_get", "asset_search", "asset_get", "traffic_search", "traffic_get", "graph_overview":
 		return true
 	}
-	return false
+	return retiredRetrievalKind(name) != ""
 }
 
 func clearRetrievalDirectory(req llm.CompletionRequest) llm.CompletionRequest {
-	system := make([]string, 0, len(req.System))
-	for _, s := range req.System {
-		if !strings.HasPrefix(s, retrievalDirectoryPrefix) && s != retrievalContextRule {
-			system = append(system, s)
-		}
-	}
-	req.System = system
-	return req
+	return withoutSystemSegments(req, func(s string) bool {
+		return strings.HasPrefix(s, retrievalDirectoryPrefix) || s == retrievalContextRule || s == previousRetrievalContextRule || s == legacyRetrievalContextRule
+	})
 }
 
 // This is a copy-on-write model projection, after live authorization. No ledger,
@@ -40,36 +38,48 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 	type result struct {
 		m, b, c int
 		call    llm.ContentBlock
-		value   map[string]any
 		text    string
 	}
 	calls := map[string]llm.ContentBlock{}
+	seenCalls := map[string]bool{}
 	var results []result
 	for mi, m := range req.Messages {
+		if m.Role == llm.RoleAssistant || m.Role == "system" {
+			clear(calls)
+			clear(seenCalls)
+		}
 		for bi, b := range m.Content {
 			if b.Type == llm.BlockToolUse {
+				delete(calls, b.ID)
+				if b.ID == "" || len(b.ID) > 1024 || seenCalls[b.ID] || len(seenCalls) >= 1024 || len(b.Input) > historicalReadInputBytes {
+					continue
+				}
+				seenCalls[b.ID] = true
 				c := assetContextCall(b)
 				calls[c.ID] = c
+				continue
+			}
+			if b.Type != llm.BlockToolResult {
+				if m.Role == llm.RoleUser {
+					clear(calls)
+					clear(seenCalls)
+				}
+				continue
 			}
 			call := calls[b.ToolUseID]
-			// Failed/partially failed responses retain their diagnostics and protocol.
-			if b.Type != llm.BlockToolResult || b.IsError || !retrievalTool(call.Name) || partialReadFailure(normalizedReadQuery(call.Name, call.Input), b) {
+			delete(calls, b.ToolUseID)
+			// Error blocks retain their diagnostics. Partial structured reads may
+			// shrink successful data while keeping exact per-item failure metadata.
+			if b.Type != llm.BlockToolResult || b.IsError || !retrievalTool(call.Name) {
 				continue
 			}
 			for ci, c := range b.Content {
 				if c.Type != llm.BlockText {
 					continue
 				}
-				var value map[string]any
-				if decodeStructuredJSON([]byte(c.Text), &value) != nil || value == nil {
-					continue
-				}
-				// Authorization refusals, malformed-history notices and dedup placeholders
-				// have no data and must not become a data-bearing historical directory.
-				if !retrievalHasData(value) {
-					continue
-				}
-				results = append(results, result{mi, bi, ci, call, value, c.Text})
+				// Store positions only. Decode one result at a time below rather
+				// than retaining all historical evidence trees simultaneously.
+				results = append(results, result{mi, bi, ci, call, c.Text})
 			}
 		}
 	}
@@ -77,13 +87,19 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 		req.System = append(req.System, retrievalContextRule)
 		return req
 	}
-	req = cloneToolMessages(req)
+	cloned := false
 	remaining := retrievalBodyRunes
 	entries := []any{}
 	byQuery := map[string]map[string]any{}
 	directoryTruncated := false
 	for i := len(results) - 1; i >= 0; i-- {
 		r := results[i]
+		value := retrievalValue(r.text, r.call.Name)
+		// Refusals, malformed records and dedup placeholders must not become
+		// a data-bearing historical directory.
+		if value == nil || !retrievalHasData(value) {
+			continue
+		}
 		size := utf8.RuneCountInString(r.text)
 		if size <= remaining {
 			remaining -= size
@@ -91,12 +107,23 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 		}
 		// Preserve the newest partial preview as whole fields/records. Never let an
 		// older small page displace the newer evidence the model is working on.
-		compact := compactRetrievalResult(r.value, r.call)
+		entry := retrievalIndex(value, r.call)
+		replay := retrievalReplayIndex(r.call, value, entry)
+		compact := compactRetrievalResult(value, r.call, replay)
 		encoded, _ := json.Marshal(compact)
 		if utf8.RuneCount(encoded) <= remaining {
 			remaining -= utf8.RuneCount(encoded)
 		} else {
-			encoded = []byte(`{"history_omitted":true,"read_from_original_call":true}`)
+			if diagnostics := retrievalDiagnostics(value, r.call.Name); len(diagnostics) > 0 {
+				diagnostics["history_omitted"], diagnostics["read_from_original_call"] = true, true
+				encoded, _ = json.Marshal(diagnostics)
+			} else {
+				encoded = []byte(historicalReadOmitted)
+			}
+		}
+		if !cloned {
+			req = cloneToolMessages(req)
+			cloned = true
 		}
 		block := &req.Messages[r.m].Content[r.b]
 		block.Content = slices.Clone(block.Content)
@@ -104,7 +131,12 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 		// Future older pages are indices only once the body window is full.
 		remaining = 0
 		group := retrievalQueryGroup(r.call)
-		entry := retrievalIndex(r.value, r.call)
+		if retiredRetrievalKind(r.call.Name) != "" {
+			if replay != nil {
+				entry["reread"] = replay
+			}
+			entry["legacy_cursor_not_reusable"] = true
+		}
 		entry["query_id"] = group
 		if old := byQuery[group]; old != nil {
 			// Newest continuation stays authoritative; merge only unique references.
@@ -150,12 +182,26 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 	return req
 }
 
+func retrievalValue(text, name string) map[string]any {
+	var value any
+	if decodeStructuredJSON([]byte(text), &value) != nil {
+		return nil
+	}
+	if m, ok := value.(map[string]any); ok {
+		return m
+	}
+	if rows, ok := value.([]any); ok && name == "list_goals" {
+		return map[string]any{"goals": rows}
+	}
+	return nil
+}
+
 func retrievalDirectorySize(entries []any, truncated bool) int {
 	b, _ := json.Marshal(map[string]any{"entries": entries, "truncated": truncated, "older_calls_remain_in_history": true})
 	return utf8.RuneCountInString(retrievalDirectoryPrefix) + utf8.RuneCount(b)
 }
 func retrievalHasData(m map[string]any) bool {
-	for _, key := range []string{"items", "assets", "payload", "details", "parts", "request", "response", "id", "ref", "task", "goals", "recent_facts", "frontier_open"} {
+	for _, key := range []string{"items", "assets", "payload", "details", "parts", "request", "response", "id", "ref", "task", "goals", "recent_facts", "frontier_open", "facts", "findings", "steps", "hits", "works", "members", "final_text", "body", "preview"} {
 		if _, ok := m[key]; ok {
 			return true
 		}
@@ -201,8 +247,12 @@ func retrievalIndex(value map[string]any, call llm.ContentBlock) map[string]any 
 			if _, _, err := parseContextRef(text); err == nil {
 				ref["ref"] = text
 			}
+		} else if id, ok := structuredInt64(row["step_id"]); ok && id > 0 && retiredRetrievalKind(call.Name) == "activity" {
+			ref["ref"] = fmt.Sprintf("activity:%d", id)
+		} else if id, ok := structuredInt64(row["intent_id"]); ok && id > 0 && retiredRetrievalKind(call.Name) == "intent" {
+			ref["ref"] = fmt.Sprintf("node:%d", id)
 		} else if id, ok := structuredInt64(row["id"]); ok && id > 0 {
-			if strings.HasPrefix(call.Name, "asset_") {
+			if strings.HasPrefix(call.Name, "asset_") || retiredRetrievalKind(call.Name) == "asset" {
 				ref["asset_id"] = id
 			} else {
 				ref["node_id"] = id
@@ -253,7 +303,7 @@ func retrievalIndex(value map[string]any, call llm.ContentBlock) map[string]any 
 				seen[string(b)] = true
 			}
 		}
-		for _, key := range []string{"items", "assets", "parents", "members", "goals", "hints", "running_intents", "open_intents", "recent_done_intents", "recent_facts", "finding_list", "cold_digests", "related_tasks"} {
+		for _, key := range []string{"items", "assets", "parents", "members", "goals", "hints", "running_intents", "open_intents", "recent_done_intents", "recent_facts", "finding_list", "cold_digests", "related_tasks", "facts", "findings", "steps", "hits", "works"} {
 			if list, ok := row[key].([]any); ok {
 				for i, v := range list {
 					if m, ok := v.(map[string]any); ok {
@@ -275,7 +325,7 @@ func retrievalIndex(value map[string]any, call llm.ContentBlock) map[string]any 
 	}
 	visit(value, input)
 	out["refs"] = refs
-	for _, key := range []string{"has_more", "next_cursor", "next_offset"} {
+	for _, key := range []string{"has_more", "next_cursor", "next_offset", "next_before"} {
 		if v, ok := value[key]; ok {
 			out[key] = v
 		}
@@ -283,7 +333,7 @@ func retrievalIndex(value map[string]any, call llm.ContentBlock) map[string]any 
 	return out
 }
 
-func compactRetrievalResult(value map[string]any, call llm.ContentBlock) map[string]any {
+func compactRetrievalResult(value map[string]any, call llm.ContentBlock, replay map[string]any) map[string]any {
 	// All original record IDs and cursors survive. Omitted fields are re-read
 	// from the same call with a smaller window, so no rows are silently skipped.
 	out := map[string]any{"history_omitted": true, "read_from_original_call": true, "next_is_after_original_page": true}
@@ -294,6 +344,10 @@ func compactRetrievalResult(value map[string]any, call llm.ContentBlock) map[str
 			m := map[string]any{}
 			var omitted []string
 			for k, v := range x {
+				if k == "error" || k == "errors" || k == "unavailable" || strings.HasSuffix(k, "_error") {
+					m[k] = v
+					continue
+				}
 				if k == "next" || k == "read" {
 					m[k] = v
 					continue
@@ -327,17 +381,10 @@ func compactRetrievalResult(value map[string]any, call llm.ContentBlock) map[str
 	for k, v := range trim(value).(map[string]any) {
 		out[k] = v
 	}
-	var replay map[string]any
-	if decodeStructuredJSON(call.Input, &replay) == nil {
-		switch call.Name {
-		case "context_get", "asset_get":
-			replay["max_chars"] = 2000
-		case "traffic_get":
-			replay["max_bytes"] = 2048
-		case "context_search", "asset_search", "traffic_search":
-			replay["limit"] = 1
-		}
-		out["reread"] = map[string]any{"tool": call.Name, "args": replay}
+	if replay != nil {
+		out["reread"] = replay
+	} else if retiredRetrievalKind(call.Name) != "" {
+		out["reread_unavailable"] = "旧调用缺少可可靠转换的身份；请查看原始调用或使用当前检索工具，不要调用已退役工具"
 	}
 	return out
 }

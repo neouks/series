@@ -15,7 +15,11 @@ func maintainHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool, err
 	if err := tx.QueryRowContext(ctx, `SELECT topology_rev,hot_build_generation,hot_wave,hot_seed_cursor,hot_seed_done,hot_ready FROM graph_revisions WHERE exploration_id=$1`, exp).Scan(&topology, &wave, &built, &cursor, &seeded, &ready); err != nil {
 		return false, err
 	}
-	if built != topology {
+	// Finish the persisted pass instead of throwing its frontier away on each
+	// write. A completed old watermark is never published as the current one:
+	// the next page starts a catch-up pass for the latest topology. While a pass
+	// is stale, candidate queries continue treating the graph as unverified/hot.
+	if built != topology && (wave == 0 || ready) {
 		if _, err := tx.ExecContext(ctx, `UPDATE graph_revisions SET hot_wave=topology_rev,hot_build_generation=nextval('graph_projection_generation'),hot_seed_cursor=0,hot_seed_done=false,hot_ready=false WHERE exploration_id=$1`, exp); err != nil {
 			return false, err
 		}
@@ -23,6 +27,7 @@ func maintainHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool, err
 			return false, err
 		}
 		cursor, seeded, ready = 0, false, false
+		built = topology
 	}
 	if ready {
 		return true, nil
@@ -73,8 +78,8 @@ func maintainHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool, err
 		return false, err
 	}
 	if len(page) == 0 {
-		_, err = tx.ExecContext(ctx, `UPDATE graph_revisions SET hot_ready=true WHERE exploration_id=$1 AND hot_wave=topology_rev`, exp)
-		return err == nil, err
+		_, err = tx.ExecContext(ctx, `UPDATE graph_revisions SET hot_ready=true WHERE exploration_id=$1 AND hot_build_generation=$2`, exp, wave)
+		return err == nil && built == topology, err
 	}
 	ancestors, children := []int64{}, []int64{}
 	updates := []map[string]any{}

@@ -1800,7 +1800,7 @@ export function SessionsTab({
         patchIntentState(intentId, result.state);
         setWorkerMessage("");
         setWorkerMessageRequestId("");
-        toast.success(`消息已发送给 Worker #${intentId}，已立即继续执行`);
+        toast.success(`消息已发送给 Worker #${intentId}，已安排继续执行`);
       })
       .catch((error) => {
         toast.error(`发送失败：${(error as Error).message || "请稍后重试"}`);

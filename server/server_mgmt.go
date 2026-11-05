@@ -1993,6 +1993,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
+	if err := (agent.Config{ContextWindowK: p.ContextWindowK, MaxTokens: p.MaxTokens}).ValidateModelCapacity(); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if p.Format != "openai" || p.MaxTokensField != llm.MaxTokensFieldCompletion {
 		p.MaxTokensField = ""
 	}

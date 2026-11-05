@@ -5,7 +5,9 @@ package llmrec
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"iter"
 	"log"
 	"strconv"
@@ -16,10 +18,12 @@ import (
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
 	"github.com/neouks/series/db"
+	"github.com/neouks/series/runtimebudget"
 )
 
 type taskIDContextKey struct{}
 type runInfoContextKey struct{}
+type inputRejectedMetricsKey struct{}
 
 // RunInfo carries request attribution that cannot be recovered reliably from a
 // transcript session id alone. It lives in llmrec (rather than agent) so the
@@ -112,6 +116,7 @@ type Recorder struct {
 	thinkingType    string
 	reasoningEffort string
 	enabled         func() bool // reports whether recording is currently on; nil = always record
+	writeTimeout    time.Duration
 }
 
 // Wrap returns a Provider that records calls to pg when enabled() reports true.
@@ -122,6 +127,7 @@ func Wrap(inner llm.Provider, pg *db.DB, model, profName, thinkingType, reasonin
 	return &Recorder{
 		inner: inner, pg: pg, model: model, prof: profName,
 		thinkingType: thinkingType, reasoningEffort: reasoningEffort, enabled: enabled,
+		writeTimeout: 5 * time.Second,
 	}
 }
 
@@ -156,6 +162,7 @@ func parseSession(s string) (taskID, worker string) {
 // harness via transcript.WithSessionID; reading it per-call is race-free even when
 // planner and multiple workers share one Recorder instance.
 func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	ctx = runtimebudget.WithModelByteLimits(ctx, runtimebudget.ModelBytePolicy(ctx))
 	// Body recording (the heavy debug trace: full request/response) is gated by the
 	// llm_record setting. Lightweight usage metering always runs — it powers token
 	// stats and must be complete even for interrupted/failed runs, so it is NOT
@@ -187,14 +194,23 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 	// untouched wire bodies — the normalized view below cannot reconstruct them
 	// (tool schemas are dropped, tool_use blocks never reach this layer, and the
 	// SSE framing is already decoded). See capture.go.
-	reqBody := ""
-	var capt *Capture
-	if recordBodies {
-		reqBody = r.serializeRequest(req)
-		ctx, capt = NewCapture(ctx)
-	}
-
 	return func(yield func(llm.StreamEvent, error) bool) {
+		callCtx := ctx
+		inputErr := callCtx.Err()
+		if inputErr == nil {
+			inputErr = runtimebudget.CheckModelInputBytes(req, int64(runtimebudget.ModelBytePolicy(callCtx).RequestMiB)*runtimebudget.MiB)
+		}
+		if inputErr != nil {
+			r.recordInputRejection(callCtx, session, taskID, worker, expID, runInfo, start, req.Thinking, inputErr, recordBodies)
+			yield(llm.StreamEvent{}, inputErr)
+			return
+		}
+		reqBody := ""
+		var capt *Capture
+		if recordBodies {
+			reqBody = r.serializeRequest(req)
+			callCtx, capt = NewCapture(callCtx)
+		}
 		var (
 			textBuf     strings.Builder
 			thinkingBuf strings.Builder
@@ -209,20 +225,22 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 				return
 			}
 			finished = true
+			writeCtx, cancel := r.writeContext(callCtx)
+			defer cancel()
 			status := "ok"
 			if err != nil {
 				status = "error"
 			}
 			// Lightweight metering row — always written.
-			r.recordUsage(taskID, expID, worker, runInfo, req, usage, int(time.Since(start).Milliseconds()), status)
+			r.recordUsage(writeCtx, taskID, expID, worker, runInfo, req, usage, int(time.Since(start).Milliseconds()), status)
 			// Heavy trace row — only when body recording is on.
 			if recordBodies {
-				r.record(req, session, taskID, worker, reqBody, capt, start, textBuf.String(), thinkingBuf.String(), usage, stopReason, err)
+				r.record(writeCtx, req, session, taskID, worker, reqBody, capt, start, textBuf.String(), thinkingBuf.String(), usage, stopReason, err)
 			}
 		}
-		defer func() { finish(ctx.Err()) }()
+		defer func() { finish(context.Cause(callCtx)) }()
 
-		for ev, err := range r.inner.Stream(ctx, req) {
+		for ev, err := range r.inner.Stream(callCtx, req) {
 			if err != nil {
 				streamErr = err
 				finish(streamErr)
@@ -267,6 +285,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 // Complete implements the atomic completion path while preserving the same
 // usage metering, normalized body recording and raw wire capture as Stream.
 func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	ctx = runtimebudget.WithModelByteLimits(ctx, runtimebudget.ModelBytePolicy(ctx))
 	recordBodies := r.enabled == nil || r.enabled()
 	start := time.Now()
 	session := transcript.SessionIDFrom(ctx)
@@ -286,6 +305,14 @@ func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm
 	if taskID == "" {
 		taskID = parsedID
 	}
+	inputErr := ctx.Err()
+	if inputErr == nil {
+		inputErr = runtimebudget.CheckModelInputBytes(req, int64(runtimebudget.ModelBytePolicy(ctx).RequestMiB)*runtimebudget.MiB)
+	}
+	if inputErr != nil {
+		r.recordInputRejection(ctx, session, taskID, worker, expID, runInfo, start, req.Thinking, inputErr, recordBodies)
+		return llm.Message{}, "", llm.Usage{}, inputErr
+	}
 
 	reqBody := ""
 	var capt *Capture
@@ -299,9 +326,11 @@ func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm
 	if err != nil {
 		status = "error"
 	}
-	r.recordUsage(taskID, expID, worker, runInfo, req, usage, int(time.Since(start).Milliseconds()), status)
+	writeCtx, cancel := r.writeContext(ctx)
+	defer cancel()
+	r.recordUsage(writeCtx, taskID, expID, worker, runInfo, req, usage, int(time.Since(start).Milliseconds()), status)
 	if recordBodies {
-		r.record(req, session, taskID, worker, reqBody, capt, start, msg.Text(), thinkingText(msg), usage, stopReason, err)
+		r.record(writeCtx, req, session, taskID, worker, reqBody, capt, start, msg.Text(), thinkingText(msg), usage, stopReason, err)
 	}
 	return msg, stopReason, usage, err
 }
@@ -318,8 +347,12 @@ func thinkingText(msg llm.Message) string {
 
 // recordUsage appends one lightweight metering row to llm_usage (no bodies). Skips
 // zero-token calls with no model, which carry nothing worth metering.
-func (r *Recorder) recordUsage(taskID string, expID int64, worker string, runInfo RunInfo, req llm.CompletionRequest, usage llm.Usage, latencyMs int, status string) {
+func (r *Recorder) recordUsage(ctx context.Context, taskID string, expID int64, worker string, runInfo RunInfo, req llm.CompletionRequest, usage llm.Usage, latencyMs int, status string) {
 	if r.pg == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		log.Printf("[llmusage] record write deadline reached")
 		return
 	}
 	if r.model == "" && usage.InputTokens == 0 && usage.OutputTokens == 0 &&
@@ -327,13 +360,24 @@ func (r *Recorder) recordUsage(taskID string, expID int64, worker string, runInf
 		return
 	}
 	dims := requestDimensionsFor(req)
-	phase := runInfo.Phase
-	if req.Thinking == "disabled" {
-		phase = "compaction"
-	} else if phase == "" {
+	phase := runtimebudget.ModelPhase(ctx)
+	if phase == "" {
+		phase = runInfo.Phase
+	}
+	if phase == "" {
 		phase = "normal"
 	}
-	err := r.pg.InsertLLMUsage(&db.LLMUsage{
+	var readCalls, repeatedReads *int
+	reads, observed := ContextReadMetricsFrom(ctx)
+	if rejected, _ := ctx.Value(inputRejectedMetricsKey{}).(bool); rejected {
+		dims = requestDimensions{}
+		reads = ContextReadMetrics{}
+		observed = false
+	}
+	if observed {
+		readCalls, repeatedReads = &reads.Calls, &reads.Repeated
+	}
+	err := r.pg.InsertLLMUsageContext(ctx, &db.LLMUsage{
 		TaskID:               taskID,
 		ExplorationID:        expID,
 		IntentID:             runInfo.IntentID,
@@ -353,7 +397,9 @@ func (r *Recorder) recordUsage(taskID string, expID int64, worker string, runInf
 		ToolChars:            dims.tools,
 		RequestChars:         dims.total,
 		EstimatedInputTokens: (dims.total + 3) / 4,
-		Status:               status,
+		RequestBytes:         dims.bytes,
+		HistoryReadCalls:     readCalls, HistoryRepeatedReads: repeatedReads, HistoryReadTrackingLimited: reads.Limited,
+		Status: status,
 	})
 	if err != nil {
 		log.Printf("[llmusage] insert: %v", err)
@@ -362,29 +408,62 @@ func (r *Recorder) recordUsage(taskID string, expID int64, worker string, runInf
 
 type requestDimensions struct {
 	system, messages, tools, total int
+	bytes                          int
 }
 
 func requestDimensionsFor(req llm.CompletionRequest) requestDimensions {
-	serializedRunes := func(value any) int {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return 0
-		}
-		return utf8.RuneCount(raw)
-	}
-	dims := requestDimensions{
-		system:   serializedRunes(req.System),
-		messages: serializedRunes(req.Messages),
-		tools:    serializedRunes(req.Tools),
-	}
+	var dims requestDimensions
+	var sb, mb, tb int
+	dims.system, sb = serializedSliceDimensions(req.System)
+	dims.messages, mb = serializedSliceDimensions(req.Messages)
+	dims.tools, tb = serializedSliceDimensions(req.Tools)
 	dims.total = dims.system + dims.messages + dims.tools
+	base := req
+	base.System = nil
+	base.Messages = nil
+	base.Tools = nil
+	raw, _ := json.Marshal(base)
+	dims.bytes = len(raw) - 12 + sb + mb + tb
 	return dims
+}
+
+// Each element is encoded once for both units; no full-history encoding buffer.
+func serializedSliceDimensions[T any](items []T) (int, int) {
+	if items == nil {
+		return 4, 4
+	}
+	chars, size := 2, 2
+	for i, item := range items {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			return 0, 0
+		}
+		chars += utf8.RuneCount(raw)
+		size += len(raw)
+		if i > 0 {
+			chars++
+			size++
+		}
+	}
+	return chars, size
+}
+
+func serializedSliceRunes[T any](items []T) int {
+	chars, _ := serializedSliceDimensions(items)
+	return chars
 }
 
 // record persists one LLM call to PostgreSQL before the provider stream returns.
 // Keeping the write inside the owning task operation means task deletion can
 // drain calls and then remove records without a late async insert recreating one.
-func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, reqBody string, capt *Capture, start time.Time, text, thinking string, usage llm.Usage, stopReason string, streamErr error) {
+func (r *Recorder) record(ctx context.Context, req llm.CompletionRequest, session, taskID, worker, reqBody string, capt *Capture, start time.Time, text, thinking string, usage llm.Usage, stopReason string, streamErr error) {
+	if r.pg == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		log.Printf("[llmrec] record write deadline reached")
+		return
+	}
 	latency := int(time.Since(start).Milliseconds())
 	status := "ok"
 	errMsg := ""
@@ -406,6 +485,23 @@ func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, re
 	}
 	if thinking != "" {
 		resp["thinking"] = thinking
+	}
+	var byteStop *runtimebudget.ModelByteLimitError
+	if errors.As(streamErr, &byteStop) {
+		resp["incomplete"] = true
+		resp["byte_limit"] = map[string]any{"phase": byteStop.Phase, "limit_bytes": byteStop.Limit}
+	}
+	rawRequest, requestEncoded := storageWireBody(capt.RawRequest())
+	receivedResponse := capt.RawResponse()
+	rawResponse, responseEncoded := storageWireBody(receivedResponse)
+	if byteStop != nil {
+		resp["captured_response_bytes"] = len(receivedResponse)
+	}
+	if requestEncoded {
+		resp["raw_request_encoding"] = "base64-envelope"
+	}
+	if responseEncoded {
+		resp["raw_response_encoding"] = "base64-envelope"
 	}
 	respBody, _ := json.Marshal(resp)
 
@@ -433,13 +529,48 @@ func (r *Recorder) record(req llm.CompletionRequest, session, taskID, worker, re
 		// Raw wire bodies; empty when the transport did not fill the Capture
 		// (e.g. a provider dialing through a client without the capture hook, or
 		// a call that failed before any HTTP request went out).
-		RawRequest:  capt.RawRequest(),
-		RawResponse: capt.RawResponse(),
+		RawRequest:  rawRequest,
+		RawResponse: rawResponse,
 	}
 
-	if err := r.pg.InsertLLMRecord(rec); err != nil {
+	if err := r.pg.InsertLLMRecordContext(ctx, rec); err != nil {
 		log.Printf("[llmrec] insert: %v", err)
 	}
+}
+
+// Oversized projected input was not sent. Record a small diagnostic, not a
+// second copy of that input in the recorder or its dimension serializer.
+func (r *Recorder) recordInputRejection(ctx context.Context, session, taskID, worker string, expID int64, info RunInfo, start time.Time, thinking string, err error, bodies bool) {
+	minimal := llm.CompletionRequest{Thinking: thinking}
+	ctx = context.WithValue(ctx, inputRejectedMetricsKey{}, true)
+	writeCtx, cancel := r.writeContext(ctx)
+	defer cancel()
+	r.recordUsage(writeCtx, taskID, expID, worker, info, minimal, llm.Usage{}, int(time.Since(start).Milliseconds()), "error")
+	if bodies {
+		r.record(writeCtx, minimal, session, taskID, worker, `{"omitted":true,"sent":false,"reason":"model_input_preflight"}`, nil, start, "", "", llm.Usage{}, "", err)
+	}
+}
+
+// Finish the failed call's diagnostic even after model cancellation, but share
+// one finite write budget across usage and body records. Slow PG must not hold
+// the model permit indefinitely or cause the model/tools to be replayed.
+func (r *Recorder) writeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	limit := r.writeTimeout
+	if limit <= 0 {
+		limit = 5 * time.Second
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), limit)
+}
+
+// PostgreSQL text cannot store a mid-UTF8 prefix or NUL. Keep received bytes
+// losslessly in an explicit base64 envelope instead of losing the whole record
+// or replacing bytes. Existing valid wire bodies remain byte-for-byte unchanged.
+func storageWireBody(raw string) (string, bool) {
+	if utf8.ValidString(raw) && !strings.ContainsRune(raw, 0) {
+		return raw, false
+	}
+	envelope, _ := json.Marshal(map[string]string{"encoding": "base64", "data": base64.StdEncoding.EncodeToString([]byte(raw)), "note": "已提供给SDK的字节前缀无法直接保存为UTF-8文本；解码data可还原该前缀"})
+	return string(envelope), true
 }
 
 // serializeRequest builds a JSON representation of the completion request.

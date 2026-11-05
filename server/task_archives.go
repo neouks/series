@@ -151,22 +151,9 @@ func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
 			runErr = errors.Join(runErr, fileStage.rollback())
 		}
 	}()
-	streamPath := filepath.Join(fileStage.payload, filepath.FromSlash(pgdb.TaskArchiveLLMRecordsPath))
-	if err := os.MkdirAll(filepath.Dir(streamPath), archiveDirMode); err != nil {
-		return err
-	}
-	streamFile, err := os.OpenFile(streamPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, archiveFileMode)
-	if err != nil {
-		return err
-	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "snapshot_database", 20)
-	snapshot, snapshotErr := s.m.pg.SnapshotTaskArchiveWithLLMRecords(job.TaskID, streamFile)
-	var syncErr error
-	if snapshotErr == nil {
-		syncErr = streamFile.Sync()
-	}
-	closeErr := streamFile.Close()
-	if err := errors.Join(snapshotErr, syncErr, closeErr); err != nil {
+	snapshot, err := snapshotTaskArchiveStreams(s.ctx, s.m.pg, job.TaskID, fileStage.payload)
+	if err != nil {
 		return err
 	}
 	if snapshot.ExplorationID != task.ExplorationID {
@@ -181,11 +168,7 @@ func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
 		snapshot.DataCounts["traffic"] = trafficCount
 	}
 	archivePath := taskArchivePath(s.m.dir, job.ID, taskID)
-	evidenceSnapshots, err := pgdb.ArchiveEvidenceSnapshots(snapshot)
-	if err != nil {
-		return err
-	}
-	if err = s.evidenceStore().CopySnapshots(s.ctx, evidenceSnapshots, filepath.Join(fileStage.payload, "evidence")); err != nil {
+	if err = s.evidenceStore().CopySnapshotIterator(s.ctx, taskArchiveEvidenceIterator(s.ctx, snapshot, fileStage.payload), filepath.Join(fileStage.payload, "evidence")); err != nil {
 		return err
 	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "compress", 50)
@@ -280,35 +263,21 @@ func (s *Server) restoreTaskArchive(job *pgdb.TaskArchive) (runErr error) {
 	if snapshot.TaskID != job.TaskID || !pgdb.IsTaskArchiveFormatSupported(snapshot.FormatVersion) {
 		return pgdb.ErrTaskArchiveFormatMismatch
 	}
-	evidenceSnapshots, err := pgdb.ArchiveEvidenceSnapshots(&snapshot)
-	if err != nil {
+	if err := pgdb.ValidateTaskArchiveStreams(&snapshot); err != nil {
 		return err
 	}
-	return s.evidenceStore().WithInstalledSnapshots(s.ctx, evidenceSnapshots, filepath.Join(extracted, "evidence"), func() error {
+	return s.evidenceStore().WithInstalledSnapshotIterator(s.ctx, taskArchiveEvidenceIterator(s.ctx, &snapshot, extracted), filepath.Join(extracted, "evidence"), func() error {
 		return s.restoreTaskArchivePayload(job, &snapshot, extracted)
 	})
 }
 
 func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb.TaskArchiveSnapshot, extracted string) (runErr error) {
 	var err error
-	var llmRecordsFile *os.File
-	relative, hasStreamedLLMRecords := snapshot.StreamedTables["llm_records"]
-	if len(snapshot.StreamedTables) > 0 &&
-		(snapshot.FormatVersion < 2 || !hasStreamedLLMRecords || len(snapshot.StreamedTables) != 1 ||
-			relative != pgdb.TaskArchiveLLMRecordsPath) {
-		return pgdb.ErrTaskArchiveFormatMismatch
+	streams, err := openTaskArchiveStreams(snapshot, extracted)
+	if err != nil {
+		return err
 	}
-	if hasStreamedLLMRecords {
-		llmRecordsFile, err = os.Open(filepath.Join(extracted, filepath.FromSlash(relative)))
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if llmRecordsFile != nil {
-				_ = llmRecordsFile.Close()
-			}
-		}()
-	}
+	defer streams.Close()
 	if s.m.traffic != nil {
 		_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "restore_traffic", 35)
 		if _, err := s.m.traffic.ImportArchive(filepath.Join(extracted, "traffic")); err != nil {
@@ -328,18 +297,15 @@ func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb
 	}()
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "restore_database", 70)
 	var warnings []string
-	if llmRecordsFile != nil {
-		warnings, err = s.m.pg.RestoreTaskArchiveWithLLMRecords(
-			job.ID, snapshot, job.RemainingTimeoutSeconds, llmRecordsFile,
-		)
-		closeErr := llmRecordsFile.Close()
-		llmRecordsFile = nil
-		err = errors.Join(err, closeErr)
-	} else {
-		warnings, err = s.m.pg.RestoreTaskArchive(job.ID, snapshot, job.RemainingTimeoutSeconds)
-	}
+	warnings, err = s.m.pg.RestoreTaskArchiveWithStreams(s.ctx, job.ID, snapshot, job.RemainingTimeoutSeconds, streams.readers)
 	if err != nil {
 		return err
+	}
+	// Database commit has succeeded. A read-descriptor close error cannot
+	// justify moving restored live files back out from under committed rows.
+	databaseRestored = true
+	if closeErr := streams.Close(); closeErr != nil {
+		log.Printf("[task-archive] close restored streams task=%d: %v", job.TaskID, closeErr)
 	}
 	for _, warning := range warnings {
 		log.Printf("[task-archive] restored task %d with warning: %s", job.TaskID, warning)

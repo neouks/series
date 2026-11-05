@@ -67,6 +67,15 @@ func (c *Capture) SetRequest(body string) {
 	}
 }
 
+func (c *Capture) HasRequest() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.request != ""
+}
+
 // TeeResponse opens a new attempt and wraps rc so everything read from it is
 // mirrored into that attempt. It tees rather than reads because a successful
 // response is an SSE stream that must keep streaming to the caller.

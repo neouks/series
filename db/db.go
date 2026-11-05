@@ -26,6 +26,9 @@ var assetTemplateSQL string
 //go:embed graph_maintenance.sql
 var graphMaintenanceSQL string
 
+//go:embed graph_navigation.sql
+var graphNavigationSQL string
+
 const schemaMigrationLockKey int64 = 7337741001
 
 var schemaDeadlockRetryDelays = [...]time.Duration{
@@ -46,7 +49,7 @@ func isPostgresDeadlock(err error) bool {
 
 func applySchemaWithRetry(ctx context.Context, execer schemaExecer, sleep func(time.Duration)) error {
 	for attempt := 0; ; attempt++ {
-		if _, err := execer.ExecContext(ctx, schemaSQL+"\n"+assetTemplateSQL+"\n"+graphMaintenanceSQL); err != nil {
+		if _, err := execer.ExecContext(ctx, schemaSQL+"\n"+assetTemplateSQL+"\n"+graphMaintenanceSQL+"\n"+graphNavigationSQL); err != nil {
 			if !isPostgresDeadlock(err) || attempt >= len(schemaDeadlockRetryDelays) {
 				return err
 			}
@@ -81,7 +84,11 @@ func withSchemaMigrationLock(ctx context.Context, sqlDB *sql.DB, action func(*sq
 // mutually exclusive with startup DDL while allowing ordinary runtime queries
 // to continue normally.
 func coordinateWithSchemaMigration(tx *sql.Tx) error {
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, schemaMigrationLockKey); err != nil {
+	return coordinateWithSchemaMigrationContext(context.Background(), tx)
+}
+
+func coordinateWithSchemaMigrationContext(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, schemaMigrationLockKey); err != nil {
 		return fmt.Errorf("coordinate with schema migration: %w", err)
 	}
 	return nil

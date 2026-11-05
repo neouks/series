@@ -22,6 +22,7 @@ import (
 	"github.com/neouks/series/agent"
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // 本文件实现自定义工具执行器(docs/自定义工具设计.md)。system=false 的 tools 行按
@@ -290,6 +291,13 @@ func (s *Server) customTools() ([]actool.CoreTool, error) {
 func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 	schema := ensureSchema(t.Schema)
 	key, kind, execRaw := t.Key, t.Kind, t.Exec
+	description := t.Description
+	if kind == "script" {
+		description = scriptExecutionDescription(description)
+	}
+	if kind == "command" {
+		description = commandExecutionDescription(description)
+	}
 	run := func(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 		var params map[string]any
 		if len(in) > 0 {
@@ -312,12 +320,49 @@ func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 		}
 	}
 	return actool.Build(actool.Spec{
-		Name: key, Description: t.Description, Schema: schema,
+		Name: key, Description: description, Schema: schema,
 		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
 			return permission.Allowed()
 		},
 		Run: run,
 	})
+}
+
+const scriptExecutionNote = "Python脚本执行上限：10分钟、32 MiB输出；超限会终止，失败输出不可作为完整结论。"
+const commandExecutionNote = "命令共用外部作业限额；前台等待默认120秒、最多10分钟，无后台管理器时输出最多32 MiB；失败内容可能不完整。"
+
+func commandExecutionDescription(description string) string {
+	if strings.HasSuffix(description, commandExecutionNote) {
+		return description
+	}
+	return description + "\n" + commandExecutionNote
+}
+
+func scriptExecutionDescription(description string) string {
+	if strings.HasSuffix(description, scriptExecutionNote) {
+		return description
+	}
+	return description + "\n" + scriptExecutionNote
+}
+
+// Preserve the runtime limit after the catalog's editable description/defaults
+// decorate the custom tool. No row or permission is changed; deferred tools
+// receive the same final contract when their schema becomes visible.
+func decorateCustomTool(t actool.CoreTool, row *db.Tool, schema map[string]any) actool.CoreTool {
+	description := row.Description
+	if row.Kind == "script" {
+		if description == "" {
+			description = t.Description()
+		}
+		description = scriptExecutionDescription(description)
+	}
+	if row.Kind == "command" {
+		if description == "" {
+			description = t.Description()
+		}
+		description = commandExecutionDescription(description)
+	}
+	return agent.DecorateTool(t, description, schema)
 }
 
 // hasSchemaProps reports whether raw is a JSON-Schema object with ≥1 property.
@@ -365,15 +410,21 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 	if reason := s.customToolAssetPolicy(ctx, "custom_command", map[string]any{"command": cmd, "params": params}); reason != "" {
 		return actool.Errorf(reason), nil
 	}
-	// 复用 Bash 也在用的底层 run(经 Bash CoreTool.Call):自动继承安全 floor/超时/
-	// 代理 env/输出溢出。工具与 Bash 平级、共用底层,不经过 Bash 这个工具让模型调。
-	bashIn, _ := json.Marshal(map[string]any{"command": cmd})
+	// Share the admitted interpreter backend, not a nested model-visible Bash
+	// call. Keep custom-tool usage/approval once, including queue revalidation.
+	bashIn, _ := json.Marshal(map[string]any{"command": cmd, "timeout_ms": spec.TimeoutMs})
 	if spec.TimeoutMs > 0 {
+		ms := min(spec.TimeoutMs, 600000) // bound before duration conversion
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeoutOr(spec.TimeoutMs, 120000))
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(ms)*time.Millisecond)
 		defer cancel()
 	}
-	return actool.NewBash().Call(ctx, bashIn, tc)
+	return agent.RunAdmittedBash(ctx, bashIn, tc, func(checkCtx context.Context) error {
+		if reason := s.customToolAssetCheck(checkCtx, "custom_command", map[string]any{"command": cmd, "params": params}, true); reason != "" {
+			return fmt.Errorf("%s", reason)
+		}
+		return nil
+	})
 }
 
 // ---------- script(仅 Python):临时文件 + stdin JSON + env ----------
@@ -399,9 +450,14 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 		}
 		sessionEnv = tc.Env
 	}
-	body, err := execPython(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000))
+	body, err := execPythonChecked(ctx, interp, key, spec.Code, params, workDir, sessionEnv, timeoutOr(spec.TimeoutMs, 120000), func(checkCtx context.Context) error {
+		if reason := s.customToolAssetCheck(checkCtx, key, map[string]any{"code": spec.Code, "params": params}, true); reason != "" {
+			return fmt.Errorf("%s", reason)
+		}
+		return nil
+	})
 	if err != nil {
-		return actool.Errorf(err.Error()), nil
+		return actool.Errorf(actool.Capture(tc, body+"\n"+err.Error())), nil
 	}
 	return actool.Text(actool.Capture(tc, body)), nil
 }
@@ -410,42 +466,42 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 // with the params JSON on stdin + scalar params mirrored to TOOL_<NAME> env, and
 // returns combined stdout+stderr (with a timeout/exit note). Standalone + testable.
 func execPython(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration) (string, error) {
-	toolsDir := filepath.Join(workDir, ".tools")
-	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
-		return "", err
-	}
-	f, err := os.CreateTemp(toolsDir, key+"-*.py")
-	if err != nil {
-		return "", err
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	if _, err := f.WriteString(code); err != nil {
-		f.Close()
-		return "", err
-	}
-	f.Close()
+	return execPythonChecked(ctx, interp, key, code, params, workDir, sessionEnv, timeout, nil)
+}
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	c := exec.CommandContext(runCtx, interp, tmp)
-	c.Dir = workDir
-	c.Env = append(os.Environ(), sessionEnv...) // 会话代理 env
-	for k, v := range params {                  // 标量参数镜像成 TOOL_<NAME>
-		if sv, ok := scalarStr(v); ok {
-			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
+func execPythonChecked(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration, recheck func(context.Context) error) (string, error) {
+	result, err := runtimebudget.RunProcess(ctx, externalProcessKey(ctx), timeout, recheck, func(runCtx context.Context) (*exec.Cmd, func(), error) {
+		toolsDir := filepath.Join(workDir, ".tools")
+		if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+			return nil, nil, err
 		}
-	}
-	pj, _ := json.Marshal(params)
-	c.Stdin = bytes.NewReader(pj) // 参数 JSON 走 stdin
-	out, err := c.CombinedOutput()
-	body := string(out)
-	if runCtx.Err() == context.DeadlineExceeded {
-		body += "\n... [超时终止] ..."
-	} else if err != nil {
-		body += "\n[exit: " + err.Error() + "]"
-	}
-	return body, nil
+		f, err := os.CreateTemp(toolsDir, key+"-*.py")
+		if err != nil {
+			return nil, nil, err
+		}
+		cleanup := func() { _ = f.Close(); _ = os.Remove(f.Name()) }
+		if _, err = f.WriteString(code); err != nil {
+			return nil, cleanup, err
+		}
+		if err = f.Close(); err != nil {
+			return nil, cleanup, err
+		}
+		pj, err := json.Marshal(params)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		c := exec.CommandContext(runCtx, interp, f.Name())
+		c.Dir = workDir
+		c.Env = append(os.Environ(), sessionEnv...)
+		for k, v := range params {
+			if sv, ok := scalarStr(v); ok {
+				c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
+			}
+		}
+		c.Stdin = bytes.NewReader(pj)
+		return c, cleanup, nil
+	})
+	return result.Output, err
 }
 
 // ---------- http:原生请求 + 代理 ----------
@@ -505,9 +561,16 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 // custom command/script/HTTP template must be checked again here before any
 // process starts or request is sent.
 func (s *Server) customToolAssetPolicy(ctx context.Context, toolName string, value any) string {
+	return s.customToolAssetCheck(ctx, toolName, value, false)
+}
+
+func (s *Server) customToolAssetCheck(ctx context.Context, toolName string, value any, recheck bool) string {
 	runInfo := agent.RunInfoFrom(ctx)
-	if runInfo.TaskID <= 0 || s == nil || s.m == nil || s.m.assets == nil {
+	if runInfo.TaskID <= 0 {
 		return ""
+	}
+	if s == nil || s.m == nil || s.m.assets == nil {
+		return "任务资产执行被阻止：任务资产校验服务不可用"
 	}
 	input, err := json.Marshal(value)
 	if err != nil {
@@ -517,7 +580,24 @@ func (s *Server) customToolAssetPolicy(ctx context.Context, toolName string, val
 	if task, ok := s.m.Task(fmt.Sprint(runInfo.TaskID)); ok {
 		taskGuard = task.Guard
 	}
-	hooks := guard.AssetPolicyHooksWithGuard(taskGuard, s.m.assets, runInfo.TaskID)
+	policyCtx := ctx
+	if recheck {
+		var cancel context.CancelFunc
+		policyCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+	hooks := guard.AssetPolicyHooksWithGuard(taskGuard, s.m.assets.WithReadContext(policyCtx), runInfo.TaskID)
+	if recheck {
+		// Queue waits may outlive an approval. Refresh authorization only;
+		// do not prompt for action approval or account the tool a second time.
+		policy, ok := hooks.(interface {
+			RecheckToolInput(context.Context, string, []byte) string
+		})
+		if !ok {
+			return "任务资产执行被阻止：无法复核排队后的授权"
+		}
+		return policy.RecheckToolInput(policyCtx, toolName, input)
+	}
 	blocked, reason, _ := hooks.PreToolUse(ctx, toolName, input)
 	if blocked {
 		return reason

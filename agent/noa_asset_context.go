@@ -7,12 +7,18 @@ import (
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noaadapter"
+	"github.com/neouks/series/llmrec"
 )
 
 // noa tags its model-view tool results, so strip only that trailing metadata
 // while the normal authorization/deduplication pipeline parses structured JSON.
 // Restore refs afterwards; neither raw audit messages nor noa's ledger change.
 func (p assetContextProvider) filter(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, error) {
+	out, _, err := p.filterWithMetrics(ctx, req)
+	return out, err
+}
+
+func (p assetContextProvider) filterWithMetrics(ctx context.Context, req llm.CompletionRequest) (llm.CompletionRequest, llmrec.ContextReadMetrics, error) {
 	started := time.Now()
 	ri := RunInfoFrom(ctx)
 	if ri.AgentKey == "planner" || ri.AgentKey == "worker" {
@@ -58,20 +64,29 @@ func (p assetContextProvider) filter(ctx context.Context, req llm.CompletionRequ
 		out, err = p.filterPlain(ctx, req)
 	}
 	if err != nil {
-		return out, err
+		return out, llmrec.ContextReadMetrics{}, err
+	}
+	out, err = p.refreshOperationConstraints(ctx, out)
+	if err != nil {
+		return out, llmrec.ContextReadMetrics{}, err
 	}
 	out = refreshPlannerStateHistory(ctx, out)
 	out = boundRetrievalHistory(deduplicateToolHistory(out))
 	out, err = p.refreshFindingFeedback(ctx, out)
 	if err != nil {
-		return out, err
+		return out, llmrec.ContextReadMetrics{}, err
 	}
 	out = refreshWorkerTodos(ctx, out)
+	out, err = refreshExecutionCheckpoint(ctx, out)
+	if err != nil {
+		return out, llmrec.ContextReadMetrics{}, err
+	}
 	for _, r := range refs {
 		b := &out.Messages[r.m].Content[r.b]
 		if r.c < len(b.Content) && b.Content[r.c].Type == llm.BlockText {
 			b.Content[r.c].Text += r.suffix
 		}
 	}
-	return projectRequestBudget(ctx, out), nil
+	out, metrics := projectRequestBudgetAndMetrics(ctx, out)
+	return out, metrics, nil
 }

@@ -15,7 +15,7 @@ func assetStructuredTool(name string) bool {
 	case "context_search", "context_get", "asset_search", "asset_get", "insert_assets", "list_assets", "list_untested_assets", "graph_overview", "node_detail", "expand_digest", "expand_index", "list_findings", "list_facts", "get_worker_output", "get_worker_trace", "list_worker_traces", "search_all_worker_traces":
 		return true
 	}
-	return false
+	return retiredRetrievalKind(name) != "" && retiredRetrievalKind(name) != "traffic"
 }
 
 // Deferred dispatch has the target's result and invocation id, but its outer

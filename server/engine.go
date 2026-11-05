@@ -18,6 +18,7 @@ import (
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
 	"github.com/neouks/series/intercept"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // isFKViolation reports whether err is a Postgres foreign-key violation (SQLSTATE
@@ -81,7 +82,7 @@ var errWorkControlConflict = errors.New("work control conflict")
 // In particular, a quota error after partial streaming advances the task cursor
 // for the next LLM call but must not replay this whole intent on the backup.
 func retryableWorkerModelError(reason harness.TerminalReason, err error) bool {
-	return reason == harness.ReasonModelError && !isTaskLLMRuntimeError(err)
+	return reason == harness.ReasonModelError && !isTaskLLMRuntimeError(err) && !runtimebudget.StopsAutomaticReplay(err)
 }
 
 // Engine drives the event-driven exploration loop with real LLM agents
@@ -97,15 +98,16 @@ type Engine struct {
 
 	bc *Broadcaster // live activity pub/sub (SSE)
 
-	mu       sync.RWMutex
-	planner  *agent.Planner
-	worker   *agent.Worker
-	started  sync.Map // taskID -> bool, so Run is idempotent per task
-	lastAct  sync.Map // taskID -> int64 unix, last planner/worker activity (heartbeat)
-	llmCalls sync.Map // taskID -> *int64, actual planner/worker/main-agent LLM calls
-	paused   sync.Map // taskID -> bool, user-paused (planner + workers idle but loops alive)
-	deleting sync.Map // taskID -> bool, delete barrier (no new task-owned writes)
-	dropCnt  sync.Map // taskID -> *int64, running count of dropped (unpersistable) activity records
+	mu         sync.RWMutex
+	planner    *agent.Planner
+	worker     *agent.Worker
+	workerGate *runtimebudget.Gate // nil uses the process-wide execution budget
+	started    sync.Map            // taskID -> bool, so Run is idempotent per task
+	lastAct    sync.Map            // taskID -> int64 unix, last planner/worker activity (heartbeat)
+	llmCalls   sync.Map            // taskID -> *int64, actual planner/worker/main-agent LLM calls
+	paused     sync.Map            // taskID -> bool, user-paused (planner + workers idle but loops alive)
+	deleting   sync.Map            // taskID -> bool, delete barrier (no new task-owned writes)
+	dropCnt    sync.Map            // taskID -> *int64, running count of dropped (unpersistable) activity records
 
 	// deleteMu makes installing the delete barrier atomic with registering a new
 	// task operation. Once BeginDelete returns, every admitted writer is reflected
@@ -793,7 +795,7 @@ func (e *Engine) Mode() string {
 // but no-op until an LLM is configured (so a task created while idle picks up
 // automatically once LLM is set from the UI).
 func (e *Engine) Run(ctx context.Context, t *Task) {
-	workers := e.m.Workers()
+	workers := t.workerConcurrency(e.m)
 	e.deleteMu.RLock()
 	if e.IsDeleting(t.ID) {
 		e.deleteMu.RUnlock()
@@ -927,13 +929,17 @@ drain:
 	if src == "heartbeat" {
 		planner.MaintainGraph(ctx, t.Store)
 	}
-	if src == "heartbeat" && !t.hasPendingTriggers() {
-		revision, revisionErr := t.Store.BlackboardRevision()
-		previous, hasPrevious := e.plannerRevision.Load(t.ID)
-		if revisionErr == nil && hasPrevious && previous.(string) == revision {
-			log.Printf("[planner] task %s 心跳跳过：黑板无变化", t.ID)
-			return
+	snapshot, err := t.Store.PlannerEventSnapshot(ctx)
+	if err != nil {
+		log.Printf("[planner] task %s 读取变动水位失败: %v", t.ID, err)
+		return
+	}
+	if src == "heartbeat" && !t.hasPendingTriggers() && !snapshot.Pending() {
+		log.Printf("[planner] task %s 心跳跳过：黑板无变化", t.ID)
+		if _, err := t.Store.PrunePlannerEvents(ctx, 1024); err != nil {
+			log.Printf("[planner] task %s 清理已确认变动元数据失败: %v", t.ID, err)
 		}
+		return
 	}
 	if !e.beginTaskOperation(t.ID) {
 		return
@@ -963,22 +969,32 @@ drain:
 	// coalesces a burst; empty for time/heartbeat wakes).
 	triggers := t.drainTriggers()
 	taskIDInt, _ := strconv.ParseInt(t.ID, 10, 64)
-	// Store only the revision observed before this call. Recording the post-call
-	// revision could swallow an async asset mutation that happened while the
-	// Planner was running even though that request never saw the mutation.
-	observedRevision, observedRevisionErr := t.Store.BlackboardRevision()
 	e.BeginLLMCall(t.ID)
 	planCtx := agent.WithRunInfo(ectx, agent.RunInfo{Trigger: src})
+	planCtx = agent.WithPlannerChangeSnapshot(planCtx, snapshot)
 	e.plannerActive.Store(t.ID, true)
 	met, reason, err := planner.Plan(planCtx, taskIDInt, e.m.assets, t.Guard, t.Store, t.Goal, triggers, emit)
 	e.plannerActive.Delete(t.ID)
 	t.wakeWorkers()
 	e.EndLLMCall(t.ID)
-	if ectx.Err() != nil {
+	if ectx.Err() != nil || err != nil {
+		if t.lifecycleSnapshot().ExecutionMode != db.ExecutionManual {
+			t.restorePlannerTriggers(triggers)
+		}
+	}
+	if ectx.Err() != nil || t.lifecycleSnapshot().ExecutionMode == db.ExecutionManual {
 		return // Cancelled rounds cannot finish the task or update its planning revision.
 	}
-	if err == nil && observedRevisionErr == nil {
-		e.plannerRevision.Store(t.ID, observedRevision)
+	if err == nil {
+		if ackErr := t.Store.AcknowledgePlannerEvents(ectx, snapshot); ackErr != nil {
+			t.restorePlannerTriggers(triggers)
+			log.Printf("[planner] task %s 确认变动水位失败: %v", t.ID, ackErr)
+			return
+		}
+		e.plannerRevision.Store(t.ID, snapshot.GraphRevision)
+		if _, pruneErr := t.Store.PrunePlannerEvents(ectx, 256); pruneErr != nil {
+			log.Printf("[planner] task %s 清理已确认变动元数据失败: %v", t.ID, pruneErr)
+		}
 	}
 	switch {
 	case err != nil && ectx.Err() == nil:
@@ -1096,12 +1112,27 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 // runIntent. Returns false when nothing was claimable. The pool worker loop is its
 // only caller.
 func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker *agent.Worker) bool {
+	waitCtx, cancel := e.workerWaitContext(ctx, t)
+	defer cancel()
+	permit, err := e.acquireWorker(waitCtx, t)
+	if err != nil {
+		return false
+	}
+	defer permit.Release()
+	// Configuration can change while this loop waits for host resources. Resolve
+	// again before claiming, including an authoritative disabled/exhausted result.
+	if permit.WasQueued() || worker == nil {
+		_, worker = e.snapshotFor(t)
+	}
+	if worker == nil {
+		return false
+	}
 	intent := e.claimNext(t, name)
 	if intent == nil {
 		return false
 	}
 	log.Printf("[worker %s] task %s 领取意图 #%d", name, t.ID, intent.ID)
-	return e.runIntent(ctx, t, name, worker, intent, "", "")
+	return e.runIntent(ctx, t, name, worker, intent, "", "", permit)
 }
 
 // runIntent executes and fully settles one already-claimed (state=running) intent.
@@ -1112,7 +1143,40 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 // transcript marker that dedups re-injection across model_error retries. The caller
 // must already hold one task-operation admission for the whole sequence so a delete
 // cannot observe quiescence between the LLM return and the final DB writes.
-func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *agent.Worker, intent *db.Node, requestID, message string) bool {
+func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *agent.Worker, intent *db.Node, requestID, message string, reservation ...*runtimebudget.Permit) bool {
+	var permit *runtimebudget.Permit
+	if len(reservation) > 0 {
+		permit = reservation[0]
+	}
+	if permit == nil {
+		waitCtx, cancel := e.workerWaitContext(ctx, t)
+		var err error
+		permit, err = e.acquireWorker(waitCtx, t)
+		cancel()
+		if err != nil {
+			state := "open"
+			if message != "" {
+				state = "paused"
+			}
+			if stateErr := transitionIntentState(t.Store, intent.ID, "running", state); stateErr != nil {
+				log.Printf("[worker-admission] task=%s settlement_error=%v", t.ID, stateErr)
+			}
+			return true
+		}
+	}
+	defer permit.Release()
+	// A supplied reservation is still checked here: it may have been canceled
+	// between claim and entry, or a future entry path may supply a queued permit.
+	if err := permit.Wait(ctx); err != nil {
+		state := "open"
+		if message != "" {
+			state = "paused"
+		}
+		if stateErr := transitionIntentState(t.Store, intent.ID, "running", state); stateErr != nil {
+			log.Printf("[worker-admission] task=%s settlement_error=%v", t.ID, stateErr)
+		}
+		return true
+	}
 	// The detached human-message path also enters here, so repeat the admission
 	// check immediately before any task clock or LLM accounting is started.
 	if e.m.assets != nil {
@@ -1338,16 +1402,40 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 // itself (never through 'open'), so the pool, which only claims 'open', can never
 // race it; the "at most one run per intent" invariant still holds because winning
 // the CAS is the sole entry and work[intentID] was cleared when the pause settled.
-// Because it does not compete for a frontier slot, a user message continues the
-// worker immediately even when all pool slots are busy (mirroring how the
-// main-agent chat handler starts its run directly). The spawned goroutine owns one
+// It shares the pool's task/global execution budget. Waiting belongs to requestCtx,
+// is finite and cancellable, and changes no intent state. After grant, the spawned goroutine owns one
 // task-operation admission for the whole run and roots its context at ctx (pass the
 // server root, never the HTTP request, so a disconnect cannot strand the run while
 // task pause/delete/shutdown still stops it). Returns an error if the run could not
 // be started; the intent is left untouched in that case.
-func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64, requestID, message, agentMessage string) error {
+func (e *Engine) runDetachedIntent(ctx, requestCtx context.Context, t *Task, intentID int64, requestID, message, agentMessage string) error {
+	waitCtx, cancel := e.workerWaitContext(ctx, t)
+	defer cancel()
+	waitCtx, stopWait := context.WithTimeout(waitCtx, workerAdmissionWait)
+	defer stopWait()
+	stopRequest := context.AfterFunc(requestCtx, stopWait)
+	defer stopRequest()
+	if err := requestCtx.Err(); err != nil {
+		return err
+	}
+	permit, err := e.acquireWorker(waitCtx, t)
+	if err != nil {
+		return fmt.Errorf("等待 Worker 执行资源失败: %w", err)
+	}
+	owned := true
+	defer func() {
+		if owned {
+			permit.Release()
+		}
+	}()
 	t.workerControlMu.Lock()
 	defer t.workerControlMu.Unlock()
+	if err := waitCtx.Err(); err != nil {
+		return err
+	}
+	if err := requestCtx.Err(); err != nil {
+		return err
+	}
 	lifecycle := t.lifecycleSnapshot()
 	if e.IsPaused(t.ID) || lifecycle.Paused || lifecycle.Queued || isTerminalStatus(lifecycle.Status) || e.isSettling(t.ID) {
 		return fmt.Errorf("%w: 当前任务状态不允许恢复 Worker", db.ErrIntentStateConflict)
@@ -1385,6 +1473,12 @@ func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64,
 			return accessErr
 		}
 	}
+	if err := waitCtx.Err(); err != nil {
+		return err
+	}
+	if err := requestCtx.Err(); err != nil {
+		return err
+	}
 	changed, err := t.Store.ClaimPausedIntentByUser(intentID)
 	if err != nil {
 		return err
@@ -1400,9 +1494,10 @@ func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64,
 	uid := intentID
 	e.emitActivity(t, db.Activity{NodeID: &uid, Worker: "user", Kind: "user", Summary: message, Detail: message})
 	release = false // ownership of the admission passes to the goroutine
+	owned = false
 	go func() {
 		defer e.decInflight(t.ID)
-		e.runIntent(ctx, t, "chat", worker, node, requestID, agentMessage)
+		e.runIntent(ctx, t, "chat", worker, node, requestID, agentMessage, permit)
 	}()
 	return nil
 }
@@ -1433,7 +1528,8 @@ func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
 func (e *Engine) claimNext(t *Task, name string) *db.Node {
 	t.workerControlMu.Lock()
 	defer t.workerControlMu.Unlock()
-	if e.IsPaused(t.ID) || isTerminalStatus(t.lifecycleSnapshot().Status) {
+	state := t.lifecycleSnapshot()
+	if e.IsPaused(t.ID) || state.Paused || state.Queued || isTerminalStatus(state.Status) || e.IsDeleting(t.ID) || e.isSettling(t.ID) {
 		return nil
 	}
 	node, err := t.Store.ClaimNextWorker(name, func(in *db.Node) bool {

@@ -126,7 +126,7 @@ func querySignature(v any) string {
 func (t *ToolSet) contextSearch() actool.CoreTool {
 	return readTool("context_search", "按类型检索授权可见的任务上下文摘要和正文，返回命中片段、match_offset及node:ID/activity:ID；read可直接传给context_get，从命中附近读取。仅组合types枚举允许的类型；省略时按当前任务范围的默认类型查询，见types说明。activity只含Worker执行记录，须获授权且显式选择，可混合查询；混合结果按登记时间倒序，单类按ID倒序。默认10条、最多50条，输出预算可能缩小页长；has_more表示还有未展示结果，按需收窄或用next_cursor续页。本任务省略task_id，资产筛选用单个asset_id，不用dsl或asset_ids。", obj(map[string]any{
 		"task_id": contextTaskSchema(), "types": map[string]any{"type": "array", "description": "选择当前角色可用类型；省略时从 fact/finding/intent 中取有权限的类型，activity须显式选择", "items": map[string]any{"type": "string", "enum": ContextTypes}},
-		"q": str("不区分大小写的字面关键词，最多200字符；查摘要及正文（漏洞含报告），空值列出记录，不支持正则"), "asset_id": idp("单个资产ID，不是node引用；多资产可分次按需查"), "intent_id": idp("意图节点ID：查询该意图及其产出；activity查询该Worker记录"), "state": str("节点状态；activity按所属意图状态筛选，如open/running/done/blocked/exhausted/stopped；跨状态查重显式传空字符串，覆盖可能配置的default；省略使用default（无default时不筛选）"), "severity": str("payload.severity精确筛选，如critical/high/medium/low；其他不含该字段的记录也被排除"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("保留原查询条件，传入next_cursor；改变筛选条件时省略cursor开始新查询"),
+		"q": str("不区分大小写的字面关键词，最多200字符；查摘要及正文（漏洞含报告、现场复现步骤），空值列出记录，不支持正则"), "asset_id": idp("单个资产ID，不是node引用；多资产可分次按需查"), "intent_id": idp("意图节点ID：查询该意图及其产出；activity查询该Worker记录"), "state": str("节点状态；activity按所属意图状态筛选，如open/running/done/blocked/exhausted/stopped；跨状态查重显式传空字符串，覆盖可能配置的default；省略使用default（无default时不筛选）"), "severity": str("payload.severity精确筛选，如critical/high/medium/low；其他不含该字段的记录也被排除"), "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 10}, "cursor": str("保留原查询条件，传入next_cursor；改变筛选条件时省略cursor开始新查询"),
 	}), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a contextSearchInput
 		if err := decodeToolInput(raw, &a); err != nil {
@@ -256,7 +256,7 @@ func parseContextRef(ref string) (string, int64, error) {
 	return parts[0], id, nil
 }
 func (t *ToolSet) contextGet() actool.CoreTool {
-	item := obj(map[string]any{"ref": str("node:探索节点ID 或 activity:活动ID；Planner还可用planner_state:当前任务ID分页读完整待办；不能使用独立finding_id或资产ID"), "view": map[string]any{"type": "string", "description": "默认detail；output/parents仅意图节点，members仅摘要节点；activity仅detail", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("detail的JSON Pointer；节点从payload根取，如/evidence、/report；/asset_ids分页读当前节点及祖先的资产ID；activity可取/detail或/summary；省略先看字段目录"), "index": intp("detail集合的next_index，默认0"), "offset": intp("detail/output文本的next_offset，按Unicode字符计，默认0"), "before": intp("members/parents的next_before；不能与field/index/offset组合"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"}}, "ref")
+	item := obj(map[string]any{"ref": str("node:探索节点ID 或 activity:活动ID；Planner/Worker还可用checkpoint:current读取自身检查点；Planner还可用planner_state:当前任务ID分页读完整待办、planner_changes:当前任务ID分页读本轮变动；不能使用独立finding_id或资产ID"), "view": map[string]any{"type": "string", "description": "默认detail；output/parents仅意图节点，members仅摘要节点；activity仅detail", "enum": []string{"detail", "output", "members", "parents"}}, "field": str("detail的JSON Pointer；节点从payload根取，如/evidence、/report；/asset_ids分页读当前节点及祖先的资产ID；activity可取/detail或/summary；省略先看字段目录；节点结果的source_stamp用于检查点来源版本，不是权限凭证"), "index": intp("detail集合的next_index，默认0"), "offset": intp("detail/output文本的next_offset，按Unicode字符计，默认0"), "before": intp("members/parents或planner_changes的续页游标，使用结果next.items中的before；不能与field/index/offset组合"), "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "description": "该项正文上限；仍受顶层总预算和工具输出上限约束"}}, "ref")
 	return readTool("context_get", "批量读取1..5个引用；view选择正文、意图输出、上游事实或摘要成员。每项独立返回错误和可直接调用的next；output区分最终结果与中途进度。顶层max_chars为总预算（默认8000、最多24000），各项均分，每项max_chars只能进一步收紧；工具输出上限仍生效。", obj(map[string]any{"task_id": contextTaskSchema(), "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 5, "items": item}, "max_chars": map[string]any{"type": "integer", "minimum": 1, "maximum": 24000, "default": 8000}}, "items"), func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 		var a struct {
 			TaskID   contextTaskID `json:"task_id"`
@@ -301,6 +301,12 @@ func (t *ToolSet) readContextItem(ctx context.Context, task string, item context
 	}
 	if strings.HasPrefix(item.Ref, "planner_state:") {
 		return t.readPlannerState(ctx, task, item, budget)
+	}
+	if strings.HasPrefix(item.Ref, "planner_changes:") {
+		return t.readPlannerChanges(ctx, task, item, budget)
+	}
+	if strings.HasPrefix(item.Ref, "checkpoint:") {
+		return t.readExecutionCheckpoint(ctx, task, item, budget)
 	}
 	kind, id, e := parseContextRef(item.Ref)
 	if e != nil {

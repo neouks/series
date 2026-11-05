@@ -1,13 +1,34 @@
 package db
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
+
+// GetBoolContext distinguishes an absent setting from a failed read. Callers
+// enforcing runtime policy must not turn database errors into default access.
+func (d *DB) GetBoolContext(ctx context.Context, key string, def bool) (bool, error) {
+	var value string
+	err := d.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return def, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return value == "true" || value == "1", nil
+}
 
 // Settings is a tiny key-value store for global app config the UI toggles at
 // runtime (e.g. traffic_capture). Missing keys fall back to caller defaults.
 
 // GetSetting returns the stored value and ok=false when the key is unset.
 func (d *DB) GetSetting(key string) (value string, ok bool, err error) {
-	err = d.QueryRow(`SELECT value FROM settings WHERE key=$1`, key).Scan(&value)
+	return d.GetSettingContext(context.Background(), key)
+}
+
+func (d *DB) GetSettingContext(ctx context.Context, key string) (value string, ok bool, err error) {
+	err = d.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
@@ -19,7 +40,11 @@ func (d *DB) GetSetting(key string) (value string, ok bool, err error) {
 
 // SetSetting upserts a setting value.
 func (d *DB) SetSetting(key, value string) error {
-	_, err := d.Exec(`
+	return d.SetSettingContext(context.Background(), key, value)
+}
+
+func (d *DB) SetSettingContext(ctx context.Context, key, value string) error {
+	_, err := d.ExecContext(ctx, `
 INSERT INTO settings(key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, key, value)
 	return err

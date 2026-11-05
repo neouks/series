@@ -60,7 +60,7 @@ func (m *MainAgent) maxTokens() int {
 }
 
 func NewMainAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *MainAgent {
-	return &MainAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns}
+	return &MainAgent{prov: WithModelRequestScope(prov), model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns}
 }
 
 func (m *MainAgent) SetCompactionWindowResolver(fn func() int) { m.windowFn = fn }
@@ -225,11 +225,15 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	// across turns (each Chat is a fresh session; without this it can't see earlier
 	// messages). First turn: no file yet → Resume loads nothing and proceeds.
 	if m.tx != nil {
-		_ = s.Resume(opts.SessionID)
+		if err := restoreConversationContext(ctx, s, opts.SessionID); err != nil {
+			return "", err
+		}
 	}
 	// C2: this session is fresh each turn; re-unlock skill-gated MCPs from prior
 	// Skill() calls in the reloaded history so revealed tools stay callable.
-	seedUnlockFromHistory(s.Messages(), def.UnlockSkill)
+	if err = seedSessionUnlock(ctx, s, def.UnlockSkill); err != nil {
+		return "", err
+	}
 	text, _, err := captureRunSession(ctx, s, message, func(r db.Activity) {
 		if emit != nil {
 			r.Worker = "mainagent"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -14,81 +15,134 @@ import (
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/neouks/series/db"
+	"github.com/neouks/series/runtimebudget"
 )
 
-var graphSummarySlots = make(chan struct{}, 2)
+var graphMaintenanceSlots, _ = runtimebudget.New(runtimebudget.Limits{Concurrency: 2, Queue: 256})
+var graphSummarySlots, _ = runtimebudget.New(runtimebudget.Limits{Concurrency: 2, Queue: 256})
 var graphSummaryTasks = struct {
 	sync.Mutex
 	running map[int64]bool
-	lastRun map[int64]time.Time
-}{running: map[int64]bool{}, lastRun: map[int64]time.Time{}}
+}{running: map[int64]bool{}}
+
+const graphMaintenancePages = 32
+const graphMaintenanceTime = 2 * time.Second
 
 // Schedule is also called by the code-only heartbeat, independently of whether
 // a Planner model round is necessary. There are no database reads on this path.
 func (c *Compactor) Schedule(ctx context.Context, ts *db.ExplorationStore) {
-	if c == nil || c.prov == nil || ts == nil || !c.tryStart(ts.ID()) {
+	if c == nil || ts == nil || ctx.Err() != nil || !c.tryStart(ts.ID()) {
 		return
 	}
 	graphSummaryTasks.Lock()
-	if graphSummaryTasks.running[ts.ID()] || time.Since(graphSummaryTasks.lastRun[ts.ID()]) < c.cooldown {
+	if graphSummaryTasks.running[ts.ID()] {
 		graphSummaryTasks.Unlock()
 		c.finish(ts.ID())
 		return
 	}
-	select {
-	case graphSummarySlots <- struct{}{}:
-		graphSummaryTasks.running[ts.ID()] = true
-		graphSummaryTasks.Unlock()
-	default:
+	maintenance, err := graphMaintenanceSlots.Reserve(fmt.Sprint(ts.ID()))
+	if err != nil {
 		graphSummaryTasks.Unlock()
 		c.finish(ts.ID())
 		return
 	}
+	graphSummaryTasks.running[ts.ID()] = true
+	graphSummaryTasks.Unlock()
 	go func() {
+		defer maintenance.Release()
 		defer func() {
 			graphSummaryTasks.Lock()
 			delete(graphSummaryTasks.running, ts.ID())
-			graphSummaryTasks.lastRun[ts.ID()] = time.Now()
-			if len(graphSummaryTasks.lastRun) > 2048 {
-				for id, at := range graphSummaryTasks.lastRun {
-					if time.Since(at) > 10*time.Minute {
-						delete(graphSummaryTasks.lastRun, id)
-					}
-				}
-			}
 			graphSummaryTasks.Unlock()
-			<-graphSummarySlots
 			c.finish(ts.ID())
 		}()
-		runCtx, err := compactorRunContext(ctx, ts)
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer cancel()
+		runCtx, err := compactorRunContext(bg, ts)
 		if err != nil {
 			return
 		}
-		bg, cancel := context.WithTimeout(context.WithoutCancel(runCtx), 2*time.Minute)
-		defer cancel()
-		if err = c.incremental(bg, ts); err != nil && bg.Err() == nil {
+		bg = runCtx
+		if err = maintenance.Wait(bg); err != nil {
+			return
+		}
+		if err = c.incremental(bg, ts, maintenance.Release); err != nil && bg.Err() == nil {
 			log.Printf("[graph-maintenance] exploration=%d error=%v", ts.ID(), err)
 		}
 	}()
 }
 
-func (c *Compactor) incremental(ctx context.Context, ts *db.ExplorationStore) error {
+func (c *Compactor) incremental(ctx context.Context, ts *db.ExplorationStore, maintenanceDone func()) error {
+	ready, err := c.maintainPageBatch(ctx, ts)
+	// Never hold metadata capacity while queuing for the model. Release is
+	// idempotent, including errors or the outer job's deferred cleanup.
+	if maintenanceDone != nil {
+		maintenanceDone()
+	}
+	if err != nil || !ready || c.prov == nil {
+		return err
+	}
+	// Probe only one record before waiting; queued jobs do not retain a whole
+	// candidate page, and the actual page is refreshed after model admission.
+	rows, err := ts.GraphCandidates(ctx, 1)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return ts.AdvanceSummaryCursor(ctx, 0)
+	}
+	summary, err := graphSummarySlots.Reserve(fmt.Sprint(ts.ID()))
+	if err != nil {
+		return err
+	}
+	defer summary.Release()
+	if err = summary.Wait(ctx); err != nil {
+		return err
+	}
+	rows, err = ts.GraphCandidates(ctx, 128)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	allowed, err := ts.TryGraphSummary(ctx, c.cooldown)
+	if err != nil || !allowed {
+		return err
+	}
+	return c.summarizePage(ctx, ts, rows)
+}
+
+// Small cooperative batches give other tasks a turn. Incomplete frontiers live
+// in PostgreSQL; a busy graph does not occupy a model slot or allocate its body.
+func (c *Compactor) maintainPageBatch(ctx context.Context, ts *db.ExplorationStore) (ready bool, err error) {
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, graphMaintenanceTime)
+	defer func() {
+		// A consumed maintenance slice yields, it is not an authorization error
+		// or a model retry. Outer cancellation and real database errors propagate.
+		if ctx.Err() == context.DeadlineExceeded && parent.Err() == nil {
+			ready = false
+			if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				err = nil
+			}
+		}
+		cancel()
+	}()
 	started := time.Now()
 	bootstrapPages, repairPages := 0, 0
 	// Initialization and dirty-frontier repair have persistent cursors. They may
 	// span jobs/restarts; no incomplete region becomes eligible for summarization.
-	for ctx.Err() == nil {
+	readyToSummarize := false
+	for page := 0; page < graphMaintenancePages && ctx.Err() == nil; page++ {
 		allowed, err := ts.GraphSummaryAllowed(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !allowed {
-			return nil
+			return false, nil
 		}
 		ready, err := ts.BootstrapGraphProjection(ctx)
 		bootstrapPages++
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !ready {
 			continue
@@ -96,31 +150,27 @@ func (c *Compactor) incremental(ctx context.Context, ts *db.ExplorationStore) er
 		n, err := ts.MaintainGraphPage(ctx)
 		repairPages++
 		if err != nil {
-			return err
+			return false, err
 		}
 		if n == 0 {
+			readyToSummarize = true
 			break
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	log.Printf("[graph-maintenance] exploration=%d bootstrap_pages=%d repair_pages=%d elapsed_ms=%d", ts.ID(), bootstrapPages, repairPages, time.Since(started).Milliseconds())
+	if !readyToSummarize {
+		return false, nil
+	}
 	if err := ts.RetireStaleGraphDigests(ctx); err != nil {
-		return err
+		return false, err
 	}
-	rows, err := ts.GraphCandidates(ctx, 128)
-	if err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		return ts.AdvanceSummaryCursor(ctx, 0)
-	}
-	// Advance before model calls, so a malformed summary cannot starve later
-	// groups. Rejected/failed sources are retried only on a later cursor sweep.
-	if err = ts.AdvanceSummaryCursor(ctx, rows[len(rows)-1].ID); err != nil {
-		return err
-	}
+	return true, nil
+}
+
+func (c *Compactor) summarizePage(ctx context.Context, ts *db.ExplorationStore, rows []db.GraphCandidate) error {
 	candidates := map[int64]bool{}
 	ids := []int64{}
 	byID := map[int64]db.GraphCandidate{}
@@ -158,23 +208,45 @@ func (c *Compactor) incremental(ctx context.Context, ts *db.ExplorationStore) er
 		}
 	}
 	sort.Strings(keys)
-	attempts := 0
+	parts := [][]db.GraphCandidate{}
+	examined := map[int64]bool{}
 	for _, key := range keys {
 		group := groups[key]
-		for len(group) >= 2 && attempts < 4 {
+		for len(group) >= 2 && len(parts) < 4 {
 			n := min(32, len(group))
 			part := group[:n]
 			group = group[n:]
-			attempts++
-			if err = c.foldIncremental(ctx, ts, part); err != nil {
-				log.Printf("[graph-summary] exploration=%d members=%d rejected=%v", ts.ID(), len(part), err)
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
+			parts = append(parts, part)
+			for _, row := range part {
+				examined[row.ID] = true
 			}
 		}
-		if attempts >= 4 {
-			break
+		// A singleton was inspected but cannot form a bounded summary. It must
+		// not pin the cursor; it remains intact for a later grouping/sweep.
+		if len(group) == 1 {
+			examined[group[0].ID] = true
+		}
+	}
+	// Group IDs may interleave. Never jump over the first unplanned member just
+	// because some later IDs belong to one of this job's four selected blocks.
+	cursor := rows[len(rows)-1].ID
+	for _, row := range rows {
+		if !examined[row.ID] {
+			cursor = min(cursor, row.ID-1)
+		}
+	}
+	// Advance before generation so malformed output cannot permanently pin a
+	// group. Unplanned groups remain on the next page; failed planned records
+	// remain original data and may be retried on a later sweep after cooldown.
+	if err = ts.AdvanceSummaryCursor(ctx, cursor); err != nil {
+		return err
+	}
+	for _, part := range parts {
+		if err = c.foldIncremental(ctx, ts, part); err != nil {
+			log.Printf("[graph-summary] exploration=%d members=%d rejected=%v", ts.ID(), len(part), err)
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 	return nil
@@ -191,6 +263,11 @@ type graphSummaryOutput struct {
 
 func validateGraphSummary(raw string, sources []db.GraphCandidate) (graphSummaryOutput, error) {
 	var out graphSummaryOutput
+	// Enforce local decoding bounds even if a gateway ignores MaxTokens. This
+	// covers 32*800 fully JSON-escaped characters plus bounded source references.
+	if len(raw) > 256*1024 {
+		return out, fmt.Errorf("summary JSON exceeds byte budget")
+	}
 	if err := decodeToolInput(json.RawMessage(raw), &out); err != nil {
 		return out, fmt.Errorf("invalid summary JSON")
 	}
@@ -202,7 +279,7 @@ func validateGraphSummary(raw string, sources []db.GraphCandidate) (graphSummary
 		valid[s.ID] = s
 	}
 	for _, it := range out.Items {
-		if strings.TrimSpace(it.Text) == "" || utf8.RuneCountInString(it.Text) > 800 || len(it.Refs) == 0 {
+		if strings.TrimSpace(it.Text) == "" || utf8.RuneCountInString(it.Text) > 800 || len(it.Refs) == 0 || len(it.Refs) > 40 {
 			return out, fmt.Errorf("invalid summary statement")
 		}
 		if it.Confidence != "observed" && it.Confidence != "inferred" && it.Confidence != "unverified" && it.Confidence != "failed" {
@@ -248,14 +325,17 @@ func (c *Compactor) foldIncremental(ctx context.Context, ts *db.ExplorationStore
 		allIDs = append(allIDs, n.ID)
 	}
 	authorized := func() error {
+		var states map[int64]string
+		var e error
 		if c.assets == nil {
-			return nil
+			states, e = ts.GraphSourceApprovalStates(ctx, allIDs)
+		} else {
+			var taskID int64
+			taskID, e = ts.TaskIDContext(ctx)
+			if e == nil {
+				states, e = c.assets.WithReadContext(ctx).TaskNodeApprovalStates(taskID, allIDs)
+			}
 		}
-		taskID, e := ts.TaskID()
-		if e != nil {
-			return e
-		}
-		states, e := c.assets.WithReadContext(ctx).TaskNodeApprovalStates(taskID, allIDs)
 		if e != nil {
 			return e
 		}
@@ -309,10 +389,25 @@ func (c *Compactor) foldIncremental(ctx context.Context, ts *db.ExplorationStore
 	}
 	// Preparation can span several reads; lifecycle changes must stop the next
 	// model call, not merely reject publication after spending the tokens.
+	// Take the ordinary model permit before the final checks as well: waiting
+	// behind Planner/Worker traffic must not preserve pre-wait authorization.
+	ctx, release, err := acquireModelRequest(ctx, runtimebudget.ModelGate(), false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if allowed, err = ts.GraphSummaryAllowed(ctx); err != nil {
 		return err
 	} else if !allowed {
 		return fmt.Errorf("task no longer permits summary generation")
+	}
+	if err = authorized(); err != nil {
+		return err
+	}
+	if current, e := ts.GraphSourcesCurrent(ctx, versions, fingerprints); e != nil {
+		return e
+	} else if !current {
+		return fmt.Errorf("summary source changed before model call")
 	}
 	started := time.Now()
 	msg, _, usage, err := c.prov.Complete(ctx, llm.CompletionRequest{System: []string{incrementalSummaryPrompt}, Messages: []llm.Message{llm.UserText(string(encoded))}, MaxTokens: 1500, Thinking: "disabled"})

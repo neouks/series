@@ -12,19 +12,25 @@ import (
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // newSession integrates SERIES policy through public SDK extension points only.
 // The official dispatcher calls targets directly, so our outer hook must resolve
 // their identity before applying business policy. No SDK source is replaced.
-func newSession(opts agentcore.Options) (*agentcore.Session, func(), error) {
+func newSession(opts agentcore.Options) (conversationSession, func(), error) {
+	configureWorkerMemory(&opts)
 	// An empty catalog is authoritative. The SDK interprets nil as a request
 	// for its default filesystem/Bash tools, which would bypass role bindings.
 	if opts.Tools == nil {
 		opts.Tools = []actool.CoreTool{}
 	}
 	cleanup := func() {}
-	if toolsNeedTaskManager(opts.Tools) && !actool.InteractiveShellDisabled() &&
+	var ptys *ptyOwner
+	if hasOwnedPTYTools(opts.Tools) {
+		ptys = newPTYOwner()
+	}
+	if ptys == nil && toolsNeedTaskManager(opts.Tools) && !actool.InteractiveShellDisabled() &&
 		(opts.DisableBackgroundTasks || actool.BackgroundTasksDisabled()) {
 		manager, err := actool.NewManager(opts.SessionID)
 		if err != nil {
@@ -44,10 +50,131 @@ func newSession(opts agentcore.Options) (*agentcore.Session, func(), error) {
 		opts.UnlockSet = actool.NewUnlockSet(opts.DeferredTools...)
 	}
 	policy := newDispatchHooks(opts)
+	policy.ptys = ptys
+	// Only supply recheck context here: replacing Call would bypass the existing
+	// binding/default/usage decorators. Deferred targets use this registry too.
+	opts.Tools = append([]actool.CoreTool{}, opts.Tools...)
+	for i, tool := range opts.Tools {
+		opts.Tools[i] = &processContextTool{CoreTool: tool, hooks: policy, background: !opts.DisableBackgroundTasks && !actool.BackgroundTasksDisabled()}
+		policy.tools[tool.Name()] = opts.Tools[i]
+	}
+	configureSmallWindowCompaction(&opts)
+	configureCompactionUsage(&opts)
 	policy.observeModelCalls(&opts)
 	opts.Hooks = policy
+	if opts.Transcript != nil || ptys != nil || (!opts.DisableBackgroundTasks && !actool.BackgroundTasksDisabled()) {
+		session, err := newHostedSession(opts, policy)
+		if err != nil {
+			if ptys != nil {
+				ptys.close()
+			}
+			cleanup()
+			return nil, func() {}, fmt.Errorf("session initialization: %w", err)
+		}
+		return session, func() { session.Close(); cleanup() }, nil
+	}
 	session := agentcore.NewSession(opts)
 	return session, func() { session.Close(); cleanup() }, nil
+}
+
+type processContextTool struct {
+	actool.CoreTool
+	hooks      *dispatchHooks
+	background bool
+	ptyOnce    sync.Once
+	ptySchema  map[string]any
+}
+
+func (t *processContextTool) interactiveSchema() map[string]any {
+	// Tools/configuration are resolved per run. Cache only on this immutable
+	// instance, never globally across roles, tasks or later settings changes.
+	t.ptyOnce.Do(func() { t.ptySchema = interactiveInputSchema(t.Name(), t.CoreTool.InputSchema()) })
+	return t.ptySchema
+}
+
+func (t *processContextTool) InputSchema() map[string]any {
+	if isInteractiveTool(t.Name()) {
+		return t.interactiveSchema()
+	}
+	schema := t.CoreTool.InputSchema()
+	if t.Name() != "Bash" || t.background {
+		return schema
+	}
+	// The official schema only knows the global switch, not the per-role
+	// session setting. Do not advertise an unavailable background execution path.
+	copy := make(map[string]any, len(schema))
+	for key, value := range schema {
+		copy[key] = value
+	}
+	if props, ok := schema["properties"].(map[string]any); ok {
+		p := make(map[string]any, len(props))
+		for key, value := range props {
+			if key != "run_in_background" {
+				p[key] = value
+			}
+		}
+		copy["properties"] = p
+	}
+	if raw, err := json.Marshal(schema["required"]); err == nil {
+		var required []string
+		if json.Unmarshal(raw, &required) == nil {
+			filtered := make([]string, 0, len(required))
+			for _, name := range required {
+				if name != "run_in_background" {
+					filtered = append(filtered, name)
+				}
+			}
+			if schema["required"] != nil {
+				copy["required"] = filtered
+			}
+		}
+	}
+	return copy
+}
+
+func (t *processContextTool) PrepareInput(input json.RawMessage) (json.RawMessage, error) {
+	resolved, err := PrepareToolInput(t.CoreTool, input)
+	if err == nil && isInteractiveTool(t.Name()) {
+		err = validateInteractiveBoundedInput(t.Name(), t.interactiveSchema(), resolved)
+	}
+	return resolved, err
+}
+func (t *processContextTool) AcceptsRawInput() bool {
+	if isInteractiveTool(t.Name()) {
+		return true // PrepareInput already validates the full schema and bounds.
+	}
+	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
+	return ok && raw.AcceptsRawInput()
+}
+func (t *processContextTool) Call(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+	if isInteractiveTool(t.Name()) {
+		if err := ctx.Err(); err != nil {
+			return actool.Errorf("interactive shell execution canceled: " + err.Error()), nil
+		}
+		// Keep the guard at the actual registry call too, including deferred calls.
+		// Preparation does not run approvals, metering or the underlying executor.
+		var err error
+		input, err = t.PrepareInput(input)
+		if err != nil {
+			return actool.Errorf("invalid interactive shell input: " + err.Error()), nil
+		}
+	}
+	check := processRecheck(func(checkCtx context.Context, name string, in []byte) string {
+		if policy, ok := t.hooks.inner.(interface {
+			RecheckToolInput(context.Context, string, []byte) string
+		}); ok {
+			return policy.RecheckToolInput(checkCtx, name, in)
+		}
+		if RunInfoFrom(checkCtx).TaskID > 0 {
+			return "queued task command has no trusted authorization recheck; not executed"
+		}
+		return ""
+	})
+	ctx = context.WithValue(ctx, processRecheckKey{}, check)
+	if t.hooks != nil && t.hooks.ptys != nil {
+		ctx = context.WithValue(ctx, ptyOwnerKey{}, t.hooks.ptys)
+	}
+	return t.CoreTool.Call(ctx, input, tc)
 }
 
 type interactiveTool struct {
@@ -116,6 +243,7 @@ func (t *interactiveTool) Call(ctx context.Context, input json.RawMessage, tc *a
 }
 
 type dispatchHooks struct {
+	ptys        *ptyOwner
 	inner       harness.HookRunner
 	tools       map[string]actool.CoreTool
 	deferred    map[string]bool
@@ -142,20 +270,20 @@ func (h *dispatchHooks) observeModelCalls(opts *agentcore.Options) {
 	}
 	if stream != nil {
 		opts.Deps.CallModel = func(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
-			return func(yield func(llm.StreamEvent, error) bool) {
-				h.observeTools(req.Tools)
-				for event, err := range stream(ctx, req) {
-					if !yield(event, err) {
-						return
-					}
-				}
-			}
+			h.observeTools(req.Tools)
+			return committedModelStream(ctx, req, stream)
 		}
 	}
 	if complete != nil {
 		opts.Deps.CallModelSync = func(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 			h.observeTools(req.Tools)
-			return complete(ctx, req)
+			callCtx, release, err := acquireModelRequest(ctx, runtimebudget.ModelGate(), false)
+			if err != nil {
+				return llm.Message{}, "", llm.Usage{}, err
+			}
+			defer release()
+			msg, stop, usage, err := complete(callCtx, req)
+			return msg, stop, usage, modelRequestError(callCtx, err)
 		}
 	}
 }
@@ -209,6 +337,9 @@ func (h *dispatchHooks) target(name string, input []byte) (string, json.RawMessa
 }
 
 func (h *dispatchHooks) PreToolUse(ctx context.Context, outer string, input []byte) (bool, string, []byte) {
+	if err := ctx.Err(); err != nil {
+		return true, "tool execution canceled: " + err.Error(), nil
+	}
 	name, params, err := h.target(outer, input)
 	if err != nil {
 		return true, err.Error(), nil

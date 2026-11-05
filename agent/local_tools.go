@@ -8,6 +8,6 @@ import actool "github.com/Autumn-27/norma/tool"
 func workerLocalTools() []actool.CoreTool {
 	return []actool.CoreTool{
 		actool.NewRead(), actool.NewWrite(), actool.NewEdit(), actool.NewMultiEdit(),
-		actool.NewLS(), actool.NewGlob(), actool.NewGrep(), actool.NewBash(),
+		actool.NewLS(), actool.NewGlob(), newAdmittedGrep(), newAdmittedBash(),
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
 	"github.com/neouks/series/intercept"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // chatGuard returns a guard wired with the manager's interceptor, used for chat
@@ -58,7 +59,7 @@ func reviewCompletion(ctx context.Context, prov llm.Provider, prompt string, inp
 	if err != nil {
 		return "", err
 	}
-	return streamCollectText(ctx, prov, prompt, string(user))
+	return streamCollectText(runtimebudget.WithModelPhase(ctx, "action_review"), prov, prompt, string(user))
 }
 
 // streamCollectText runs a single non-streaming-style completion (thinking off,

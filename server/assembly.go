@@ -260,7 +260,10 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 			return nil, fmt.Errorf("加载读取能力失败: %w", err)
 		}
 		searchRow := byKey["context_search"]
-		agent.SetTaskContextReadAccess(ctx, policy, searchRow != nil && searchRow.System && searchRow.Enabled && contains(searchRow.Agents, agentKey))
+		detailRow := byKey["context_get"]
+		agent.SetTaskContextReadAccess(ctx, policy,
+			searchRow != nil && searchRow.System && searchRow.Enabled && contains(searchRow.Agents, agentKey),
+			detailRow != nil && detailRow.System && detailRow.Enabled && contains(detailRow.Agents, agentKey))
 		runInfo := agent.RunInfoFrom(ctx)
 		resolve := func(t actool.CoreTool, row *db.Tool) actool.CoreTool {
 			var schema map[string]any
@@ -270,7 +273,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 			if row.System {
 				return applyContextPolicy(meterTool(agent.ResolveBuiltinTool(t, row.Description, schema), pg, row.Key, agentKey, runInfo), policy)
 			}
-			return meterTool(agent.DecorateTool(t, row.Description, schema), pg, row.Key, agentKey, runInfo)
+			return meterTool(decorateCustomTool(t, row, schema), pg, row.Key, agentKey, runInfo)
 		}
 		out := tools[:0:0]
 		taskReg := agent.TaskDomainToolsFrom(ctx)
@@ -344,7 +347,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 		// dangles when off. See docs/交互式shell设计.md §14.2.
 		if runtime.GOOS != "windows" && !actool.InteractiveShellDisabled() {
 			if a, err := pg.GetAgentByKey(agentKey); err == nil && a != nil && a.InteractiveShell {
-				out = append(out, actool.ShellSessionTools()...)
+				out = append(out, agent.ShellSessionTools()...)
 				for i, t := range out {
 					if t.Name() == "Bash" {
 						out[i] = agent.DecorateTool(t, t.Description()+bashInteractiveShellNote, t.InputSchema())

@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	TaskArchiveFormatVersion       = 3
+	TaskArchiveFormatVersion       = 6
 	TaskArchiveLegacyFormatVersion = 1
 	TaskArchiveLLMRecordsPath      = "database/llm_records.ndjson"
 )
@@ -130,8 +130,8 @@ type TaskArchivePage struct {
 }
 
 // TaskArchiveSnapshot is serialized into manifest.json inside the cold package.
-// Small tables remain JSON arrays in Tables. Large v2 tables are streamed to
-// package files listed in StreamedTables so their size is not bounded by memory.
+// Small tables remain JSON arrays in Tables. Versioned streamed sections live
+// in package files; planner state splits its growing JSON array into items.
 type TaskArchiveSnapshot struct {
 	FormatVersion     int                        `json:"format_version"`
 	CreatedAt         time.Time                  `json:"created_at"`
@@ -580,7 +580,7 @@ UNION SELECT value::bigint FROM finding_suppression_rules rule CROSS JOIN LATERA
 // writes are already quiescent at the server barrier; repeatable-read also keeps
 // the asset and accounting views mutually consistent during serialization.
 func (d *DB) SnapshotTaskArchive(taskID int64) (*TaskArchiveSnapshot, error) {
-	return d.snapshotTaskArchive(taskID, nil)
+	return d.snapshotTaskArchive(context.Background(), taskID, nil)
 }
 
 // SnapshotTaskArchiveWithLLMRecords streams the heavyweight record history to
@@ -590,20 +590,32 @@ func (d *DB) SnapshotTaskArchiveWithLLMRecords(taskID int64, llmRecords io.Write
 	if llmRecords == nil {
 		return nil, errors.New("nil LLM record archive writer")
 	}
-	return d.snapshotTaskArchive(taskID, llmRecords)
+	return d.snapshotTaskArchive(context.Background(), taskID, map[string]io.Writer{"llm_records": llmRecords})
 }
 
-func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchiveSnapshot, error) {
-	tx, err := d.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+// SnapshotTaskArchiveWithStreams keeps growing working state outside manifest.
+// All selected tables still come from one repeatable-read snapshot.
+func (d *DB) SnapshotTaskArchiveWithStreams(ctx context.Context, taskID int64, streams map[string]io.Writer) (*TaskArchiveSnapshot, error) {
+	for name, writer := range streams {
+		if _, ok := TaskArchiveStreamFiles()[name]; !ok || writer == nil {
+			return nil, fmt.Errorf("invalid archive stream writer %q", name)
+		}
+	}
+	return d.snapshotTaskArchive(ctx, taskID, streams)
+}
+
+func (d *DB) snapshotTaskArchive(ctx context.Context, taskID int64, streams map[string]io.Writer) (*TaskArchiveSnapshot, error) {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	if err := coordinateWithSchemaMigration(tx); err != nil {
+	queryContext := archiveContextQuery{ctx: ctx, tx: tx}
+	if err := coordinateWithSchemaMigrationContext(ctx, tx); err != nil {
 		return nil, err
 	}
 	var expID int64
-	if err := tx.QueryRow(`SELECT exploration_id FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).Scan(&expID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT exploration_id FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).Scan(&expID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrTaskArchiveNotFound
 		}
@@ -619,6 +631,7 @@ func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchi
 		{"explorations", `SELECT * FROM explorations WHERE id=$1`, []any{expID}},
 		{"deleted_workers", `SELECT * FROM deleted_workers WHERE exploration_id=$1 ORDER BY intent_id`, []any{expID}},
 		{"planner_working_state", `SELECT * FROM planner_working_state WHERE exploration_id=$1`, []any{expID}},
+		{"agent_execution_checkpoints", `SELECT * FROM agent_execution_checkpoints WHERE exploration_id=$1 ORDER BY role,intent_id`, []any{expID}},
 		{"exploration_nodes", `SELECT * FROM exploration_nodes WHERE exploration_id=$1 ORDER BY id`, []any{expID}},
 		{"exploration_edges", `SELECT * FROM exploration_edges WHERE exploration_id=$1 ORDER BY src_id,dst_id`, []any{expID}},
 		{"exploration_anchors", `SELECT anchor.* FROM exploration_anchors anchor JOIN exploration_nodes node ON node.id=anchor.node_id WHERE node.exploration_id=$1 ORDER BY node_id,asset_id`, []any{expID}},
@@ -652,17 +665,30 @@ func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchi
 	counts := make(map[string]int64, len(queries))
 	streamedTables := map[string]string{}
 	for _, query := range queries {
-		if query.name == "llm_records" && llmRecords != nil {
-			count, err := streamArchiveRows(tx, llmRecords, query.query, query.args...)
+		if writer := streams[query.name]; writer != nil {
+			var count int64
+			var err error
+			if query.name == "planner_working_state" {
+				count, err = streamPlannerWorkingState(ctx, tx, writer, expID)
+			} else if archiveDataStreamTable(query.name) {
+				count, err = streamArchiveDataRows(ctx, tx, writer, query.name, query.query, query.args...)
+			} else if query.name == "llm_records" {
+				// Existing recorder limits can produce a single legitimate row
+				// larger than the new working-state frame ceiling. Preserve the
+				// v2 record stream contract; do not make old archives unreadable.
+				count, err = streamArchiveRows(queryContext, writer, query.query, query.args...)
+			} else {
+				count, err = streamBoundedArchiveRows(ctx, tx, writer, query.query, query.args...)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("snapshot %s: %w", query.name, err)
 			}
 			tables[query.name] = json.RawMessage("[]")
 			counts[query.name] = count
-			streamedTables[query.name] = TaskArchiveLLMRecordsPath
+			streamedTables[query.name] = TaskArchiveStreamFiles()[query.name]
 			continue
 		}
-		raw, count, err := queryArchiveRows(tx, query.query, query.args...)
+		raw, count, err := queryArchiveRows(queryContext, query.query, query.args...)
 		if err != nil {
 			return nil, fmt.Errorf("snapshot %s: %w", query.name, err)
 		}
@@ -670,13 +696,13 @@ func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchi
 		counts[query.name] = count
 	}
 
-	assetIDs, exclusiveAssetIDs, hosts, exclusiveHosts, err := archiveAssetMetadata(tx, taskID, expID, tables["assets"])
+	assetIDs, exclusiveAssetIDs, hosts, exclusiveHosts, err := archiveAssetMetadata(queryContext, taskID, expID, tables["assets"])
 	if err != nil {
 		return nil, err
 	}
 	_ = assetIDs // retained in the assets table payload; only exclusive ids need a side channel.
 	var sources []int64
-	rows, err := tx.Query(`SELECT source_task_id FROM task_relations WHERE task_id=$1 ORDER BY created_at,source_task_id`, taskID)
+	rows, err := tx.QueryContext(ctx, `SELECT source_task_id FROM task_relations WHERE task_id=$1 ORDER BY created_at,source_task_id`, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -691,7 +717,7 @@ func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchi
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	stats, err := taskArchiveAggregates(tx, taskID, expID)
+	stats, err := taskArchiveAggregates(queryContext, taskID, expID)
 	if err != nil {
 		return nil, err
 	}
@@ -704,7 +730,7 @@ func (d *DB) snapshotTaskArchive(taskID int64, llmRecords io.Writer) (*TaskArchi
 	return snapshot, tx.Commit()
 }
 
-func archiveAssetMetadata(tx *sql.Tx, taskID, expID int64, assetRows json.RawMessage) ([]int64, []int64, []string, []string, error) {
+func archiveAssetMetadata(tx archiveSnapshotQueryer, taskID, expID int64, assetRows json.RawMessage) ([]int64, []int64, []string, []string, error) {
 	var rows []map[string]any
 	if err := json.Unmarshal(assetRows, &rows); err != nil {
 		return nil, nil, nil, nil, err
@@ -762,7 +788,7 @@ AND NOT EXISTS (
 	return assetIDs, exclusiveIDs, hosts, exclusiveHosts, nil
 }
 
-func taskArchiveAggregates(tx *sql.Tx, taskID, expID int64) (map[string]any, error) {
+func taskArchiveAggregates(tx archiveSnapshotQueryer, taskID, expID int64) (map[string]any, error) {
 	stats := map[string]any{}
 	var calls, input, output, cacheRead, cacheWrite int64
 	if err := tx.QueryRow(`SELECT count(*),COALESCE(sum(input_tokens),0),COALESCE(sum(output_tokens),0),
@@ -772,6 +798,11 @@ FROM llm_usage WHERE COALESCE(task_id,'')=$1 OR exploration_id=$2`, strconv.Form
 		return nil, err
 	}
 	stats["tokens"] = map[string]int64{"calls": calls, "input_tokens": input, "output_tokens": output, "cache_read_tokens": cacheRead, "cache_write_tokens": cacheWrite}
+	contextUsage, err := snapshotContextUsage(tx, taskID, expID)
+	if err != nil {
+		return nil, err
+	}
+	stats["context_usage"] = contextUsage
 	for _, item := range []struct {
 		name  string
 		query string

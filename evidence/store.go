@@ -41,13 +41,20 @@ func hashPath(dir, hash string) (string, error) {
 }
 
 func verifyFile(path, hash string, length int64) error {
+	return verifyFileContext(context.Background(), path, hash, length)
+}
+
+func verifyFileContext(ctx context.Context, path, hash string, length int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	h := sha256.New()
-	n, err := io.Copy(h, f)
+	n, err := io.Copy(h, contextEvidenceReader{ctx: ctx, reader: f})
 	if err != nil {
 		return err
 	}
@@ -60,6 +67,13 @@ func verifyFile(path, hash string, length int64) error {
 // A new body becomes visible only after a durable write. Failed SQL commits may
 // leave unreferenced files; GC reaps those after a full day's grace period.
 func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string) (hash string, err error) {
+	return s.writeBodyContext(context.Background(), r, expectedLength, expectedHash)
+}
+
+func (s *Store) writeBodyContext(ctx context.Context, r io.Reader, expectedLength int64, expectedHash string) (hash string, err error) {
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
 	stage := filepath.Join(s.Dir, ".staging")
 	if err = os.MkdirAll(stage, 0o700); err != nil {
 		return
@@ -70,7 +84,7 @@ func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string
 	}
 	defer func() { f.Close(); os.Remove(f.Name()) }()
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), r)
+	n, err := io.Copy(io.MultiWriter(f, h), contextEvidenceReader{ctx: ctx, reader: r})
 	if err != nil {
 		return "", err
 	}
@@ -87,12 +101,15 @@ func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string
 	if err = f.Close(); err != nil {
 		return "", err
 	}
+	if err = ctx.Err(); err != nil {
+		return "", err
+	}
 	path, err := hashPath(s.Dir, hash)
 	if err != nil {
 		return "", err
 	}
 	if _, err = os.Stat(path); err == nil {
-		if err = verifyFile(path, hash, n); err != nil {
+		if err = verifyFileContext(ctx, path, hash, n); err != nil {
 			return "", err
 		}
 		// Refresh the grace period for a restored but not-yet-committed body.
@@ -137,7 +154,7 @@ func (s *Store) StageFindingsExport(ctx context.Context, findings []*db.DBFindin
 			}
 		}
 		if copyBodies {
-			return s.copySnapshots(snapshots, dest)
+			return s.copySnapshotIterator(ctx, snapshotList(snapshots), dest)
 		}
 		return nil
 	})
@@ -248,6 +265,10 @@ func (s *Store) Binding(ctx context.Context, findingID, bindingID int64) (db.Fin
 
 // OpenBody may be called without holding the evidence lock; see Binding.
 func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.File, int64, error) {
+	return s.openBodyContext(context.Background(), snapshot, side)
+}
+
+func (s *Store) openBodyContext(ctx context.Context, snapshot db.TrafficEvidenceSnapshot, side string) (*os.File, int64, error) {
 	hash, length := snapshot.ReqHash, snapshot.ReqLen
 	if side == "response" {
 		hash, length = snapshot.RespHash, snapshot.RespLen
@@ -258,7 +279,7 @@ func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.
 	if err != nil {
 		return nil, 0, err
 	}
-	if err = verifyFile(path, hash, length); err != nil {
+	if err = verifyFileContext(ctx, path, hash, length); err != nil {
 		return nil, 0, err
 	}
 	f, err := os.Open(path)
@@ -268,46 +289,7 @@ func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.
 // CopySnapshots is used by both report downloads and portable task archives.
 // The destination owns real copies, never links into either disposable store.
 func (s *Store) CopySnapshots(ctx context.Context, snapshots []db.TrafficEvidenceSnapshot, dest string) error {
-	return s.DB.WithEvidenceTx(ctx, func(*sql.Tx) error { return s.copySnapshots(snapshots, dest) })
-}
-
-func (s *Store) copySnapshots(snapshots []db.TrafficEvidenceSnapshot, dest string) error {
-	for _, v := range snapshots {
-		for _, side := range []string{"request", "response"} {
-			if err := func() error {
-				f, length, err := s.OpenBody(v, side)
-				if err != nil {
-					return err
-				}
-				defer f.Close()
-				hash := v.ReqHash
-				if side == "response" {
-					hash = v.RespHash
-				}
-				target, err := hashPath(dest, hash)
-				if err != nil {
-					return err
-				}
-				if err = os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-					return err
-				}
-				out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
-				if os.IsExist(err) {
-					return verifyFile(target, hash, length)
-				}
-				if err != nil {
-					return err
-				}
-				_, copyErr := io.Copy(out, f)
-				syncErr := out.Sync()
-				closeErr := out.Close()
-				return errors.Join(copyErr, syncErr, closeErr)
-			}(); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return s.CopySnapshotIterator(ctx, snapshotList(snapshots), dest)
 }
 
 func (s *Store) InstallSnapshots(ctx context.Context, snapshots []db.TrafficEvidenceSnapshot, source string) error {
@@ -317,34 +299,7 @@ func (s *Store) InstallSnapshots(ctx context.Context, snapshots []db.TrafficEvid
 // WithInstalledSnapshots pins installed bodies until the metadata restore finishes.
 // The callback must not acquire another evidence advisory lock.
 func (s *Store) WithInstalledSnapshots(ctx context.Context, snapshots []db.TrafficEvidenceSnapshot, source string, restore func() error) error {
-	return s.DB.WithEvidenceTx(ctx, func(*sql.Tx) error {
-		for _, v := range snapshots {
-			if v.ID != db.TrafficSnapshotID(v) {
-				return errors.New("归档证据快照元数据哈希不匹配")
-			}
-			for _, body := range []struct {
-				hash   string
-				length int64
-			}{{v.ReqHash, v.ReqLen}, {v.RespHash, v.RespLen}} {
-				if err := func() error {
-					path, err := hashPath(source, body.hash)
-					if err != nil {
-						return err
-					}
-					f, err := os.Open(path)
-					if err != nil {
-						return err
-					}
-					defer f.Close()
-					_, err = s.writeBody(f, body.length, body.hash)
-					return err
-				}(); err != nil {
-					return err
-				}
-			}
-		}
-		return restore()
-	})
+	return s.WithInstalledSnapshotIterator(ctx, snapshotList(snapshots), source, restore)
 }
 
 func (s *Store) Collect(ctx context.Context, now time.Time) error {

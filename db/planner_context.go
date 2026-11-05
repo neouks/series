@@ -56,14 +56,21 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
 	if seeds == nil {
 		seeds = []int64{}
 	}
-	revision, err := s.GraphRevision(ctx, true)
+	// Count receipts and their authorization epoch must describe the same
+	// snapshot as the query, including on a cache hit concurrent with revocation.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
+		return PlannerContext{}, err
+	}
+	defer tx.Rollback()
+	var revision, countRevision string
+	if err = tx.QueryRowContext(ctx, graphPlannerSnapshotSQL, s.expID).Scan(&revision, &countRevision); err != nil {
 		return PlannerContext{}, err
 	}
 	sorted := append([]string{}, kinds...)
 	slices.Sort(sorted)
 	policyKey := "planner:" + strings.Join(sorted, ",")
-	cachedCounts, cached, err := s.GraphCountCache(ctx, policyKey, revision)
+	cachedCounts, cached, err := s.graphCountCache(ctx, tx, policyKey, countRevision)
 	if err != nil {
 		return PlannerContext{}, err
 	}
@@ -77,7 +84,7 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
    OR n.id IN(SELECT e.src_id FROM exploration_edges e WHERE e.exploration_id IN(SELECT exp FROM contexts) AND e.rel IN ('derived_from','yields') AND e.dst_id=ANY($3::bigint[])
     UNION SELECT e.dst_id FROM exploration_edges e WHERE e.exploration_id IN(SELECT exp FROM contexts) AND e.rel IN ('derived_from','yields') AND e.src_id=ANY($3::bigint[])))`
 	}
-	query := contextVisibility(roots, false) + `, event_nodes AS MATERIALIZED (
+	query := contextDependencyVisibility(contextScopeSQL, roots, false, false, true, dependencyEventAssets) + `, event_nodes AS MATERIALIZED (
  SELECT * FROM visible WHERE id=ANY($3::bigint[])
  ), candidates AS (
  SELECT id,0 rank FROM event_nodes
@@ -102,20 +109,15 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
  'counts',COALESCE((SELECT jsonb_agg(to_jsonb(g) ORDER BY kind,state,inherited) FROM grouped g),'[]'::jsonb),
  'has_more',(SELECT count(*)>8 FROM chosen),'records',COALESCE((SELECT jsonb_agg(r ORDER BY rank,id DESC) FROM (
  SELECT 'node:'||v.id ref,v.kind,v.state,v.owner source_task_id,v.exploration_id<>$1 inherited,
- left(COALESCE(n.payload->>'summary',n.payload->>'text',n.payload->>'body',''),240) summary,
+ left(` + nodeNavigationContextSQL + `,240) summary,
  CASE c.rank WHEN 0 THEN 'event' WHEN 1 THEN 'parent' WHEN 2 THEN 'yield' WHEN 3 THEN 'same_asset_active' ELSE 'idle_running' END reason,c.rank,v.id
- FROM chosen c JOIN visible v ON v.id=c.id JOIN exploration_nodes n ON n.id=v.id ORDER BY c.rank,v.id DESC LIMIT 8
+ FROM chosen c JOIN visible v ON v.id=c.id JOIN exploration_nodes n ON n.id=v.id ` + nodeNavigationJoinSQL + ` ORDER BY c.rank,v.id DESC LIMIT 8
  ) r),'[]'::jsonb))`
 	var out PlannerContext
 	// The recursive visibility plan's conservative row estimates trigger LLVM
 	// JIT even for a small graph. EXPLAIN measured >800ms compiling this bounded
 	// projection. Keep JIT disabled for this read transaction only; do not leak a
 	// session setting into the shared connection pool.
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return out, err
-	}
-	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, `SET LOCAL jit=off`); err != nil {
 		return out, err
 	}
@@ -132,7 +134,7 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
 	}
 	if cached {
 		out.Counts = cachedCounts
-	} else if err = s.SaveGraphCounts(ctx, policyKey, revision, out.Counts); err != nil {
+	} else if err = s.SaveGraphCounts(ctx, policyKey, countRevision, out.Counts); err != nil {
 		return out, err
 	}
 	out.Revision = revision

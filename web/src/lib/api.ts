@@ -1,4 +1,5 @@
 import { entryAwareFetch } from "@/lib/http-auth";
+import { HTTPError } from "@/lib/http-error";
 // Real backend client. /api/* is proxied to the Go backend (next.config rewrites).
 // Returns the domain types in lib/types.ts. Shapes match the backend handlers;
 // a few fields the backend serializes differently (e.g. created_at as a unix int)
@@ -56,6 +57,9 @@ import type {
   FindingTraffic,
   FindingTrafficDetail,
   GlobalProxyProbeResult,
+  GraphWindow,
+  GraphWindowQuery,
+  GraphNodeBody,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -148,7 +152,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Keep the status-based fallback for empty or non-JSON error responses.
     }
-    throw new Error(message);
+    throw new HTTPError(r.status, message);
   }
   if (r.status === 204) return undefined as T;
   return r.json();
@@ -713,7 +717,15 @@ export const api = {
     get<ConvTokenSummary[]>("/tokens/conversations")
       .then(arr)
       .catch(() => [] as ConvTokenSummary[]),
-  explorationGraph: (task?: string) => get<{ nodes: TaskNode[]; edges: Edge[] }>(`/exploration/graph${tq(task)}`),
+  explorationGraphWindow: (task: string, query: GraphWindowQuery = {}, signal?: AbortSignal) => {
+    const q = new URLSearchParams({ task, view: "compact" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") q.set(key, String(value));
+    }
+    return get<GraphWindow>(`/exploration/graph?${q}`, { signal });
+  },
+  explorationGraphBody: (task: string, id: string, offset = 0, version = "", signal?: AbortSignal) =>
+    get<GraphNodeBody>(`/exploration/graph/nodes/${encodeURIComponent(id)}?${new URLSearchParams({ task, offset: String(offset), body_version: version })}`, { signal }),
   // 播报板:服务端按创建顺序分页的探索节点(默认最新在前)。
   explorationNodes: (task: string, query: ExplorationNodeQuery = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();

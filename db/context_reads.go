@@ -49,14 +49,20 @@ const contextScopeSQL = `WITH RECURSIVE current_task AS (
  )`
 
 func contextVisibility(roots string, worker bool) string {
-	at := strings.Index(toolNodeVisibilitySQL, "), lineage(root,id,exp)")
-	lineage := toolNodeVisibilitySQL[at:]
-	if !worker {
-		// Match TaskNodeAccess: a digest without members has unverifiable
-		// provenance, including when it occurs in an ordinary node's ancestry.
-		lineage = strings.Replace(lineage, "AND n.id IS NULL)", "AND (n.id IS NULL OR (n.kind='digest' AND NOT EXISTS(SELECT 1 FROM exploration_edges de WHERE de.exploration_id=n.exploration_id AND de.src_id=n.id AND de.rel='covers'))))", 1)
-	}
-	return workerReadSQL(contextScopeSQL+`, roots AS MATERIALIZED (`+roots+lineage, worker)
+	return contextVisibilityPolicy(roots, worker, false)
+}
+
+// allowStaleRoot is reserved for staleDigestNavigation: it may return source
+// references for $2, never the obsolete summary body. Ancestors remain strict.
+func contextVisibilityPolicy(roots string, worker, allowStaleRoot bool) string {
+	return contextDependencyVisibility(contextScopeSQL, roots, worker, allowStaleRoot, !worker, dependencyFilterAssets)
+}
+
+// Only explicit inherited-asset reads need every asset. Other reads propagate
+// the requested filter or visible event assets, independently of the complete
+// live permission check on direct_assets.
+func contextVisibilityAssets(roots string, worker bool) string {
+	return contextDependencyVisibility(contextScopeSQL, roots, worker, false, !worker, dependencyAllAssets)
 }
 
 // Evidence and platform IDs must survive projection without float64 rounding.
@@ -66,6 +72,10 @@ func decodeContextJSON(raw []byte, value any) error {
 	return decoder.Decode(value)
 }
 
+// Keep search fields aligned with ContextNode's JSON-pointer reads. Structured
+// reproduction strings are searched at their exact paths, not as JSON syntax;
+// binding IDs and object keys are not evidence text. Malformed legacy values
+// are ignored without throwing jsonb_array_elements errors.
 const contextNodeFields = `VALUES
  ('/summary',COALESCE(n.payload->>'summary','')),
  ('/name',COALESCE(n.payload->>'name','')),
@@ -73,7 +83,16 @@ const contextNodeFields = `VALUES
  ('/evidence',COALESCE(n.payload->>'evidence','')),
  ('/text',COALESCE(n.payload->>'text','')),
  ('/body',COALESCE(n.payload->>'body','')),
- ('/report',CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.report FROM findings f WHERE f.node_id=n.id LIMIT 1),'') ELSE '' END)`
+ ('/report',CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.report FROM findings f WHERE f.node_id=n.id LIMIT 1),'') ELSE '' END)
+ UNION ALL SELECT '/reproduction/entry_point',n.payload#>>'{reproduction,entry_point}'
+ WHERE n.kind='finding' AND jsonb_typeof(n.payload#>'{reproduction,entry_point}')='string'
+ UNION ALL SELECT '/reproduction/prerequisites/'||(p.ordinality-1),p.value#>>'{}'
+ FROM jsonb_array_elements(CASE WHEN n.kind='finding' AND jsonb_typeof(n.payload#>'{reproduction,prerequisites}')='array' THEN n.payload#>'{reproduction,prerequisites}' ELSE '[]'::jsonb END) WITH ORDINALITY p(value,ordinality)
+ WHERE jsonb_typeof(p.value)='string'
+ UNION ALL SELECT '/reproduction/steps/'||(s.ordinality-1)||'/'||f.key,s.value->>f.key
+ FROM jsonb_array_elements(CASE WHEN n.kind='finding' AND jsonb_typeof(n.payload#>'{reproduction,steps}')='array' THEN n.payload#>'{reproduction,steps}' ELSE '[]'::jsonb END) WITH ORDINALITY s(value,ordinality)
+ CROSS JOIN (VALUES ('title'),('action'),('result'),('proves'),('request'),('response'),('command'),('output')) f(key)
+ WHERE jsonb_typeof(s.value)='object' AND jsonb_typeof(s.value->f.key)='string'`
 
 func (s *ExplorationStore) ContextUpper(ctx context.Context, activity bool) (int64, error) {
 	table := "exploration_nodes"
@@ -126,15 +145,15 @@ func (s *ExplorationStore) contextSearchSQL(activity, mixed bool) string {
  left(COALESCE(a.summary,''),240),COALESCE(hit.path,''),COALESCE(hit.snippet,''),hit.match_offset,0::bigint` + extra + `
  FROM visible n JOIN activity a ON a.node_id=n.id AND a.exploration_id=n.exploration_id
  LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet,strpos(lower(body),lower($3))-1 match_offset FROM (VALUES ('/detail',COALESCE(a.detail,'')),('/summary',COALESCE(a.summary,''))) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
- WHERE a.kind NOT IN ('thinking','usage') AND a.id<=` + upper + ` AND ($6::bigint=0 OR a.id<$6)` + before + `
+ WHERE a.kind NOT IN ('thinking','usage') AND NOT ` + contextCheckpointNoteSQL + ` AND a.id<=` + upper + ` AND ($6::bigint=0 OR a.id<$6)` + before + `
  AND ($3='' OR hit.path IS NOT NULL)
  AND $8::boolean AND $2::text[] IS NOT NULL ORDER BY ` + order + ` LIMIT $7`
 	} else {
-		sql += ` SELECT 'node:'||n.id,n.id,n.kind,n.id AS node_id,v.owner,n.exploration_id<>$1,n.state,left(COALESCE(n.payload->>'summary',n.payload->>'text',n.payload->>'body',''),240),
+		sql += ` SELECT 'node:'||n.id,n.id,n.kind,n.id AS node_id,v.owner,n.exploration_id<>$1,n.state,left(` + nodeNavigationContextSQL + `,240),
  COALESCE(hit.path,''),COALESCE(hit.snippet,''),hit.match_offset,CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END` + extra + `
- FROM visible v JOIN exploration_nodes n ON n.id=v.id
+ FROM visible v JOIN exploration_nodes n ON n.id=v.id ` + nodeNavigationJoinSQL + `
  LEFT JOIN LATERAL (SELECT path,substring(body FROM greatest(1,strpos(lower(body),lower($3))-60) FOR 180) snippet,
- CASE WHEN path='/report' OR jsonb_typeof(n.payload->substr(path,2))='string' THEN strpos(lower(body),lower($3))-1 END match_offset
+ CASE WHEN path='/report' OR jsonb_typeof(jsonb_extract_path(n.payload,VARIADIC string_to_array(substr(path,2),'/')))='string' THEN strpos(lower(body),lower($3))-1 END match_offset
  FROM (` + contextNodeFields + `) f(path,body) WHERE $3<>'' AND strpos(lower(body),lower($3))>0 LIMIT 1) hit ON true
  WHERE $8::boolean ORDER BY ` + order + ` LIMIT $7`
 	}
@@ -149,7 +168,7 @@ func (s *ExplorationStore) SearchContext(ctx context.Context, q ContextSearch) (
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	activity := len(q.Types) == 1 && q.Types[0] == "activity"
-	rows, err := s.db.QueryContext(ctx, s.contextSearchSQL(activity, false), s.expID, q.Types, q.Query, q.Severity, q.AssetID, q.Before, q.Limit+1, true, q.State, q.IntentID, q.Upper)
+	rows, err := s.contextQuery(ctx, s.contextSearchSQL(activity, false), s.expID, q.Types, q.Query, q.Severity, q.AssetID, q.Before, q.Limit+1, true, q.State, q.IntentID, q.Upper)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +203,11 @@ func (s *ExplorationStore) ContextNode(ctx context.Context, id int64, field stri
 			path = append(path, strings.ReplaceAll(strings.ReplaceAll(p, "~1", "/"), "~0", "~"))
 		}
 	}
-	query := contextVisibility(roots, s.workerRead) + `, content AS (
+	visibility := contextVisibility(roots, s.workerRead)
+	if field == "/asset_ids" {
+		visibility = contextVisibilityAssets(roots, s.workerRead)
+	}
+	query := visibility + `, content AS (
  SELECT n.id,n.kind,n.state,v.owner,n.exploration_id<>$1 inherited,
  CASE WHEN n.kind='finding' THEN COALESCE((SELECT f.id FROM findings f WHERE f.node_id=n.id LIMIT 1),0) ELSE 0 END finding_id,
  (CASE WHEN $3::text[]=ARRAY['asset_ids'] THEN jsonb_build_object('asset_ids',COALESCE((SELECT jsonb_agg(DISTINCT a.asset_id ORDER BY a.asset_id) FROM anchors a WHERE a.root=n.id),'[]'::jsonb))
@@ -194,7 +217,12 @@ func (s *ExplorationStore) ContextNode(ctx context.Context, id int64, field stri
  SELECT child.key,child.value, row_number() OVER(ORDER BY child.key) seq FROM content c CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(c.value)='object' THEN c.value ELSE '{}'::jsonb END) child
  UNION ALL SELECT (child.ordinality-1)::text,child.value,child.ordinality FROM content c CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.value)='array' THEN c.value ELSE '[]'::jsonb END) WITH ORDINALITY child
  ), page AS (SELECT * FROM children ORDER BY seq OFFSET $4 LIMIT 20)
- SELECT jsonb_build_object('id',id,'node_id',id,'ref','node:'||id,'kind',kind,'state',state,'source_task_id',owner,'inherited',inherited,'finding_id',finding_id,'finding_node_id',CASE WHEN kind='finding' THEN id END,'payload',
+ SELECT jsonb_build_object('id',id,'node_id',id,'ref','node:'||id,'kind',kind,'state',state,'source_task_id',owner,'inherited',inherited,'finding_id',finding_id,'finding_node_id',CASE WHEN kind='finding' THEN id END,
+ 'source_stamp',(SELECT ` + checkpointNodeStampSQL + ` FROM exploration_nodes n
+ LEFT JOIN graph_node_projection gp ON gp.node_id=n.id AND gp.exploration_id=n.exploration_id AND gp.kind=n.kind AND gp.state=n.state
+ LEFT JOIN graph_dependency_state ds ON ds.node_id=n.id AND ds.exploration_id=n.exploration_id
+ LEFT JOIN graph_revisions gr ON gr.exploration_id=n.exploration_id
+ LEFT JOIN LATERAL (SELECT id,report,evidence_version,status FROM findings WHERE node_id=n.id ORDER BY id LIMIT 1) f ON true WHERE n.id=content.id), 'payload',
  CASE WHEN value IS NULL THEN jsonb_build_object('error','字段不存在') WHEN jsonb_typeof(value)='string' THEN jsonb_build_object('value',substring(value#>>'{}' FROM $6+1 FOR $7),'total_chars',char_length(value#>>'{}'),'offset',$6,'truncated',char_length(value#>>'{}')>$6+$7,'next_offset',CASE WHEN char_length(value#>>'{}')>$6+$7 THEN $6+$7 END)
  WHEN jsonb_typeof(value) IN ('array','object') THEN jsonb_build_object('entries',COALESCE((SELECT jsonb_agg(
  CASE WHEN octet_length(p.value::text)<=$7/20 THEN jsonb_build_object('field',$8||'/'||replace(replace(key,'~','~0'),'/','~1'),'value',p.value)
@@ -203,7 +231,7 @@ func (s *ExplorationStore) ContextNode(ctx context.Context, id int64, field stri
  FROM content`
 	// $5 belongs to the shared authorization CTE (asset filter).
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, query, s.expID, id, path, index, int64(0), offset, budget, field).Scan(&raw)
+	err := s.contextRow(ctx, query, s.expID, id, path, index, int64(0), offset, budget, field).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return s.staleDigestNavigation(ctx, id, index, min(10, max(1, budget/250)))
 	}
@@ -221,8 +249,7 @@ func (s *ExplorationStore) ContextNode(ctx context.Context, id int64, field stri
 func (s *ExplorationStore) staleDigestNavigation(ctx context.Context, id int64, index, limit int) (map[string]any, error) {
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
  WHERE n.id=$2 AND n.kind='digest' AND NOT series_digest_sources_current(n.payload)`
-	visibility := contextVisibility(roots, s.workerRead)
-	visibility = strings.Replace(visibility, "WHERE l.root=r.id AND n.kind='digest' AND NOT series_digest_sources_current(n.payload)", "WHERE l.root=r.id AND n.kind='digest' AND n.id<>$2 AND NOT series_digest_sources_current(n.payload)", 1)
+	visibility := contextVisibilityPolicy(roots, s.workerRead, true)
 	query := visibility + `, members AS (
  SELECT e.dst_id FROM visible v JOIN exploration_edges e ON e.exploration_id=v.exploration_id AND e.src_id=v.id AND e.rel='covers'
  ORDER BY e.dst_id OFFSET $3 LIMIT $4
@@ -231,7 +258,7 @@ func (s *ExplorationStore) staleDigestNavigation(ctx context.Context, id int64, 
  'next_index',CASE WHEN (SELECT count(*) FROM exploration_edges e WHERE e.exploration_id=v.exploration_id AND e.src_id=v.id AND e.rel='covers')>$3+$4 THEN $3+$4 END)
  FROM visible v`
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, query, s.expID, id, index, limit, int64(0)).Scan(&raw)
+	err := s.contextRow(ctx, query, s.expID, id, index, limit, int64(0)).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}
@@ -252,14 +279,14 @@ func (s *ExplorationStore) ContextActivity(ctx context.Context, id int64, offset
 	defer cancel()
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
  JOIN activity a ON a.node_id=n.id AND a.exploration_id=n.exploration_id
- WHERE a.id=$2 AND n.kind='intent' AND a.kind NOT IN ('thinking','usage')
+ WHERE a.id=$2 AND n.kind='intent' AND a.kind NOT IN ('thinking','usage') AND NOT ` + contextCheckpointNoteSQL + `
  AND (n.exploration_id=$1 OR n.state IN ('done','blocked','exhausted','stopped'))`
 	query := contextVisibility(roots, s.workerRead) + ` SELECT jsonb_build_object('ref','activity:'||a.id,'step_id',a.id,'node_id',v.id,'intent_id',v.id,'kind',a.kind,'tool',a.tool,'is_error',a.is_error,'source_task_id',v.owner,'inherited',a.exploration_id<>$1,
  'detail',substring(CASE WHEN $6='/summary' THEN COALESCE(a.summary,'') ELSE COALESCE(NULLIF(a.detail,''),a.summary,'') END FROM $3+1 FOR $4),'offset',$3,'total_chars',char_length(CASE WHEN $6='/summary' THEN COALESCE(a.summary,'') ELSE COALESCE(NULLIF(a.detail,''),a.summary,'') END),
  'next_offset',CASE WHEN char_length(CASE WHEN $6='/summary' THEN COALESCE(a.summary,'') ELSE COALESCE(NULLIF(a.detail,''),a.summary,'') END)>$3+$4 THEN $3+$4 END)
  FROM visible v JOIN activity a ON a.node_id=v.id AND a.exploration_id=v.exploration_id WHERE a.id=$2`
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, query, s.expID, id, offset, budget, int64(0), field).Scan(&raw)
+	err := s.contextRow(ctx, query, s.expID, id, offset, budget, int64(0), field).Scan(&raw)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +315,7 @@ func (s *ExplorationStore) ContextOutput(ctx context.Context, id int64, offset, 
  ORDER BY CASE WHEN a.kind='result' THEN 0 ELSE 1 END,a.id DESC LIMIT 1
  )a ON true`
 	var raw []byte
-	if err := s.db.QueryRowContext(ctx, query, s.expID, id, offset, budget, int64(0)).Scan(&raw); err != nil {
+	if err := s.contextRow(ctx, query, s.expID, id, offset, budget, int64(0)).Scan(&raw); err != nil {
 		return nil, err
 	}
 	var out map[string]any
@@ -337,9 +364,9 @@ func (s *ExplorationStore) ContextParents(ctx context.Context, intentID, before 
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id
  WHERE n.kind IN ('fact','finding') AND EXISTS(SELECT 1 FROM exploration_edges e JOIN exploration_nodes i ON i.id=e.dst_id AND i.exploration_id=e.exploration_id
  WHERE i.id=$2 AND i.kind='intent' AND i.exploration_id IN(SELECT exp FROM contexts) AND e.src_id=n.id AND e.rel='derived_from')`
-	query := contextVisibility(roots, s.workerRead) + ` SELECT n.id,n.kind,v.owner,n.exploration_id<>$1,left(COALESCE(n.payload->>'summary',''),$7)
- FROM visible v JOIN exploration_nodes n ON n.id=v.id WHERE ($3::bigint=0 OR n.id<$3) AND $4::boolean ORDER BY n.id DESC LIMIT $6`
-	rows, e := s.db.QueryContext(ctx, query, s.expID, intentID, before, true, int64(0), limit+1, summaryChars)
+	query := contextVisibility(roots, s.workerRead) + ` SELECT n.id,n.kind,v.owner,n.exploration_id<>$1,left(COALESCE(` + nodeNavigationPayloadSQL + `->>'summary',''),$7)
+ FROM visible v JOIN exploration_nodes n ON n.id=v.id ` + nodeNavigationJoinSQL + ` WHERE ($3::bigint=0 OR n.id<$3) AND $4::boolean ORDER BY n.id DESC LIMIT $6`
+	rows, e := s.contextQuery(ctx, query, s.expID, intentID, before, true, int64(0), limit+1, summaryChars)
 	if e != nil {
 		return nil, e
 	}
@@ -392,12 +419,12 @@ func (s *ExplorationStore) ContextDigestMembers(ctx context.Context, id, before 
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id WHERE n.id=$2 AND n.kind='digest'`
 	query := contextVisibility(roots, s.workerRead) + ` SELECT n.id,n.kind,jsonb_strip_nulls(jsonb_build_object('summary',left(n.payload->>'summary',$6),'confidence',n.payload->'confidence')),n.priority,n.state,COALESCE(n.origin,''),COALESCE(n.owner,''),COALESCE(n.blocked_reason,''),n.created_at
  FROM visible v JOIN exploration_edges e ON e.src_id=v.id AND e.exploration_id=v.exploration_id AND e.rel='covers' JOIN exploration_nodes n ON n.id=e.dst_id AND n.exploration_id=e.exploration_id WHERE ($3::bigint=0 OR n.id<$3) ORDER BY n.id DESC LIMIT $4`
-	rows, e := s.db.QueryContext(ctx, query, s.expID, id, before, limit+1, int64(0), summaryChars)
+	rows, e := s.contextQuery(ctx, query, s.expID, id, before, limit+1, int64(0), summaryChars)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
-	return scanNodes(rows)
+	return scanNodes(rows.Rows)
 }
 
 // ToolHotNodeIDs is the rendering-only hot set. Compression still loads full

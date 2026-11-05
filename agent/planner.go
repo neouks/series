@@ -35,22 +35,21 @@ type Planner struct {
 	proxyCACert       string                                 // recording proxy's CA cert path (HTTPS verify)
 	webSearch         WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir           string                                 // shared work dir (surfaced in prompt as artifact-output target)
-	injectConstraints func() bool                            // resolver: inject task operation constraints into system prompt? (nil = yes)
+	injectConstraints func(context.Context) (bool, error)    // request-scoped policy resolver; nil = enabled
 	nonStreamingFn    func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
 	compactor         *Compactor                             // cold-node compaction (§7); nil = disabled
 
-	// todos keeps ONE plan-scratchpad per task (keyed by exploration id) so the
-	// planner's multi-step plan survives across wake-ups — each Plan() is a fresh
-	// session, but the shared store lets it record a serial exploit chain once and
-	// dispatch it step-by-step over rounds instead of front-loading it in parallel.
-	todoMu sync.Mutex
-	todos  map[int64]*actool.TodoStore
+	// Full todos live only in PostgreSQL. This bounded cache stores navigation
+	// text, validated against live source metadata on every planning round.
+	todoMu           sync.Mutex
+	todoPreviewClock uint64
+	todoPreviews     map[int64]plannerTodoCached
 }
 
 func NewPlanner(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *Planner {
-	return &Planner{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, todos: map[int64]*actool.TodoStore{}}
+	return &Planner{prov: WithModelRequestScope(prov), model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns}
 }
 
 func (p *Planner) SetCompactionWindowResolver(fn func() int) { p.windowFn = fn }
@@ -102,27 +101,26 @@ func (p *Planner) SetProxy(addr, caCert string) { p.proxyAddr, p.proxyCACert = a
 func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
 
 // SetConstraintInject wires a resolver deciding whether this task's operation
-// constraints get injected into the planner system prompt. Read per round so the
+// constraints get injected into the planner system prompt. Read per request so the
 // settings toggle takes effect without rebuilding the agent. nil = inject (default).
-func (p *Planner) SetConstraintInject(fn func() bool) { p.injectConstraints = fn }
+func (p *Planner) SetConstraintInject(fn func() bool) {
+	if fn == nil {
+		p.injectConstraints = nil
+		return
+	}
+	p.injectConstraints = func(context.Context) (bool, error) { return fn(), nil }
+}
+
+func (p *Planner) SetConstraintInjectContext(fn func(context.Context) (bool, error)) {
+	p.injectConstraints = fn
+}
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
-func (p *Planner) wantConstraints() bool { return p.injectConstraints == nil || p.injectConstraints() }
-
-// todoFor returns the task's persistent planning todo store, creating it on first
-// use. Shared across all of this task's planner wake-ups.
-func (p *Planner) todoFor(expID int64) *actool.TodoStore {
-	p.todoMu.Lock()
-	defer p.todoMu.Unlock()
-	if p.todos == nil {
-		p.todos = map[int64]*actool.TodoStore{}
+func (p *Planner) wantConstraints(ctx context.Context) (bool, error) {
+	if p.injectConstraints == nil {
+		return true, nil
 	}
-	s := p.todos[expID]
-	if s == nil {
-		s = actool.NewTodoStore()
-		p.todos[expID] = s
-	}
-	return s
+	return p.injectConstraints(ctx)
 }
 
 // SetKillWork wires task-scoped termination of queued or running intents.
@@ -149,6 +147,8 @@ func renderPlannerTodos(items []actool.Todo) string { return plannerTodoPreview(
 //	"cancelled" — the human deleted intent IntentID (Detail = 删除原因). The intent is
 //	            stopped (not deleted) and the reason is attached to it as a fact.
 type TriggerEvent struct {
+	Count      int64   // coalesced notification count, zero means one
+	Truncated  bool    // additional identities/text remain in persistent task state
 	NodeIDs    []int64 // Exact successfully persisted nodes, never resolved by summary text.
 	FeedbackID int64   // finding_deleted: persisted task-local feedback identity only
 	Kind       string
@@ -259,11 +259,13 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	// Planner 只保留开局极轻量探测需要的 Bash；文件编辑、目录遍历与 Sleep 都不属于
 	// 规划职责，避免它们的 schema 在每次 completion 中反复占用输入。
 	// 资产覆盖度关闭时移除 add_task_scope，保留普通资产检索。
-	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), actool.NewBash())
+	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), newAdmittedBash())
 	ctx = withContextObserver(ctx, emit)
 	ctx = context.WithValue(ctx, contextOutputDirectoryKey{}, cmdOutDir(taskDir))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "planner"})
 	ctx = WithTaskToolSet(ctx, tsx)
+	ctx = withExecutionCheckpoint(ctx, tsx, "planner", 0)
+	ctx = withOperationConstraints(ctx, ts, p.wantConstraints)
 	tools, def, cleanup, err := AugmentTools(ctx, "planner", base)
 	defer cleanup()
 	if err != nil {
@@ -272,6 +274,10 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	tools = tsx.StripCoverageParams(tools)
 	def.AssetGuidance = plannerAssetGuidance(tools)
 	if err := requireRoleTools("planner", tools); err != nil {
+		return false, "", err
+	}
+	triggers, err = tsx.plannerChangeTriggers(ctx, triggers)
+	if err != nil {
 		return false, "", err
 	}
 	// 关键态势（刚完成的意图 + 预取的轻量图）改放【本轮 user 输入】(见下方 input)，system
@@ -313,12 +319,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	}
 	// 本任务的工作目录 <workDir>/tasks/<taskID>，先建好。
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
-	sysBody := plannerSystem(goal, p.workDir, taskDir) + plannerRetrievalRule
+	sysBody := plannerSystem(goal, p.workDir, taskDir) + plannerRetrievalRule + checkpointGuide
 	sysBody += "\n仅未知候选按需批量调用 check_target_access；已知不可用项本轮跳过，继续已授权方向。"
 	sysBody += "\n资产审批管理不自动预载，需要管理详情时才按需分页调用 list_task_assets。管理可见不等于允许测试：只有 can_schedule=true 的当前已授权资产可下发；pending/blocked/revoked 仅供解释，不要每轮查询全部状态。"
-	if p.wantConstraints() {
-		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,框定探索边界
-	}
+	// Enabled constraints are refreshed at the provider boundary, including
+	// subsequent turns and SDK compression; failed reads abort that request.
 	system, boundary := deferredSystem(sysBody, def)
 	// planner 无自身墙钟预算;有 deadline 时把 MaxDuration 夹逼到剩余,让在跑的规划轮在
 	// 任务到点时进收尾(因超时→任务超时词,因步数→per-run 词)。
@@ -328,12 +333,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		settle = wrapupSettlementForTask("planner", nil, clamped)
 	}
 	runProxyAddr := TaskProxyAddr(p.proxyAddr, p.proxyCACert, taskID, guard.AssetSkipScope(ctx))
-	todos, todoErr := p.restoreTodos(ctx, ts)
+	todoPreview, todoErr := p.plannerTodos(ctx, ts)
 	if todoErr != nil {
 		return false, "", fmt.Errorf("读取规划待办: %w", todoErr)
 	}
-	defer func() { p.todoMu.Lock(); delete(p.todos, ts.ID()); p.todoMu.Unlock() }()
-	tools = append(tools, persistentPlannerTodo{CoreTool: todos.Tool(), store: ts})
+	tools = append(tools, checkpointTodoTool{CoreTool: persistentPlannerTodo{CoreTool: actool.NewTodoStore().Tool(), store: ts}})
 	opts := agentcore.Options{
 		Provider:               withAssetContext(p.prov, as, taskID),
 		SystemPrompt:           system,
@@ -391,7 +395,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		lead = "本轮没有具体节点变动信号；依据已有目标与上下文规划或等待，仅在缺少关键信息时按需读取。心跳相关记录可用于监督，未展示不代表不存在。"
 	}
 
-	input := lead + situational + "\n\n依据已有目标、事件和上下文规划；信息足够时直接调用 add_intent，无需先查询。信息不足时再按需读取；候选均不可用或等待依赖时结束本轮，不为凑意图绕过约束。" + renderPlannerTodos(todos.List()) + fmt.Sprintf("\n完整待办入口：context_get({\"items\":[{\"ref\":\"planner_state:%d\",\"field\":\"/todos\"}]})", taskID)
+	input := lead + situational + "\n\n依据已有目标、事件和上下文规划；信息足够时直接调用 add_intent，无需先查询。信息不足时再按需读取；候选均不可用或等待依赖时结束本轮，不为凑意图绕过约束。" + todoPreview + fmt.Sprintf("\n完整待办入口：context_get({\"items\":[{\"ref\":\"planner_state:%d\",\"field\":\"/todos\"}]})", taskID)
 	// MaxDuration 现在会在墙钟到点打断在跑工具并就地进收尾(在活 ctx 上),单轮卡死不再
 	// 绕过收尾,无需外部硬 ctx 兜底。ctx 只承载 pause / kill / shutdown。
 	if err := ctx.Err(); err != nil {

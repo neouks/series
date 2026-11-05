@@ -54,9 +54,22 @@ func newLLMHealthRegistry(pg *db.DB) *llmpool.Registry {
 	return reg
 }
 
-// poolMember builds one chain member from a profile, reusing the per-profile
-// provider cache so every agent pointing at the same profile shares one provider
-// (hence one rate limiter). Returns nil when the profile can't be built.
+// Compression must fit every eligible fallback, not only the bound head.
+// Unknown capacity retains the existing configured fallback, not a detected
+// server limit. Final request errors remain authoritative.
+func providerCompactionWindow(prov llm.Provider, cfg agent.Config) int {
+	window := cfg.CompactionWindow()
+	if pool, ok := prov.(*llmpool.Pool); ok {
+		for _, member := range pool.Members() {
+			if member.WindowTokens > 0 && (cfg.MaxTokens <= 0 || member.WindowTokens > cfg.MaxTokens) {
+				window = min(window, member.WindowTokens)
+			}
+		}
+	}
+	return window
+}
+
+// poolMember reuses each profile's provider and rate limiter.
 func (s *Server) poolMember(p *db.LLMProfile, rank int) *llmpool.Member {
 	prov, cfg, ok := s.providerForProfile(p.ID)
 	if !ok {

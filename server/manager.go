@@ -32,6 +32,8 @@ type Task struct {
 	workerControlMu   sync.Mutex         // Serializes user controls with worker admission.
 	plannerCancel     context.CancelFunc // Protected by workerControlMu; never cancels Workers.
 	plannerGeneration uint64
+	workerSlotsOnce   sync.Once
+	workerSlots       int // frozen at first admission, matching the pool size for this task
 
 	ID           string `json:"id"`
 	ExpID        int64  `json:"exploration_id"`
@@ -80,6 +82,7 @@ type Task struct {
 	// a burst into one round, so several may pile up before drainTriggers() clears them.
 	trigMu          sync.Mutex
 	pendingTriggers []agent.TriggerEvent
+	triggerOverflow int64
 }
 
 // taskLifecycleState is an internally consistent view of the mutable task
@@ -257,13 +260,15 @@ type DeleteTaskResult struct {
 // Manager owns the PostgreSQL data source (asset graph + every task's exploration
 // graph + config) and the in-memory set of task handles.
 type Manager struct {
-	dir           string
-	pg            *pgdb.DB
-	assets        *pgdb.AssetStore
-	traffic       *traffic.Traffic       // process-wide recording proxy (may be nil)
-	enrich        *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
-	interceptor   *intercept.Interceptor // user-configured tool-call interception rules
-	trafficDiskMu sync.Mutex             // serialize persistence and runtime application of disk settings
+	dir            string
+	pg             *pgdb.DB
+	assets         *pgdb.AssetStore
+	traffic        *traffic.Traffic       // process-wide recording proxy (may be nil)
+	enrich         *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
+	interceptor    *intercept.Interceptor // user-configured tool-call interception rules
+	trafficDiskMu  sync.Mutex             // serialize persistence and runtime application of disk settings
+	modelLimitsMu  sync.Mutex             // preserve model-admission setting commit order
+	workerLimitsMu sync.Mutex
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -372,16 +377,17 @@ func (m *Manager) Workers() int {
 		return defaultWorkers
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil || n <= 0 {
+	if err != nil || n <= 0 || n > 128 {
 		return defaultWorkers
 	}
 	return n
 }
 
-// SetWorkers persists the concurrent work-agent count. Values <=0 are rejected.
+// SetWorkers persists the per-task pool size, sampled at first admission. Human
+// continuations share that limit. The bounded range also caps idle loop counts.
 func (m *Manager) SetWorkers(n int) error {
-	if n <= 0 {
-		return fmt.Errorf("workers 必须 >0")
+	if n <= 0 || n > 128 {
+		return fmt.Errorf("workers 必须为 1..128")
 	}
 	return m.pg.SetSetting(settingWorkers, strconv.Itoa(n))
 }
@@ -430,6 +436,26 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		log.Printf("[llmusage] create table: %v", err)
 	}
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	if err := m.loadModelRequestLimits(); err != nil {
+		pg.Close()
+		return nil, fmt.Errorf("load model request limits: %w", err)
+	}
+	if err := m.loadWorkerExecutionLimits(); err != nil {
+		pg.Close()
+		return nil, fmt.Errorf("load worker execution limits: %w", err)
+	}
+	if err := m.loadModelRequestDeadlines(); err != nil {
+		pg.Close()
+		return nil, fmt.Errorf("load model request deadlines: %w", err)
+	}
+	if err := m.loadModelByteLimits(); err != nil {
+		pg.Close()
+		return nil, fmt.Errorf("load model request byte limits: %w", err)
+	}
+	if err := m.loadExternalProcessLimits(); err != nil {
+		pg.Close()
+		return nil, fmt.Errorf("load external process limits: %w", err)
+	}
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
 		if err != nil {
@@ -1803,7 +1829,7 @@ func stageTaskFiles(dataDir, taskID string, explorationID int64) (*taskFileDelet
 	prefix := fmt.Sprintf("exp%d-", explorationID)
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || (!entry.IsDir() && !strings.HasSuffix(name, ".jsonl")) {
+		if !strings.HasPrefix(name, prefix) || (!entry.IsDir() && !isTranscriptFile(name)) {
 			continue
 		}
 		targets = append(targets, filepath.Join(transcriptDir, name))
@@ -1986,9 +2012,7 @@ func (t *Task) wakeWorkers() {
 // (debounce) until the round drains them via drainTriggers.
 func (t *Task) NotifyDone(intentID int64) {
 	if intentID > 0 {
-		t.trigMu.Lock()
-		t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "done", IntentID: intentID})
-		t.trigMu.Unlock()
+		t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "done", IntentID: intentID})
 	}
 	t.Notify()
 }
@@ -1996,9 +2020,7 @@ func (t *Task) NotifyDone(intentID int64) {
 // NotifyFinding records that a worker reported a finding on intentID (summary),
 // then wakes the planner — so the round spells out which intent found what.
 func (t *Task) NotifyFinding(intentID int64, summary string, nodeIDs ...int64) {
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "finding", IntentID: intentID, Detail: summary, NodeIDs: append([]int64(nil), nodeIDs...)})
-	t.trigMu.Unlock()
+	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "finding", IntentID: intentID, Detail: summary, NodeIDs: nodeIDs})
 	t.Notify()
 }
 
@@ -2012,9 +2034,7 @@ func (t *Task) NotifyGoal(texts []string) {
 	if len(texts) == 0 {
 		return
 	}
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "goal", Goals: texts})
-	t.trigMu.Unlock()
+	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "goal", Goals: texts})
 	t.Notify()
 }
 
@@ -2027,9 +2047,7 @@ func (t *Task) NotifyHint(texts []string) {
 	if len(texts) == 0 {
 		return
 	}
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "hint", Hints: texts})
-	t.trigMu.Unlock()
+	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "hint", Hints: texts})
 	t.Notify()
 }
 
@@ -2041,9 +2059,7 @@ func (t *Task) NotifyGoalDeleted(text string) {
 	if text == "" {
 		return
 	}
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "goal_deleted", Detail: text})
-	t.trigMu.Unlock()
+	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "goal_deleted", Detail: text})
 	t.Notify()
 }
 
@@ -2055,9 +2071,7 @@ func (t *Task) NotifyGoalEdited(oldText, newText string) {
 	if newText == "" {
 		return
 	}
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "goal_edited", OldGoal: oldText, NewGoal: newText})
-	t.trigMu.Unlock()
+	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "goal_edited", OldGoal: oldText, NewGoal: newText})
 	t.Notify()
 }
 
@@ -2066,9 +2080,7 @@ func (t *Task) NotifyGoalEdited(oldText, newText string) {
 // The intent is stopped (not deleted); the reason is attached to it as a fact.
 func (t *Task) NotifyCancelled(intentID int64, reason string) {
 	if intentID > 0 {
-		t.trigMu.Lock()
-		t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "cancelled", IntentID: intentID, Detail: reason})
-		t.trigMu.Unlock()
+		t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "cancelled", IntentID: intentID, Detail: reason})
 	}
 	t.Notify()
 }
@@ -2079,13 +2091,17 @@ func (t *Task) drainTriggers() []agent.TriggerEvent {
 	defer t.trigMu.Unlock()
 	ev := t.pendingTriggers
 	t.pendingTriggers = nil
+	if t.triggerOverflow > 0 {
+		ev = append(ev, agent.TriggerEvent{Kind: "change", Count: t.triggerOverflow, Truncated: true})
+		t.triggerOverflow = 0
+	}
 	return ev
 }
 
 func (t *Task) hasPendingTriggers() bool {
 	t.trigMu.Lock()
 	defer t.trigMu.Unlock()
-	return len(t.pendingTriggers) > 0
+	return len(t.pendingTriggers) > 0 || t.triggerOverflow > 0
 }
 
 // NotifyFindingDeleted only wakes the planner; it never wakes or resumes workers.
@@ -2097,9 +2113,7 @@ func (t *Task) NotifyFindingDeleted(feedbackID int64) {
 	if isTerminalStatus(state.Status) || state.Status == "paused" || state.Paused || state.Queued {
 		return
 	}
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "finding_deleted", FeedbackID: feedbackID})
-	t.trigMu.Unlock()
+	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: "finding_deleted", FeedbackID: feedbackID})
 	select {
 	case t.notify <- struct{}{}:
 	default:
@@ -2108,17 +2122,11 @@ func (t *Task) NotifyFindingDeleted(feedbackID int64) {
 
 // NotifyNodes carries identities from the successful write, never guesses IDs by text.
 func (t *Task) NotifyNodes(kind string, ids []int64) {
-	clean := make([]int64, 0, len(ids))
 	for _, id := range ids {
 		if id > 0 {
-			clean = append(clean, id)
+			t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: kind, NodeIDs: ids})
+			t.Notify()
+			return
 		}
 	}
-	if len(clean) == 0 {
-		return
-	}
-	t.trigMu.Lock()
-	t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: kind, NodeIDs: clean})
-	t.trigMu.Unlock()
-	t.Notify()
 }

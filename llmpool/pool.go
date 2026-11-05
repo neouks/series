@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Autumn-27/norma/llm"
+	"github.com/neouks/series/runtimebudget"
 )
 
 // Member is one LLM profile in the chain, already built into a provider (wrapped
@@ -229,7 +230,7 @@ func statusOf(err error) int {
 // pollute the run's termination diagnosis. Never on 400 either: a malformed or
 // over-long request fails identically everywhere.
 func shouldFailover(ctx context.Context, err error) bool {
-	if err == nil {
+	if err == nil || runtimebudget.StopsAutomaticReplay(err) {
 		return false
 	}
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -284,7 +285,9 @@ func estimateTokens(req llm.CompletionRequest) int {
 		// cheaply — charge a flat ~120 chars per top-level property instead.
 		n += len(t.Name) + len(t.Description) + len(t.InputSchema)*120
 	}
-	return n * 2 / 7 // ≈ len/3.5
+	// Routing uses an estimate, not an exact tokenizer. Output occupies the same
+	// physical window and must not disappear from member eligibility.
+	return n*2/7 + max(0, req.MaxTokens) // input ≈ UTF-8 bytes/3.5
 }
 
 func blocksLen(bs []llm.ContentBlock) int {

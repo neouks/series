@@ -9,11 +9,37 @@ import (
 	"time"
 )
 
-const graphRevisionSQL = `WITH scope AS (
+const graphScopeSQL = `WITH scope AS (
  SELECT $1::bigint id UNION SELECT t.exploration_id FROM tasks c JOIN task_relations r ON r.task_id=c.id
  JOIN tasks t ON t.id=r.source_task_id AND t.deleted_at IS NULL WHERE c.exploration_id=$1 AND c.deleted_at IS NULL
- ) SELECT COALESCE(string_agg(concat_ws(':',s.id,COALESCE(r.generation,0),COALESCE(r.content_rev,0),COALESCE(r.topology_rev,0),COALESCE(r.access_rev,0),
+ )`
+
+const graphRevisionSQL = graphScopeSQL + ` SELECT COALESCE(string_agg(concat_ws(':',s.id,COALESCE(r.generation,0),COALESCE(r.content_rev,0),COALESCE(r.topology_rev,0),COALESCE(r.access_rev,0),
  CASE WHEN $2 THEN COALESCE(r.view_rev,0) ELSE 0 END),'|' ORDER BY s.id),'') FROM scope s LEFT JOIN graph_revisions r ON r.exploration_id=s.id`
+
+const graphAccessRevisionSQL = graphScopeSQL + ` SELECT COALESCE(string_agg(concat_ws(':',s.id,COALESCE(r.generation,0),0,0,COALESCE(r.access_rev,0),0),'|' ORDER BY s.id),'')
+ FROM scope s LEFT JOIN graph_revisions r ON r.exploration_id=s.id`
+
+const graphCountRevisionSQL = graphScopeSQL + ` SELECT 'counts-v1:'||COALESCE(string_agg(concat_ws(':',s.id,COALESCE(r.generation,0),COALESCE(r.count_rev,0),COALESCE(r.access_rev,0)),'|' ORDER BY s.id),'')
+ FROM scope s LEFT JOIN graph_revisions r ON r.exploration_id=s.id`
+
+// Fetch both vectors together without adding a round trip to every bootstrap.
+const graphPlannerSnapshotSQL = graphScopeSQL + ` SELECT
+ COALESCE(string_agg(concat_ws(':',s.id,COALESCE(r.generation,0),COALESCE(r.content_rev,0),COALESCE(r.topology_rev,0),COALESCE(r.access_rev,0),COALESCE(r.view_rev,0)),'|' ORDER BY s.id),''),
+ 'counts-v1:'||COALESCE(string_agg(concat_ws(':',s.id,COALESCE(r.generation,0),COALESCE(r.count_rev,0),COALESCE(r.access_rev,0)),'|' ORDER BY s.id),'')
+ FROM scope s LEFT JOIN graph_revisions r ON r.exploration_id=s.id`
+
+type graphQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (s *ExplorationStore) GraphCountRevision(ctx context.Context) (string, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
+	var rev string
+	err := s.db.QueryRowContext(ctx, graphCountRevisionSQL, s.expID).Scan(&rev)
+	return rev, err
+}
 
 // Revision vectors contain only directly related task epochs, never bodies.
 func (s *ExplorationStore) GraphRevision(ctx context.Context, includeDerived bool) (string, error) {
@@ -39,6 +65,13 @@ func (s *ExplorationStore) BootstrapGraphProjection(ctx context.Context) (bool, 
 	if _, err = tx.ExecContext(ctx, `INSERT INTO graph_revisions(exploration_id) SELECT id FROM explorations WHERE id=$1 ON CONFLICT DO NOTHING`, s.expID); err != nil {
 		return false, err
 	}
+	navigationReady, err := maintainGraphNavigationPage(ctx, tx, s.expID)
+	if err != nil {
+		return false, err
+	}
+	if !navigationReady {
+		return false, tx.Commit()
+	}
 	var cursor int64
 	var ready bool
 	if err = tx.QueryRowContext(ctx, `SELECT bootstrap_cursor,initialized FROM graph_revisions WHERE exploration_id=$1 FOR UPDATE`, s.expID).Scan(&cursor, &ready); err != nil {
@@ -55,12 +88,19 @@ func (s *ExplorationStore) BootstrapGraphProjection(ctx context.Context) (bool, 
 		cursor = 0
 	}
 	var last int64
-	err = tx.QueryRowContext(ctx, `WITH page AS MATERIALIZED (
- SELECT id,exploration_id,kind,state,payload FROM exploration_nodes WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT 256
+	err = tx.QueryRowContext(ctx, `WITH ids AS MATERIALIZED (
+ SELECT id,kind FROM exploration_nodes WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT 128
+ ), metadata AS MATERIALIZED (
+ SELECT i.id,i.kind,(i.kind='digest' OR COALESCE(p.asset_metadata_ready,false)) ready
+ FROM ids i LEFT JOIN graph_node_projection p ON p.node_id=i.id AND p.exploration_id=$1
+ ), ranked AS MATERIALIZED (
+ SELECT *,sum(CASE WHEN ready THEN 0 ELSE 1 END) OVER(ORDER BY id) stale FROM metadata
+ ), page AS MATERIALIZED (SELECT * FROM ranked WHERE stale<=8), targets AS MATERIALIZED (
+ SELECT id FROM page WHERE NOT ready AND kind<>'digest'
  ), inserted AS (
  INSERT INTO graph_node_projection(node_id,exploration_id,kind,state,summary,confidence,source_hash,payload_asset_ids,asset_metadata_ready)
  SELECT id,exploration_id,kind,state,left(COALESCE(payload->>'summary',payload->>'text',''),600),left(COALESCE(payload->>'confidence',''),40),md5(payload::text||state||kind),series_graph_payload_assets(payload),true
- FROM page WHERE kind<>'digest' ON CONFLICT(node_id) DO UPDATE SET payload_asset_ids=EXCLUDED.payload_asset_ids,asset_metadata_ready=true WHERE NOT graph_node_projection.asset_metadata_ready RETURNING node_id
+ FROM exploration_nodes WHERE id IN (SELECT id FROM targets) ON CONFLICT(node_id) DO UPDATE SET payload_asset_ids=EXCLUDED.payload_asset_ids,asset_metadata_ready=true WHERE NOT graph_node_projection.asset_metadata_ready RETURNING node_id
  ), dirty AS (
  INSERT INTO graph_dirty_nodes(exploration_id,node_id) SELECT $1,node_id FROM inserted ON CONFLICT DO NOTHING
  ) SELECT COALESCE(max(id),0) FROM page`, s.expID, cursor).Scan(&last)
@@ -86,6 +126,10 @@ func (s *ExplorationStore) MaintainGraphPage(ctx context.Context) (int, error) {
 	}
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, s.expID+8100000000); err != nil {
+		return 0, err
+	}
+	dependencyWork, err := maintainDependencyProjectionPage(ctx, tx, s.expID)
+	if err != nil {
 		return 0, err
 	}
 	ready, err := maintainHotReachPage(ctx, tx, s.expID)
@@ -118,12 +162,15 @@ func (s *ExplorationStore) MaintainGraphPage(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if len(ids) == 0 {
-		return 0, tx.Commit()
+		return dependencyWork, tx.Commit()
 	}
-	// Each revision wave is expanded once per node. A marker records the wave
-	// in graph_repair_seen; real mutations clear it through the source revision.
+	// Each validated topology wave expands a node once. Body writes must not
+	// reset a cyclic repair frontier; topology changes get a new build generation
+	// before this dirty-page phase can run again.
 	var wave int64
-	if err = tx.QueryRowContext(ctx, `SELECT content_rev FROM graph_revisions WHERE exploration_id=$1`, s.expID).Scan(&wave); err != nil {
+	// Negative generations cannot collide with pre-upgrade positive content_rev
+	// markers, so old derived rows need no startup-wide rewrite.
+	if err = tx.QueryRowContext(ctx, `SELECT -hot_build_generation FROM graph_revisions WHERE exploration_id=$1`, s.expID).Scan(&wave); err != nil {
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `WITH affected AS (
@@ -155,7 +202,7 @@ func (s *ExplorationStore) MaintainGraphPage(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return len(ids), tx.Commit()
+	return len(ids) + dependencyWork, tx.Commit()
 }
 
 type GraphCandidate struct {
@@ -198,6 +245,8 @@ func (s *ExplorationStore) GraphCandidates(ctx context.Context, limit int) ([]Gr
 }
 
 func (s *ExplorationStore) AdvanceSummaryCursor(ctx context.Context, id int64) error {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
 	_, err := s.db.ExecContext(ctx, `UPDATE graph_revisions SET summary_cursor=$2 WHERE exploration_id=$1`, s.expID, id)
 	return err
 }
@@ -264,13 +313,49 @@ func (s *ExplorationStore) GraphSummaryAnchors(ctx context.Context, ids []int64)
 }
 
 func (s *ExplorationStore) GraphSummaryAllowed(ctx context.Context) (bool, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
 	var ok bool
 	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1 AND deleted_at IS NULL
- AND execution_mode='managed' AND status IN ('created','running') AND NOT paused AND NOT queued)`, s.expID).Scan(&ok)
+ AND execution_mode='managed' AND status IN ('created','running') AND NOT paused AND NOT queued
+ AND (deadline_at IS NULL OR deadline_at>clock_timestamp()))`, s.expID).Scan(&ok)
 	return ok, err
 }
 
+// The optional host AssetStore cannot be an authorization bypass for summary
+// generation. The owning database always has the strict planning read policy.
+func (s *ExplorationStore) GraphSourceApprovalStates(ctx context.Context, ids []int64) (map[int64]string, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
+	task, err := s.TaskIDContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.db.Assets().WithReadContext(ctx).TaskNodeApprovalStates(task, ids)
+}
+
+// Persist the model-job cooldown, not maintenance activity. Restarting a
+// Compactor cannot bypass it; metadata repair never postpones a future model
+// attempt. The update is a short autocommit statement, outside generation.
+func (s *ExplorationStore) TryGraphSummary(ctx context.Context, cooldown time.Duration) (bool, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
+	cooldown = max(time.Minute, cooldown)
+	result, err := s.db.ExecContext(ctx, `UPDATE graph_revisions r SET summary_attempted_at=clock_timestamp()
+ WHERE r.exploration_id=$1 AND (r.summary_attempted_at IS NULL OR r.summary_attempted_at<=clock_timestamp()-$2::double precision*interval '1 second')
+ AND EXISTS(SELECT 1 FROM tasks t WHERE t.exploration_id=r.exploration_id AND t.deleted_at IS NULL
+	 AND t.execution_mode='managed' AND t.status IN ('created','running') AND NOT t.paused AND NOT t.queued
+ AND (t.deadline_at IS NULL OR t.deadline_at>clock_timestamp()))`, s.expID, cooldown.Seconds())
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
+}
+
 func (s *ExplorationStore) SavePlannerTodos(ctx context.Context, value any) error {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -280,6 +365,8 @@ func (s *ExplorationStore) SavePlannerTodos(ctx context.Context, value any) erro
 	return err
 }
 func (s *ExplorationStore) PlannerTodos(ctx context.Context) (json.RawMessage, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
 	var raw []byte
 	err := s.db.QueryRowContext(ctx, `SELECT todos FROM planner_working_state WHERE exploration_id=$1`, s.expID).Scan(&raw)
 	if err == sql.ErrNoRows {
@@ -295,6 +382,8 @@ type PlannerTodoPreview struct {
 }
 
 func (s *ExplorationStore) PlannerTodoPage(ctx context.Context, index, offset int) ([]PlannerTodoPreview, int, error) {
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
 	rows, err := s.db.QueryContext(ctx, `SELECT (a.ordinality-1)::int,COALESCE(a.value->>'status',''),
  substring(COALESCE(a.value->>'content','') FROM CASE WHEN a.ordinality=$2+1 THEN $3+1 ELSE 1 END FOR 500),
  char_length(COALESCE(a.value->>'content','')),jsonb_array_length(todos)
@@ -323,8 +412,12 @@ func graphReadContext(ctx context.Context) (context.Context, context.CancelFunc)
 // Cache metadata, never an execution authorization. Callers key it with the
 // exact role policy and the live revision vector and still recheck read access.
 func (s *ExplorationStore) GraphCountCache(ctx context.Context, key, rev string) ([]PlannerCount, bool, error) {
+	return s.graphCountCache(ctx, s.db, key, rev)
+}
+
+func (s *ExplorationStore) graphCountCache(ctx context.Context, query graphQueryer, key, rev string) ([]PlannerCount, bool, error) {
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT counts FROM graph_count_cache WHERE exploration_id=$1 AND policy_key=$2 AND revision=$3`, s.expID, key, rev).Scan(&raw)
+	err := query.QueryRowContext(ctx, `SELECT counts FROM graph_count_cache WHERE exploration_id=$1 AND policy_key=$2 AND revision=$3`, s.expID, key, rev).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -360,6 +453,33 @@ func (s *ExplorationStore) GraphVersions(ctx context.Context, ids []int64) (map[
 		out[id] = v
 	}
 	return out, rows.Err()
+}
+
+// Recheck a bounded prepared summary before spending a model call. This is
+// source freshness only; it never replaces asset/lifecycle checks or the final
+// transactional authorization and version validation during publication.
+func (s *ExplorationStore) GraphSourcesCurrent(ctx context.Context, versions map[int64]int64, hashes map[int64]string) (bool, error) {
+	if len(versions) < 1 || len(versions) > 40 || len(versions) != len(hashes) {
+		return false, fmt.Errorf("invalid bounded summary version set")
+	}
+	rows := make([]map[string]any, 0, len(versions))
+	for id, version := range versions {
+		hash, ok := hashes[id]
+		if id <= 0 || version <= 0 || !ok {
+			return false, fmt.Errorf("invalid summary source identity")
+		}
+		rows = append(rows, map[string]any{"id": id, "version": version, "hash": hash})
+	}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		return false, err
+	}
+	ctx, cancel := graphReadContext(ctx)
+	defer cancel()
+	var current bool
+	err = s.db.QueryRowContext(ctx, `SELECT count(*)=$3 FROM jsonb_to_recordset($2::jsonb) x(id bigint,version bigint,hash text)
+ JOIN graph_node_projection p ON p.node_id=x.id AND p.exploration_id=$1 AND p.source_version=x.version AND p.source_hash=x.hash`, s.expID, string(raw), len(rows)).Scan(&current)
+	return current, err
 }
 
 // Source versions and a task-scoped advisory lock make publication atomic.
@@ -446,7 +566,8 @@ func (s *ExplorationStore) PublishGraphDigest(ctx context.Context, payload map[s
 		return 0, fmt.Errorf("summary source is unauthorized or became hot")
 	}
 	var allowed bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1 AND execution_mode='managed' AND status IN ('created','running') AND NOT paused AND NOT queued AND deleted_at IS NULL)`, s.expID).Scan(&allowed); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE exploration_id=$1 AND execution_mode='managed' AND status IN ('created','running') AND NOT paused AND NOT queued AND deleted_at IS NULL
+ AND (deadline_at IS NULL OR deadline_at>clock_timestamp()))`, s.expID).Scan(&allowed); err != nil {
 		return 0, err
 	}
 	if !allowed {
@@ -488,9 +609,8 @@ func (s *ExplorationStore) PublishGraphDigest(ctx context.Context, payload map[s
 func (s *ExplorationStore) GraphAccessRevision(ctx context.Context) (string, error) {
 	ctx, cancel := graphReadContext(ctx)
 	defer cancel()
-	query := strings.Replace(graphRevisionSQL, "COALESCE(r.content_rev,0),COALESCE(r.topology_rev,0),COALESCE(r.access_rev,0)", "0,0,COALESCE(r.access_rev,0)", 1)
 	var rev string
-	err := s.db.QueryRowContext(ctx, query, s.expID, false).Scan(&rev)
+	err := s.db.QueryRowContext(ctx, graphAccessRevisionSQL, s.expID).Scan(&rev)
 	return rev, err
 }
 
