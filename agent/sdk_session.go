@@ -270,12 +270,18 @@ func (h *dispatchHooks) observeModelCalls(opts *agentcore.Options) {
 	}
 	if stream != nil {
 		opts.Deps.CallModel = func(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+			if err := intentInputRetryError(ctx); err != nil {
+				return func(yield func(llm.StreamEvent, error) bool) { yield(llm.StreamEvent{}, err) }
+			}
 			h.observeTools(req.Tools)
 			return committedModelStream(ctx, req, stream)
 		}
 	}
 	if complete != nil {
 		opts.Deps.CallModelSync = func(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+			if err := intentInputRetryError(ctx); err != nil {
+				return llm.Message{}, "", llm.Usage{}, err
+			}
 			h.observeTools(req.Tools)
 			callCtx, release, err := acquireModelRequest(ctx, runtimebudget.ModelGate(), false)
 			if err != nil {
@@ -366,6 +372,9 @@ func (h *dispatchHooks) PreToolUse(ctx context.Context, outer string, input []by
 	}
 	params, err = validate(params)
 	if err != nil {
+		if name == "add_intent" {
+			return true, intentInputError(err.Error()), nil
+		}
 		return true, "invalid tool input: " + err.Error(), nil
 	}
 	if outer == actool.ExecuteExtraToolName {

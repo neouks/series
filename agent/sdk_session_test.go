@@ -50,6 +50,10 @@ func sdkToolTurn(name, input string) harness.QueryDeps {
 		}
 		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("done")}}, "end_turn", llm.Usage{}, nil
 	}
+	return sdkTurnDeps(complete)
+}
+
+func sdkTurnDeps(complete func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error)) harness.QueryDeps {
 	return harness.QueryDeps{CallModelSync: complete, CallModel: func(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
 		return func(yield func(llm.StreamEvent, error) bool) {
 			m, stop, _, _ := complete(ctx, req)

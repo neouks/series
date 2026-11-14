@@ -1483,7 +1483,7 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 		}
 	}
 	if strings.TrimSpace(it.Summary) == "" {
-		return 0, false, fmt.Errorf("summary 不能为空")
+		return 0, false, errIntentSummaryRequired
 	}
 	if t.as != nil && t.taskID > 0 {
 		access, err := queryTargetAccess(t.as, t.taskID, targetAccessQuery{AssetIDs: pidList(it.AssetIDs), NodeIDs: pidList(it.ParentIDs)})
@@ -1607,7 +1607,7 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 // and authorization errors in the per-item result rather than rejecting the batch.
 func intentInputSchema() map[string]any {
 	fields := map[string]any{
-		"summary":    str("一句话描述这个探索方向：做什么+为什么。已写清方向即可，不依赖资产 id。"),
+		"summary":    map[string]any{"type": "string", "minLength": 1, "description": "每条必填，不能只含空白。一句话写明做什么及为什么。"},
 		"asset_ids":  map[string]any{"type": "array", "description": "目标资产ID（复用当前授权上下文中的明确ID，未知时用asset_search查找），不能传探索节点ID；具体目标务必填写，纯全局侦察无具体资产时留空。"},
 		"parent_ids": map[string]any{"type": "array", "description": "上游fact/finding探索节点ID，不是独立finding_id；禁止意图/目标/提示节点。顶层新方向留空，系统挂到任务起点。"},
 		"priority":   intp("优先级建议1-10；省略或0按5处理"),
@@ -1619,14 +1619,23 @@ func intentInputSchema() map[string]any {
 	for k, v := range fields {
 		props[k] = v
 	}
-	props["intents"] = map[string]any{"type": "array", "maxItems": 4, "description": "优先批量，1..4条；非空时仅处理数组，忽略顶层单条字段。ids/errors/duplicates与输入同序。", "items": obj(fields)}
-	return obj(props)
+	props["intents"] = map[string]any{"type": "array", "maxItems": 4, "description": "批量 1–4 条，每项须有 summary；非空时忽略顶层单条字段。ids/errors/duplicates 与输入位置对应。", "items": obj(fields)}
+	schema := obj(props)
+	// Keep the required fields in the mode branches. Norma's basic validator,
+	// including deferred dispatch, must let the handler reject missing
+	// summaries per item and still process the rest of a batch.
+	schema["anyOf"] = []any{
+		obj(map[string]any{"intents": map[string]any{"maxItems": 0}}, "summary"),
+		obj(map[string]any{"intents": map[string]any{"minItems": 1, "items": map[string]any{"required": []string{"summary"}}}}, "intents"),
+	}
+	return schema
 }
 
 func (t *ToolSet) addIntent() actool.CoreTool {
-	return submissionTool{writeTool("add_intent", "生成【探索方向】写入 frontier，并连入探索链路。意图是开放的探索方向，不是固定类型——用 summary 一句话自由描述要探索/验证/利用什么。\n"+
-		"主 Agent 成功下发后结束本轮，Worker 自动回传总结，不轮询等待。Planner 信息足够时直接提交意图，无需先查询意图或资产；仅在信息不足时按需检索，结合已知方向及数据库去重避免重复。Planner 对未审批候选本轮跳过；主 Agent 可明确下发待审批资产方向，但封禁和撤回仍拒绝。未知候选先批量 check_target_access。★优先批量：一轮筛出的多个新方向放进 intents 数组一次提交（最多 4 条，比逐条调用省往返）。返回 ids 数组，与 intents 等长同序（失败项 id=0，详情见 errors；已存在的活跃同方向见 duplicates）。单条则省略 intents 直接给顶层 summary。",
-		intentInputSchema(),
+	schema := intentInputSchema()
+	core := writeTool("add_intent", "登记探索方向并连入探索链路。"+intentInputContract+"\n"+
+		"主 Agent 成功下发后结束本轮，Worker 自动回传总结。Planner 信息足够时直接提交，信息不足时按需检索；跳过未审批候选。主 Agent 可明确下发待审批资产，封禁和撤回仍拒绝。未知候选先批量 check_target_access。批量 ids 与输入同序，失败项为 0 并列在 errors，活跃重复项见 duplicates。全部失败会明确报错；只修正失败项，参数未改变时不要重试。",
+		schema,
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			t := t
 			if locked, _ := ctx.Value(intentSubmissionLockedKey{}).(bool); locked && RunInfoFrom(ctx).AgentKey == "mainagent" && RunInfoFrom(ctx).TaskID == t.taskID && RunInfoFrom(ctx).IntentID == 0 {
@@ -1642,7 +1651,7 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 				intentItem              // 单条模式：顶层 summary/asset_ids/parent_ids/priority
 			}
 			if err := json.Unmarshal(in, &a); err != nil {
-				return actool.Errorf("参数格式错误: " + err.Error()), nil
+				return actool.Errorf(intentInputError(err.Error())), nil
 			}
 			batch := len(a.Intents) > 0
 			items := a.Intents
@@ -1650,7 +1659,7 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 				items = []intentItem{a.intentItem}
 			}
 			if len(items) > 4 {
-				return actool.Errorf("一轮最多新增 4 条意图；请只保留最高价值且互不重复的方向"), nil
+				return actool.Errorf(intentInputError("每次最多新增 4 条意图")), nil
 			}
 
 			if t == nil || t.ts == nil {
@@ -1661,6 +1670,7 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			errs := map[string]string{}
 			accessErrors := map[string]targetAccessView{}
 			duplicates := map[string]int64{}
+			missingSummaries := 0
 			createdAny := false
 			var newlyCreated []int64
 			for i, it := range items {
@@ -1671,6 +1681,9 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 				id, created, err := t.addOneIntentResultWithMode(ctx, it, RunInfoFrom(ctx).AgentKey == "planner" || t.worker == "planner")
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()
+					if errors.Is(err, errIntentSummaryRequired) {
+						missingSummaries++
+					}
 					var denied *targetAccessError
 					if errors.As(err, &denied) {
 						accessErrors[strconv.Itoa(i)] = denied.Access
@@ -1715,6 +1728,9 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			recordMainDispatchErrors(ctx, errs)
 			if !batch { // 单条：保持原返回
 				if e, bad := errs["0"]; bad {
+					if missingSummaries == 1 {
+						return actool.Errorf(intentInputError(e)), nil
+					}
 					if access, ok := accessErrors["0"]; ok {
 						return accessErrorResult(errors.New(e), access)
 					}
@@ -1744,8 +1760,18 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			if len(duplicates) > 0 {
 				out["duplicates"] = duplicates
 			}
-			return jsonResult(out)
-		})}
+			allFailed := len(errs) == len(items)
+			if allFailed {
+				out["error"] = "add_intent 批量提交全部失败，请查看各项 errors。"
+				if missingSummaries == len(items) {
+					out["error"] = intentInputError(errIntentSummaryRequired.Error()) + " 批量提交全部失败。"
+				}
+			}
+			result, err := jsonResult(out)
+			result.IsError = result.IsError || allFailed
+			return result, err
+		})
+	return submissionTool{CoreTool: core, validation: normalizeToolSchema(schema)}
 }
 
 func (t *ToolSet) listGoals() actool.CoreTool {

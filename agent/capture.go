@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,6 +40,8 @@ func captureRun(ctx context.Context, opts agentcore.Options, input string, emit 
 // multiple prompts on the SAME conversation (e.g. a settlement round that reuses
 // the worker's accumulated context after the main run hit max_turns).
 func captureRunSession(ctx context.Context, s conversationSession, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
+	intentRetries := &intentInputRetries{}
+	ctx = context.WithValue(ctx, intentInputRetriesKey{}, intentRetries)
 	ctx, auditTrace := intercept.WithTrace(ctx, input, approvalHistory(s.Messages()))
 	defer auditTrace.Finish()
 	var reason harness.TerminalReason
@@ -115,6 +118,7 @@ func captureRunSession(ctx context.Context, s conversationSession, input string,
 			}
 			flush()
 			out := blocksText(ev.ToolResult.Content)
+			intentRetries.observe(toolNames[ev.ToolResult.ToolUseID], out, ev.ToolResult.IsError)
 			lastTool.done(ev.ToolResult.ToolUseID)
 			auditTrace.Complete(ev.ToolResult.ToolUseID, out, ev.ToolResult.IsError)
 			rec(db.Activity{Kind: "tool_result", Tool: toolNames[ev.ToolResult.ToolUseID], ToolUseID: ev.ToolResult.ToolUseID, Metadata: checkpointNotes[ev.ToolResult.ToolUseID],
@@ -151,7 +155,10 @@ func captureRunSession(ctx context.Context, s conversationSession, input string,
 				}
 				flush() // flush any trailing thinking / non-final text
 				sum, detail := ev.Terminal.Text, ev.Terminal.Text
-				if sum == "" || ev.Terminal.Reason == harness.ReasonAbortedTools || ev.Terminal.Reason == harness.ReasonAbortedStreaming {
+				var stopped intentInputStop
+				if errors.As(ev.Terminal.Err, &stopped) {
+					sum, detail = stopped.Error(), stopped.Error()
+				} else if sum == "" || ev.Terminal.Reason == harness.ReasonAbortedTools || ev.Terminal.Reason == harness.ReasonAbortedStreaming {
 					sum, detail = terminalText(ctx, ev.Terminal, lastTool)
 				}
 				u := ev.Terminal.Usage // cumulative token usage for this session

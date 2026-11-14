@@ -61,7 +61,10 @@ func CreatedDispatchIntents(ctx context.Context) []int64 {
 	return ids
 }
 
-type submissionTool struct{ actool.CoreTool }
+type submissionTool struct {
+	actool.CoreTool
+	validation map[string]any
+}
 
 func (t submissionTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 	fn, _ := ctx.Value(intentSubmissionKey{}).(IntentSubmission)
@@ -74,10 +77,7 @@ func (t submissionTool) Call(ctx context.Context, in json.RawMessage, tc *actool
 }
 
 func (t submissionTool) PrepareInput(in json.RawMessage) (json.RawMessage, error) {
-	return PrepareToolInput(t.CoreTool, in)
+	return in, validateBusinessInput(t.validation, in)
 }
 
-func (t submissionTool) AcceptsRawInput() bool {
-	raw, ok := t.CoreTool.(interface{ AcceptsRawInput() bool })
-	return ok && raw.AcceptsRawInput()
-}
+func (t submissionTool) AcceptsRawInput() bool { return true }
