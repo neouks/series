@@ -8,12 +8,12 @@
 #   SERIES_TARGET_OS=linux             One target OS in single-target mode.
 #   SERIES_TARGET_ARCH=amd64           One target arch in single-target mode.
 #   SERIES_TARGETS=linux/amd64,...     Comma-separated targets for multi-target mode.
-#   SERIES_BUILD_VERSION=v0.3.3        Version embedded in the binary and archive name.
+#   SERIES_BUILD_VERSION=v0.3.3        Optional release version for the binary and archive name.
 #   SERIES_OUTPUT=/path/to/series       Explicit binary path in single-target mode.
 #   SERIES_OUTPUT_DIR=dist             Directory for default binary paths.
 #   SERIES_PACKAGE=1                   Create a zip archive for each target.
 #   SERIES_PACKAGE_DIR=dist            Directory for release archives.
-#   SERIES_COMPRESS=off                UPX mode: off, auto, or required.
+#   SERIES_COMPRESS=off                UPX mode for non-macOS targets: off, auto, or required.
 #   SERIES_UPX_ARGS="--best --lzma"    Arguments passed to UPX.
 #   SERIES_SKIP_FRONTEND=1             Reuse server/webui/dist (for CI artifact builds).
 #   SERIES_SKIP_NPM_CI=1               Skip npm ci while rebuilding the frontend.
@@ -37,7 +37,7 @@ usage() {
 选项：
   --release              构建 Linux、macOS、Windows 的 amd64/arm64 目标并生成 zip
   --target OS/ARCH       设置单个目标，例如 windows/amd64
-  --upx                  强制使用 UPX 压缩二进制（可能影响部分 Linux 环境兼容性）
+  --upx                  强制压缩非 macOS 目标，macOS 目标跳过 UPX
   --no-compress          不使用 UPX，仅使用 Go linker 裁剪并压缩 zip
   --help                 显示帮助
 
@@ -90,13 +90,7 @@ done
 command -v go >/dev/null 2>&1 || die "未检测到 Go（项目需要 Go 1.26 或更高版本）"
 
 SERIES_GOSUMDB="${SERIES_GOSUMDB:-sum.golang.org}"
-if [ -z "${SERIES_BUILD_VERSION:-}" ]; then
-  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    SERIES_BUILD_VERSION="$(git describe --tags --always --dirty)"
-  else
-    SERIES_BUILD_VERSION="dev"
-  fi
-fi
+SERIES_BUILD_VERSION="${SERIES_BUILD_VERSION:-}"
 # Release tags are commonly passed as v0.3.3; keep the binary version consistent.
 SERIES_BUILD_VERSION="${SERIES_BUILD_VERSION#v}"
 SERIES_OUTPUT_DIR="${SERIES_OUTPUT_DIR:-dist}"
@@ -111,6 +105,30 @@ else
   SERIES_TARGETS="${SERIES_TARGETS:-${SERIES_TARGET_OS}/${SERIES_TARGET_ARCH}}"
 fi
 
+# Reject invalid targets before installing dependencies or exporting the UI.
+IFS=',' read -r -a raw_targets <<< "$SERIES_TARGETS"
+[ "${#raw_targets[@]}" -gt 0 ] || die "SERIES_TARGETS 不能为空"
+supported_targets="$(GOSUMDB="$SERIES_GOSUMDB" go tool dist list)" || die "无法读取 Go 支持的构建目标"
+targets=()
+for target in "${raw_targets[@]}"; do
+  target="${target//[[:space:]]/}"
+  [ -n "$target" ] || continue
+  case "$target" in
+    /*|*/|*/*/*) die "无效目标：${target}（必须是 OS/ARCH）" ;;
+    */*) ;;
+    *) die "无效目标：${target}（必须是 OS/ARCH）" ;;
+  esac
+  case "${target%%/*}" in
+    linux|darwin|windows) ;;
+    *) die "不支持的系统：${target%%/*}（支持 linux、darwin、windows）" ;;
+  esac
+  case $'\n'"$supported_targets"$'\n' in
+    *$'\n'"$target"$'\n'*) targets+=("$target") ;;
+    *) die "当前 Go 不支持构建目标：${target}" ;;
+  esac
+done
+[ "${#targets[@]}" -gt 0 ] || die "SERIES_TARGETS 不能为空"
+
 if [ "${SERIES_SKIP_FRONTEND:-0}" = "1" ]; then
   [ -d server/webui/dist ] || die "SERIES_SKIP_FRONTEND=1 但 server/webui/dist 不存在"
 else
@@ -118,7 +136,7 @@ else
   command -v rsync >/dev/null 2>&1 || die "未检测到 rsync"
   info "构建前端静态资源"
   if [ "${SERIES_SKIP_NPM_CI:-0}" != "1" ]; then
-    (cd web && npm ci)
+    (cd web && HUSKY=0 npm ci --include=dev)
   fi
   (cd web && npm run build:static)
   info "同步前端资源到 server/webui/dist"
@@ -138,6 +156,11 @@ compress_binary() {
     *) die "SERIES_COMPRESS 必须是 off、auto 或 required" ;;
   esac
 
+  if [ "$goos" = "darwin" ]; then
+    warn "macOS 目标跳过 UPX，保留原始可执行文件：$binary"
+    return 0
+  fi
+
   if ! command -v upx >/dev/null 2>&1; then
     if [ "$SERIES_COMPRESS" = "required" ]; then
       die "SERIES_COMPRESS=required 但未检测到 upx"
@@ -148,7 +171,6 @@ compress_binary() {
 
   before=$(wc -c < "$binary" | tr -d ' ')
   upx_args="$SERIES_UPX_ARGS"
-  [ "$goos" = "darwin" ] && upx_args="$upx_args --force-macos"
   # shellcheck disable=SC2086
   if ! upx $upx_args -- "$binary"; then
     if [ "$SERIES_COMPRESS" = "required" ]; then
@@ -165,7 +187,7 @@ package_binary() {
   binary="$1"
   goos="$2"
   goarch="$3"
-  package_name="series-${SERIES_BUILD_VERSION}-${goos}-${goarch}"
+  package_name="series-${SERIES_BUILD_VERSION:-dev}-${goos}-${goarch}"
   package_root="${SERIES_PACKAGE_DIR}/${package_name}"
   archive="${SERIES_PACKAGE_DIR}/${package_name}.zip"
 
@@ -190,16 +212,8 @@ package_binary() {
 
 build_target() {
   target="$1"
-  case "$target" in
-    */*) ;;
-    *) die "无效目标：$target（必须是 OS/ARCH）" ;;
-  esac
   goos="${target%%/*}"
   goarch="${target##*/}"
-  case "$goos" in
-    linux|darwin|windows) ;;
-    *) die "不支持的系统：$goos（支持 linux、darwin、windows）" ;;
-  esac
 
   binary_name="series"
   [ "$goos" = "windows" ] && binary_name="series.exe"
@@ -210,16 +224,21 @@ build_target() {
   fi
   mkdir -p "$(dirname "$output")"
 
-  info "编译 ${goos}/${goarch}，版本 ${SERIES_BUILD_VERSION}"
+  local ldflags="-s -w -buildid="
+  if [ -n "$SERIES_BUILD_VERSION" ]; then
+    ldflags+=" -X main.version=${SERIES_BUILD_VERSION}"
+  fi
+  info "编译 ${goos}/${goarch}${SERIES_BUILD_VERSION:+，版本 ${SERIES_BUILD_VERSION}}"
   GOSUMDB="$SERIES_GOSUMDB" \
   CGO_ENABLED=0 \
   GOOS="$goos" \
   GOARCH="$goarch" \
   go build \
     -mod=readonly \
+    -buildvcs=false \
     -tags embedui \
     -trimpath \
-    -ldflags "-s -w -buildid= -X main.version=${SERIES_BUILD_VERSION}" \
+    -ldflags "$ldflags" \
     -o "$output" \
     ./cmd/series
 
@@ -246,14 +265,7 @@ write_checksums() {
 mkdir -p "$SERIES_OUTPUT_DIR"
 if [ "$SERIES_PACKAGE" = "1" ]; then mkdir -p "$SERIES_PACKAGE_DIR"; fi
 
-old_ifs="$IFS"
-IFS=','
-read -r -a targets <<< "$SERIES_TARGETS"
-IFS="$old_ifs"
-[ "${#targets[@]}" -gt 0 ] || die "SERIES_TARGETS 不能为空"
 for target in "${targets[@]}"; do
-  target="${target//[[:space:]]/}"
-  [ -n "$target" ] || continue
   build_target "$target"
 done
 

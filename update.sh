@@ -46,13 +46,13 @@ update_local(){
 
   if command -v npm >/dev/null 2>&1; then
     info "重建前端静态产物…"
-    ( cd web && npm ci && npm run build:static )
+    ( cd web && HUSKY=0 npm ci --include=dev && npm run build:static )
     rm -rf server/webui/dist && cp -r web/out server/webui/dist
     info "重新编译内嵌单二进制…"
-    CGO_ENABLED=0 go build -tags embedui -trimpath -o series ./cmd/series
+    CGO_ENABLED=0 go build -buildvcs=false -tags embedui -trimpath -o series ./cmd/series
   else
     warn "未检测到 npm：编译**不内嵌前端**的后端（前端需另跑 npm run dev）"
-    CGO_ENABLED=0 go build -o series ./cmd/series
+    CGO_ENABLED=0 go build -buildvcs=false -o series ./cmd/series
   fi
   ok "编译完成 → ./series"
   warn "请重启正在运行的 series 进程以生效（重启时会自动迁移 schema）"

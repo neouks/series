@@ -123,7 +123,7 @@ CGO_ENABLED=0 go build -tags embedui -o series ./cmd/series
 # 产物：dist/series-0.3.3-*.zip
 ```
 
-UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。可用 `SERIES_TARGETS` 自定义目标；确认目标运行环境兼容时，可显式传入 `--upx` 进一步缩小二进制：
+UPX 自解压二进制可能与部分 Linux 内核、虚拟化环境或安全策略不兼容，因此默认不启用。确认目标环境兼容时，可传入 `--upx` 压缩非 macOS 产物。macOS 目标会跳过 UPX，发布包仍可通过 zip 缩小体积。
 
 ```bash
 SERIES_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
