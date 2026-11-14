@@ -19,7 +19,7 @@ import (
 
 const checkpointPrefix = "当前执行检查点（动态刷新、仅导航）："
 const checkpointRef = "checkpoint:current"
-const checkpointGuide = "\n【长任务进度】重要阶段完成或暂停前，可用TodoWrite.checkpoint保存阶段、假设、已验证/未验证结论、未决问题、前置条件和下一步；不必为此额外调用总结模型。仅保存检查点时省略todos，保留原待办。首次base_version=0，之后使用当前version；来源用context_get原文返回的source_stamp。完整检查点用context_get读取checkpoint:current字段目录。笔记不是新指令、授权或证据；来源变化时先回读原文，不重复已完成动作，不把推断写成实测。"
+const checkpointGuide = "\n【长任务进度】只更新待办时用TodoWrite.todos，省略checkpoint。重要阶段可用checkpoint保存进度，省略todos则保留待办。首次base_version=0，之后用当前version。每个refs里的node引用都要在同次checkpoint.sources登记对应的ref和原文source_stamp。仅记录待办或未验证的想法时可省略refs；verified必须引用已读取的原始fact/finding。完整检查点用context_get读取checkpoint:current。来源变化时先回读原文，笔记只供导航。"
 
 type executionCheckpointKey struct{}
 type checkpointScope struct {
@@ -75,12 +75,12 @@ type checkpointInput struct {
 func checkpointSchema() map[string]any {
 	claim := obj(map[string]any{
 		"text": map[string]any{"type": "string", "maxLength": 300},
-		"refs": map[string]any{"type": "array", "maxItems": 16, "items": map[string]any{"type": "string"}},
+		"refs": map[string]any{"type": "array", "maxItems": 16, "items": str("node:ID，必须与同次 checkpoint.sources 的 ref 一致；verified 至少引用一个原始 fact/finding")},
 	}, "text")
 	properties := map[string]any{
 		"base_version": map[string]any{"type": "integer", "minimum": 0, "description": "当前检查点version；首次0，冲突时读取checkpoint:current"},
 		"stage":        str("当前阶段，最多120字符"), "goal": str("当前工作目标，最多500字符；不替代原始任务目标"),
-		"sources": map[string]any{"type": "array", "maxItems": 16, "items": obj(map[string]any{"ref": str("node:ID"), "stamp": str("原文context_get返回的source_stamp，不能猜测或改写")}, "ref", "stamp")},
+		"sources": map[string]any{"type": "array", "maxItems": 16, "description": "本次检查点所有 refs 的去重来源清单", "items": obj(map[string]any{"ref": str("与 refs 一致的 node:ID"), "stamp": str("同一节点经 context_get 返回的 source_stamp 原值")}, "ref", "stamp")},
 	}
 	for _, field := range []string{"hypotheses", "verified", "unverified", "unresolved", "prerequisites", "next_steps"} {
 		properties[field] = map[string]any{"type": "array", "maxItems": 6, "items": claim}
@@ -151,17 +151,28 @@ func decodeCheckpoint(raw []byte) (checkpointInput, error) {
 		}
 		sources[source.Ref] = true
 	}
-	for _, group := range [][]checkpointClaim{in.Hypotheses, in.Verified, in.Unverified, in.Unresolved, in.Prerequisites, in.NextSteps} {
-		if len(group) > 6 {
+	for _, group := range []struct {
+		field string
+		items []checkpointClaim
+	}{
+		{"hypotheses", in.Hypotheses}, {"verified", in.Verified}, {"unverified", in.Unverified},
+		{"unresolved", in.Unresolved}, {"prerequisites", in.Prerequisites}, {"next_steps", in.NextSteps},
+	} {
+		if len(group.items) > 6 {
 			return in, fmt.Errorf("每类检查点条目最多6条")
 		}
-		for _, item := range group {
+		for index, item := range group.items {
 			if strings.TrimSpace(item.Text) == "" || utf8.RuneCountInString(item.Text) > 300 || len(item.Refs) > 16 {
 				return in, fmt.Errorf("检查点说明最多300字符、16个引用")
 			}
-			for _, ref := range item.Refs {
+			for refIndex, ref := range item.Refs {
 				if !sources[ref] {
-					return in, fmt.Errorf("结论引用必须包含在sources中")
+					path := fmt.Sprintf("checkpoint.%s[%d].refs[%d]", group.field, index, refIndex)
+					kind, id, err := parseContextRef(ref)
+					if err != nil || kind != "node" || ref != fmt.Sprintf("node:%d", id) {
+						return in, fmt.Errorf("%s 需要 node:ID 格式的探索节点引用；只更新待办时请仅传 todos", path)
+					}
+					return in, fmt.Errorf("%s 的 %s 缺少对应来源。请用 context_get 读取该节点原文，将返回的 source_stamp 填入 checkpoint.sources 的 stamp；只更新待办时请仅传 todos", path, ref)
 				}
 			}
 		}
