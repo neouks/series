@@ -26,7 +26,20 @@ test("fallback markdown preserves real packets, step order and code delimiters",
   });
   assert.ok(md.includes(raw));
   assert.ok(md.includes("````\n"));
-  assert.ok(md.indexOf("步骤 1：对照") < md.indexOf("步骤 2：验证"));
+  assert.ok(md.includes("## 复现记录"));
+  assert.ok(md.includes("读取已有响应") && md.includes("修改订单编号"));
+  assert.ok(md.indexOf("读取已有响应") < md.indexOf("修改订单编号"));
+  assert.ok(!md.includes("### 步骤"));
   assert.ok(md.includes("响应原文未记录"));
+  assert.ok(md.includes("请求原文未记录"));
   assert.equal(reproductionMarkdown(null), "");
+});
+
+test("recorded packet previews are labeled without changing the original text", () => {
+  const raw = "HTTP/1.1 200 OK\n\n预览\n... [截断，共 12000 字节；完整在流量文件树] ...";
+  const md = reproductionMarkdown({
+    steps: [{ title: "已有记录", action: "核对响应", result: "正文仅有预览", response: raw }],
+  });
+  assert.ok(md.includes(raw));
+  assert.ok(md.includes("响应报文为截断预览"));
 });

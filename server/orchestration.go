@@ -433,7 +433,7 @@ func (s *Server) toolGetTaskNodeDetail() actool.CoreTool {
 // task-agnostic, so this host tool needs no task_id / exploration store.
 func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 	return wrTool("update_finding_report",
-		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_node_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告采用资产发现路径、危害及严重等级、漏洞发现路径、自然语言分步复现、50字内修复建议；真实报文/命令逐字保留，缺失证据明确说明。",
+		"为已登记的漏洞写入或更新 Markdown 报告全文。finding_node_id 传 report_finding 返回的探索节点 ID。用简短自然语言写资产发现路径、危害及严重等级、漏洞发现路径、连续的复现记录、50 字内修复建议。引用已保存的证据编号，明确说明缺失的证据。",
 		objSchema(map[string]any{
 			"finding_node_id":  positiveIDParam("report_finding 返回的 finding_node_id（探索节点），正整数或数字字符串"),
 			"report":           strParam("详细报告全文,Markdown 格式"),

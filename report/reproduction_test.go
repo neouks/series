@@ -17,17 +17,31 @@ func TestReproductionExportUsesImmutableEvidenceAndLegacyReport(t *testing.T) {
 	raw, _ := json.Marshal(repro)
 	f := &db.DBFinding{ID: 123, Severity: "low", Summary: "fixture", Reproduction: raw}
 	for _, rendered := range []string{SingleFindingMarkdown(f, time.Time{}), FindingsMarkdown([]*db.DBFinding{f}, time.Time{})} {
-		for _, want := range []string{"步骤 1：对照", "步骤 2：命令", repro.Steps[0].Request, repro.Steps[0].Response, "````\n```\ntest", "关联流量证据编号", "未关联流量证据"} {
+		for _, want := range []string{"## 复现记录", "读取自己的订单", "查看输出", repro.Steps[0].Request, repro.Steps[0].Response, "````\n```\ntest", "关联流量证据编号"} {
 			if !strings.Contains(rendered, want) {
 				t.Fatalf("missing %q: %s", want, rendered)
 			}
 		}
-		if strings.Index(rendered, "步骤 1") > strings.Index(rendered, "步骤 2") {
-			t.Fatal("steps reordered")
+		if strings.Index(rendered, "读取自己的订单") > strings.Index(rendered, "查看输出") || strings.Contains(rendered, "### 步骤") {
+			t.Fatal("expected a continuous, ordered reproduction record")
 		}
 	}
 	f.Report = "## 原报告\n\n保持原文"
-	if body := SingleFindingMarkdown(f, time.Time{}); !strings.Contains(body, f.Report) || strings.Contains(body, "步骤 1") {
+	if body := SingleFindingMarkdown(f, time.Time{}); !strings.Contains(body, f.Report) || strings.Contains(body, "## 复现记录") {
 		t.Fatal("rewrote/duplicated existing report", body)
+	}
+}
+
+func TestReproductionExportNotesMissingAndTruncatedPackets(t *testing.T) {
+	repro := db.FindingReproduction{Steps: []db.FindingReproductionStep{{
+		Action:   "核对已采集的响应",
+		Response: "HTTP/1.1 200 OK\n\n预览\n…[truncated] @blob sha256:" + strings.Repeat("a", 64) + " (len=12000)",
+	}}}
+	raw, _ := json.Marshal(repro)
+	rendered := ReproductionMarkdown(raw)
+	for _, want := range []string{"请求原文未记录", "响应报文为截断预览", repro.Steps[0].Response} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing %q: %s", want, rendered)
+		}
 	}
 }

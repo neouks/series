@@ -1,15 +1,34 @@
 import type { FindingReproduction } from "./types";
 
+const packetPreviewFooter =
+  /^(?:…\[truncated\] @blob sha256:[0-9a-f]{64} \(len=[0-9]+\)|\.\.\. \[截断，共 [0-9]+ 字节；完整在流量文件树\] \.\.\.)$/;
+
+export function reproductionPacketNotices(request?: string, response?: string): string[] {
+  if (!request && !response) return [];
+  const notices = [];
+  for (const [label, raw] of [
+    ["请求", request],
+    ["响应", response],
+  ] as const) {
+    const packet = raw?.trim();
+    if (!packet) notices.push(`${label}原文未记录。`);
+    else if (packetPreviewFooter.test(packet.slice(packet.lastIndexOf("\n") + 1))) {
+      notices.push(`${label}报文为截断预览，请核对已保存的流量证据。`);
+    }
+  }
+  return notices;
+}
+
 // Deterministic mock-export fallback; the production server renders its own
 // saved representation. This never infers steps from unstructured history.
 export function reproductionMarkdown(reproduction?: FindingReproduction | null): string {
   if (!reproduction?.steps.length) return "";
-  const lines = ["## 分步复现", ""];
+  const lines = ["## 复现记录", ""];
   if (reproduction.entry_point) lines.push(`入口：${reproduction.entry_point}`, "");
   if (reproduction.prerequisites?.length)
     lines.push("前置条件：", ...reproduction.prerequisites.map((text) => `- ${text}`), "");
-  reproduction.steps.forEach((step, index) => {
-    lines.push(`### 步骤 ${index + 1}：${step.title}`, "", step.action, "");
+  for (const step of reproduction.steps) {
+    lines.push(step.action, "");
     for (const [label, text] of [
       ["请求", step.request],
       ["响应", step.response],
@@ -21,15 +40,10 @@ export function reproductionMarkdown(reproduction?: FindingReproduction | null):
       while (text.includes(fence)) fence += "`";
       lines.push(`**${label}**`, "", fence, text, fence, "");
     }
-    if (step.request && !step.response) lines.push("响应原文未记录。", "");
-    lines.push(`实际结果：${step.result}`, "");
-    if (step.proves) lines.push(`证明范围：${step.proves}`, "");
-    lines.push(
-      step.binding_ids?.length
-        ? `关联流量证据编号：${step.binding_ids.join("、")}`
-        : "未关联流量证据；以上为现场记录。",
-      "",
-    );
-  });
+    for (const notice of reproductionPacketNotices(step.request, step.response)) lines.push(notice, "");
+    lines.push(step.result, "");
+    if (step.proves) lines.push(step.proves, "");
+    if (step.binding_ids?.length) lines.push(`关联流量证据编号：${step.binding_ids.join("、")}`, "");
+  }
   return lines.join("\n");
 }
