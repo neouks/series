@@ -86,7 +86,7 @@ func (s *Server) pgTokenByModel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"models": []db.ModelTokenStat{}})
 		return
 	}
-	models, err := pg.TokenByModel(id)
+	models, err := pg.TokenByModel(r.Context(), id)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

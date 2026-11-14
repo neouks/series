@@ -40,8 +40,17 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { startPolling } from "@/lib/polling";
 import type { NotificationCategory } from "@/lib/task-notifications";
-import type { InterceptApprovalRow, LLMProfile, Stats, Task } from "@/lib/types";
+import type {
+  InterceptApprovalRow,
+  LLMProfile,
+  ModelTokenStat,
+  SessionTokenUsage,
+  Stats,
+  Task,
+  TokenTotal,
+} from "@/lib/types";
 
 import { SessionsTab } from "./_tabs/sessions-tab";
 
@@ -243,6 +252,41 @@ function TaskDetailInner() {
         ? searchParams.get("tab")!
         : "sessions",
   );
+  const [modelTokens, setModelTokens] = React.useState<ModelTokenStat[]>();
+  const [sessionUsage, setSessionUsage] = React.useState<SessionTokenUsage[]>();
+  const showTokenStats = tab === "sessions" || tab === "overview";
+  React.useEffect(() => {
+    if (!id || !showTokenStats) return;
+    const poll = startPolling(async (signal) => {
+      const { models } = await api.tokensByModel(id, signal);
+      if (!signal.aborted) setModelTokens(models);
+    }, 5000);
+    return poll.stop;
+  }, [id, showTokenStats]);
+  React.useEffect(() => {
+    if (!id || tab !== "sessions") return;
+    const poll = startPolling(async (signal) => {
+      const { sessions } = await api.tokenStats(id, signal);
+      if (!signal.aborted) setSessionUsage(sessions);
+    }, 5000);
+    return poll.stop;
+  }, [id, tab]);
+
+  const taskTokens = React.useMemo(
+    () =>
+      modelTokens?.reduce<TokenTotal>(
+        (total, model) => {
+          total.input_tokens += model.input_tokens;
+          total.output_tokens += model.output_tokens;
+          total.cache_read_tokens += model.cache_read_tokens;
+          total.cache_write_tokens += model.cache_write_tokens;
+          return total;
+        },
+        { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 },
+      ),
+    [modelTokens],
+  );
+
   const { counts: unread, refresh: refreshNotifications, capture } = useTaskNotifications([id], "all");
   const activeTab = React.useRef(tab);
   activeTab.current = tab;
@@ -501,10 +545,15 @@ function TaskDetailInner() {
       <NotificationReadContext.Provider value={beginRead}>
         <div className="flex-1 p-4 lg:p-6">
           <TabsContent value="sessions" className="mt-0">
-            <SessionsTab taskId={id} pendingIntercepts={pendingIntercepts} />
+            <SessionsTab
+              taskId={id}
+              pendingIntercepts={pendingIntercepts}
+              taskTokens={taskTokens}
+              sessionUsage={sessionUsage}
+            />
           </TabsContent>
           <TabsContent value="overview" className="mt-0">
-            <OverviewTab taskId={id} />
+            <OverviewTab taskId={id} taskTokens={taskTokens} modelTokens={modelTokens} />
           </TabsContent>
           <TabsContent value="graph" className="mt-0">
             <GraphTab taskId={id} />

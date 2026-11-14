@@ -2349,8 +2349,19 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
-  // ── 按模型 token 用量（demo：一条示例）──
-  if (path === "/llm/records/by-model")
+  // t-acme-api includes background spend to demonstrate the ledger total.
+  if (path === "/llm/records/by-model") {
+    const selectedTask = mockTasks.find((item) => item.id === task);
+    if (task !== "t-acme-api" || !selectedTask) {
+      const tokens = selectedTask?.tokens;
+      const model = D.llmProfiles.find((profile) => profile.id === String(selectedTask?.llm_profile_id))?.model;
+      return {
+        models:
+          tokens && Object.values(tokens).some((value) => value > 0)
+            ? [{ model: model ?? "(unknown)", calls: 1, ...tokens }]
+            : [],
+      };
+    }
     return {
       models: [
         {
@@ -2371,6 +2382,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         },
       ],
     };
+  }
 
   // ── stats ──
   if (path === "/stats") {

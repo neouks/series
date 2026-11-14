@@ -36,6 +36,7 @@ import type {
   TaskGoal,
   TaskNode,
   TaskScopeRow,
+  TokenTotal,
 } from "@/lib/types";
 
 // 紧凑格式化 token 数（12345 → 12.3k，2000000 → 2M）。
@@ -100,7 +101,15 @@ function StatCard({
   );
 }
 
-export function OverviewTab({ taskId }: { taskId: string }) {
+export function OverviewTab({
+  taskId,
+  taskTokens,
+  modelTokens = [],
+}: {
+  taskId: string;
+  taskTokens?: TokenTotal;
+  modelTokens?: ModelTokenStat[];
+}) {
   const [task, setTask] = React.useState<Task | null>(null);
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
@@ -121,8 +130,6 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const [scopeValueInput, setScopeValueInput] = React.useState("");
   const [scopeBusy, setScopeBusy] = React.useState(false);
   const [scopeErr, setScopeErr] = React.useState("");
-  // 按模型的 token 用量（来自常开的 llm_usage 计量账本，逐次精确）。
-  const [modelTokens, setModelTokens] = React.useState<ModelTokenStat[]>([]);
   // 目标管理：目标列表 + 新增表单 + 行内编辑状态。
   const [goals, setGoals] = React.useState<TaskGoal[]>([]);
   const [goalText, setGoalText] = React.useState("");
@@ -141,15 +148,6 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const [editingConId, setEditingConId] = React.useState<string | null>(null);
   const [editConText, setEditConText] = React.useState("");
   const [editConKind, setEditConKind] = React.useState<TaskConstraint["kind"]>("deny");
-
-  const loadTokens = React.useCallback(async () => {
-    try {
-      const resp = await api.tokensByModel(taskId);
-      setModelTokens(resp.models);
-    } catch {
-      // 忽略：无 PG 时接口报错，卡片自然为空
-    }
-  }, [taskId]);
 
   const loadScope = React.useCallback(async () => {
     try {
@@ -394,12 +392,10 @@ export function OverviewTab({ taskId }: { taskId: string }) {
 
     void load();
     void loadScope();
-    void loadTokens();
     void loadGoals();
     void loadConstraints();
     const timer = setInterval(() => {
       void load();
-      void loadTokens();
       void loadGoals();
       void loadConstraints();
     }, 3000);
@@ -407,25 +403,14 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [taskId, loadScope, loadTokens, loadGoals, loadConstraints]);
+  }, [taskId, loadScope, loadGoals, loadConstraints]);
 
   const running = intents.filter((i) => i.state === "running");
   const open = intents.filter((i) => i.state === "open");
   const blocked = intents.filter((i) => i.state === "blocked");
   const taskFindings = findings.filter((f) => f.task_id === taskId);
   const goalsPct = task?.goals_total ? Math.round(((task.goals_met ?? 0) / task.goals_total) * 100) : 0;
-  // token 合计（跨全部模型），用于卡片头部总览。
-  const tokenTotals = modelTokens.reduce(
-    (acc, m) => {
-      acc.input += m.input_tokens;
-      acc.output += m.output_tokens;
-      acc.cacheRead += m.cache_read_tokens;
-      acc.cacheWrite += m.cache_write_tokens;
-      acc.calls += m.calls;
-      return acc;
-    },
-    { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, calls: 0 },
-  );
+  const modelCalls = modelTokens.reduce((sum, row) => sum + row.calls, 0);
 
   return (
     <div className="flex flex-col gap-4">
@@ -730,41 +715,44 @@ export function OverviewTab({ taskId }: { taskId: string }) {
           </CardContent>
         </Card>
       )}
-      {/* LLM Token 用量：按模型分组，数据来自 llm_records（需开启 LLM 录制）。 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CoinsIcon className="size-4 text-amber-500" /> LLM Token 用量
-            <span className="text-muted-foreground text-xs font-normal">
-              （按模型统计{tokenTotals.calls > 0 ? `，共 ${tokenTotals.calls} 次调用` : ""}）
-            </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          {modelTokens.length > 0 ? (
-            <>
-              {/* 合计总览 */}
+          <div className="flex flex-col gap-2">
+            <span className="text-muted-foreground text-xs">任务总计 · 模型调用账本</span>
+            {taskTokens ? (
               <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-                <span className="tabular-nums">
-                  <span className="text-muted-foreground">输入 </span>
-                  <span className="font-semibold">{fmtTokens(tokenTotals.input)}</span>
-                </span>
-                <span className="tabular-nums">
-                  <span className="text-muted-foreground">输出 </span>
-                  <span className="font-semibold">{fmtTokens(tokenTotals.output)}</span>
-                </span>
-                <span className="tabular-nums">
-                  <span className="text-muted-foreground">缓存读 </span>
-                  <span className="font-semibold">{fmtTokens(tokenTotals.cacheRead)}</span>
-                </span>
+                {(
+                  [
+                    ["输入", taskTokens.input_tokens],
+                    ["输出", taskTokens.output_tokens],
+                    ["缓存读", taskTokens.cache_read_tokens],
+                    ["缓存写", taskTokens.cache_write_tokens],
+                  ] as const
+                ).map(([label, value]) => (
+                  <span key={label} className="tabular-nums" title={value.toLocaleString()}>
+                    <span className="text-muted-foreground">{label} </span>
+                    <span className="font-semibold">{fmtTokens(value)}</span>
+                  </span>
+                ))}
                 <span className="tabular-nums">
                   <span className="text-muted-foreground">缓存命中率 </span>
                   <span className="font-semibold text-emerald-500">
-                    {cacheHitRate(tokenTotals.cacheRead, tokenTotals.input)}
+                    {cacheHitRate(taskTokens.cache_read_tokens, taskTokens.input_tokens)}
                   </span>
                 </span>
               </div>
-              {/* 按模型明细表 */}
+            ) : (
+              <p className="text-muted-foreground text-sm">暂未取得任务总计。</p>
+            )}
+          </div>
+          {modelTokens.length > 0 && (
+            <>
+              <p className="text-muted-foreground text-xs">按模型记录的调用 · {modelCalls} 次 · 包含后台模型调用</p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -796,8 +784,6 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 </table>
               </div>
             </>
-          ) : (
-            <p className="text-muted-foreground text-sm">暂无 LLM 用量（任务尚未产生调用，或记录仍在写入）。</p>
           )}
         </CardContent>
       </Card>

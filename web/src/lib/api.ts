@@ -704,9 +704,10 @@ export const api = {
   deepenFinding: (id: string, description: string) =>
     post<FindingDeepenResponse>(`/exploration/findings/${id}/deepen`, { description }),
   intents: (task?: string) => get<TaskNode[]>(`/exploration/intents${tq(task)}`).then(arr),
-  tokenStats: (task?: string) =>
+  tokenStats: (task?: string, signal?: AbortSignal) =>
     get<{ workers: TokenUsage[]; sessions: SessionTokenUsage[]; total: TokenTotal }>(
       `/exploration/tokens${tq(task)}`,
+      { signal },
     ).then((r) => ({
       workers: arr(r.workers),
       sessions: arr(r.sessions),
@@ -1314,6 +1315,9 @@ export const api = {
   llmRecordsDeleteTask: (task: string) => del<{ deleted: number }>(`/llm/records?task=${encodeURIComponent(task)}`),
   // 按模型聚合本任务的 token 用量（来自常开的 llm_usage 计量账本，逐次调用精确，
   // per-agent 绑定 / 轮询 / 中断消耗都覆盖）。
-  tokensByModel: (task: string) =>
-    get<{ models: ModelTokenStat[] }>(`/llm/records/by-model?task=${encodeURIComponent(task)}`),
+  tokensByModel: (task: string, signal?: AbortSignal) =>
+    get<{ models: ModelTokenStat[] }>(`/llm/records/by-model?task=${encodeURIComponent(task)}`, {
+      signal,
+      cache: "no-store",
+    }),
 };

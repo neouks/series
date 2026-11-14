@@ -529,9 +529,13 @@ function WorkerAssetBadge({ assets }: { assets: IntentAsset[] }) {
 export function SessionsTab({
   taskId,
   pendingIntercepts,
+  taskTokens,
+  sessionUsage,
 }: {
   taskId: string;
   pendingIntercepts: InterceptApprovalRow[];
+  taskTokens?: TokenTotal;
+  sessionUsage?: SessionTokenUsage[];
 }) {
   const [selectedSessionId, setActiveId] = React.useState(MAIN_ID);
   const [sourceIntent, setSourceIntent] = React.useState<TaskNode | null>(null);
@@ -747,9 +751,10 @@ export function SessionsTab({
   // SSE connection state — surfaced so a dropped realtime link is visible, never
   // silently shown as "no messages".
   const [sseLive, setSseLive] = React.useState(false);
-  // Whole-task token total (all agents), polled from the backend aggregate.
-  const [taskTokens, setTaskTokens] = React.useState<TokenTotal | null>(null);
-  const [sessionTokens, setSessionTokens] = React.useState<Record<string, SessionTokenUsage>>({});
+  const sessionTokens = React.useMemo(
+    () => Object.fromEntries((sessionUsage ?? []).map((item) => [item.session, item])),
+    [sessionUsage],
+  );
   const [llmResolutions, setLLMResolutions] = React.useState<TaskLLMResolutions | null>(null);
   // Refs backing SSE/loading without re-render churn.
   const snapshotRef = React.useRef(0); // task-level snapshot cursor → SSE since=
@@ -889,28 +894,6 @@ export function SessionsTab({
     [taskId, store, patchStore],
   );
 
-  // ── task token total (whole task, all agents) ───────────────────────────────────
-  React.useEffect(() => {
-    let alive = true;
-    const load = () =>
-      api
-        .tokenStats(taskId)
-        .then((r) => {
-          if (!alive) return;
-          setTaskTokens(r.total);
-          setSessionTokens(Object.fromEntries(r.sessions.map((item) => [item.session, item])));
-        })
-        .catch(() => {
-          // Polling is best-effort; the next interval retries automatically.
-        });
-    void load();
-    const t = setInterval(load, 5000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [taskId]);
-
   React.useEffect(() => {
     let alive = true;
     setMainChatRunning(null);
@@ -975,8 +958,6 @@ export function SessionsTab({
     setFirstIntentsHasMore(false);
     setOlderIntentsHasMore(false);
     setHasLoadedOlderIntentsPage(false);
-    setTaskTokens(null);
-    setSessionTokens({});
     setLLMResolutions(null);
     setSseLive(false);
     setActiveId(MAIN_ID); // a stale worker id from the previous task must not leak in
@@ -1899,6 +1880,7 @@ export function SessionsTab({
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
+                  <div>模型调用账本 · 含后台调用</div>
                   输入 {taskTokens.input_tokens.toLocaleString()} · 输出 {taskTokens.output_tokens.toLocaleString()} ·
                   缓存读取 {taskTokens.cache_read_tokens.toLocaleString()} · 缓存写入{" "}
                   {taskTokens.cache_write_tokens.toLocaleString()}

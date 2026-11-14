@@ -144,14 +144,14 @@ func nullablePositive(value int64) any {
 // first, from the always-on llm_usage ledger. taskID is the task registry id.
 // Accurate even with per-agent model bindings, pool rotation/failover, and
 // interrupted runs, since every call (success or error) is metered.
-func (d *DB) TokenByModel(taskID string) ([]ModelTokenStat, error) {
-	rows, err := d.Query(`
+func (d *DB) TokenByModel(ctx context.Context, taskID string) ([]ModelTokenStat, error) {
+	rows, err := d.QueryContext(ctx, `
 SELECT COALESCE(NULLIF(model,''),'(unknown)') AS model, COUNT(*) AS calls,
        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
        COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0)
 FROM llm_usage
-WHERE COALESCE(task_id,'') = $1
-GROUP BY model
+WHERE task_id = $1
+GROUP BY 1
 ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC, model`, taskID)
 	if err != nil {
 		return nil, err

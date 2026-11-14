@@ -111,6 +111,52 @@ func TestTokenStatsBySessionUsesCompleteIntentHistory(t *testing.T) {
 		14+24+completedRuns*4+34+44+54)
 }
 
+func TestTokenByModelCountsTaskLedgerBeforeSessionResult(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer d.Close()
+	if err := d.EnsureLLMUsageTable(); err != nil {
+		t.Fatal(err)
+	}
+	task, err := d.CreateTaskWithOptions("task token ledger", "count model calls", TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	taskID := fmt.Sprint(task.ID)
+	otherTaskID := "unrelated-" + taskID
+	defer d.Exec(`DELETE FROM llm_usage WHERE task_id IN ($1, $2)`, taskID, otherTaskID)
+
+	for _, row := range []LLMUsage{
+		{TaskID: taskID, Model: "main", Worker: "worker", Status: "ok", InputTokens: 40, OutputTokens: 8, CacheRead: 12, CacheWrite: 3},
+		{TaskID: taskID, Model: "main", Worker: "worker", Status: "error", InputTokens: 20, OutputTokens: 2},
+		{TaskID: taskID, Model: "background", Worker: "compactor", Status: "ok", InputTokens: 10, OutputTokens: 1},
+		{TaskID: otherTaskID, Model: "main", InputTokens: 9999},
+	} {
+		if err := d.InsertLLMUsageContext(t.Context(), &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	models, err := d.TokenByModel(t.Context(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 ||
+		models[0] != (ModelTokenStat{Model: "main", Calls: 2, InputTokens: 60, OutputTokens: 10, CacheReadTokens: 12, CacheWriteTokens: 3}) ||
+		models[1] != (ModelTokenStat{Model: "background", Calls: 1, InputTokens: 10, OutputTokens: 1}) {
+		t.Fatalf("unexpected model ledger totals: %+v", models)
+	}
+	if err := d.InsertLLMUsageContext(t.Context(), &LLMUsage{TaskID: taskID, Model: "main", InputTokens: 5}); err != nil {
+		t.Fatal(err)
+	}
+	models, err = d.TokenByModel(t.Context(), taskID)
+	if err != nil || len(models) != 2 || models[0].Calls != 3 || models[0].InputTokens != 65 {
+		t.Fatalf("refresh did not include the new call: %+v, %v", models, err)
+	}
+}
+
 func assertSessionTokens(t *testing.T, got SessionTokenUsage, session string, input, output, read, write int) {
 	t.Helper()
 	if got.Session != session || got.InputTokens != input || got.OutputTokens != output ||
