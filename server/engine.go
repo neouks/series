@@ -18,6 +18,7 @@ import (
 	"github.com/neouks/series/db"
 	"github.com/neouks/series/guard"
 	"github.com/neouks/series/intercept"
+	"github.com/neouks/series/internal/logging"
 	"github.com/neouks/series/runtimebudget"
 )
 
@@ -960,7 +961,8 @@ drain:
 	if ectx.Err() != nil {
 		return
 	}
-	log.Printf("[planner] task %s 规划中…(%s 触发)", t.ID, src)
+	plannerLog := logging.Component("planner").WithFields(logging.Fields{"task_id": t.ID, "trigger": src})
+	plannerLog.Info("开始规划")
 	// round marker: each Plan() is one planner round; emit a boundary so the
 	// UI can separate rounds in the transcript (kind='round').
 	e.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
@@ -998,13 +1000,13 @@ drain:
 	}
 	switch {
 	case err != nil && ectx.Err() == nil:
-		log.Printf("[planner] task %s 规划出错: %v", t.ID, err)
+		plannerLog.WithError(err).Error("规划失败")
 	case met:
-		log.Printf("[planner] task %s 判定目标达成: %s", t.ID, reason)
+		plannerLog.WithField("reason", reason).Info("判定目标达成")
 		// 所有目标达成 → 持久化任务状态为 done（前端 DTO 会优先展示该终态）。
 		won, finishErr := e.completeAutomatically(t)
 		if finishErr != nil {
-			log.Printf("[planner] task %s 标记完成失败: %v", t.ID, finishErr)
+			plannerLog.WithError(finishErr).Error("标记任务完成失败")
 		}
 		if !won {
 			return
@@ -1014,7 +1016,7 @@ drain:
 		// 归为 stopped(而非 blocked)。
 		e.cancelExec(t.ID, agent.AbortGoalMet)
 	default:
-		log.Printf("[planner] task %s 规划完成", t.ID)
+		plannerLog.Info("规划完成")
 	}
 	e.touch(t.ID)
 }
@@ -1131,7 +1133,9 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 	if intent == nil {
 		return false
 	}
-	log.Printf("[worker %s] task %s 领取意图 #%d", name, t.ID, intent.ID)
+	logging.Component("worker").WithFields(logging.Fields{
+		"task_id": t.ID, "intent_id": intent.ID, "worker": name,
+	}).Info("领取意图")
 	return e.runIntent(ctx, t, name, worker, intent, "", "", permit)
 }
 
@@ -1391,7 +1395,9 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 			log.Printf("[worker %s] task %s 意图 #%d 终态 %s 落库失败: %v", name, t.ID, intent.ID, state, stateErr)
 		}
 	}
-	log.Printf("[worker %s] task %s 意图 #%d 结束: %s (写回 %s)", name, t.ID, intent.ID, state, wrote)
+	logging.Component("worker").WithFields(logging.Fields{
+		"task_id": t.ID, "intent_id": intent.ID, "worker": name, "state": state, "result": wrote,
+	}).Info("意图执行结束")
 	e.touch(t.ID)
 	t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	return true

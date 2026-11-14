@@ -3058,9 +3058,9 @@ func (s *Server) getLogsHistory(w http.ResponseWriter, r *http.Request) {
 		err  error
 	)
 	if before <= 0 {
-		rows, err = s.m.pg.RecentLogs(limit)
+		rows, err = s.m.pg.RecentLogs(r.Context(), limit)
 	} else {
-		rows, err = s.m.pg.ListLogsBefore(before, limit)
+		rows, err = s.m.pg.ListLogsBefore(r.Context(), before, limit)
 	}
 	if err != nil {
 		writeErr(w, 500, "db: "+err.Error())
@@ -3068,13 +3068,7 @@ func (s *Server) getLogsHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]LogLine, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, LogLine{
-			DBID:  r.ID,
-			TS:    r.CreatedAt.Format(time.RFC3339),
-			Level: r.Level,
-			Tag:   r.Tag,
-			Text:  r.Text,
-		})
+		items = append(items, logLineFromRow(r))
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "has_more": len(rows) == limit})
 }

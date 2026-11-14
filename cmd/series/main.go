@@ -7,39 +7,22 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/neouks/series/agent"
 	"github.com/neouks/series/config"
+	"github.com/neouks/series/internal/logging"
 	"github.com/neouks/series/server"
 )
 
 // version is the build version, injected at release time via
 // -ldflags "-X main.version=<tag>". Defaults to "dev" for local builds.
 var version = "dev"
-
-const banner = `
-    _    ____ _____ _______  __
-   / \  |  _ \_   _| ____\ \/ /
-  / _ \ | |_) || | |  _|  \  /
- / ___ \|  _ < | | | |___ /  \
-/_/   \_\_| \_\|_| |_____/_/\_\
-`
-
-// printBanner writes the startup banner + version/runtime info to stdout.
-func printBanner(addr string) {
-	fmt.Print(banner)
-	fmt.Println("  AI 自主渗透测试系统")
-	fmt.Printf("  版本 %s  ·  %s/%s  ·  %s  ·  监听 %s\n\n",
-		version, runtime.GOOS, runtime.GOARCH, runtime.Version(), addr)
-}
 
 // Keep cleanup in run so its defers complete before main exits the process.
 func main() {
@@ -58,11 +41,12 @@ func run() int {
 	// to the frontend top bar.
 	server.BuildVersion = version
 
-	printBanner(*addr)
-
-	// capture backend logs into the in-memory sink (still to stderr) so the /logs
-	// page can show a live log stream. Do this first, to catch startup logs too.
-	server.StartLogCapture()
+	if err := server.StartLogCapture(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	serverLog := logging.Component("server")
+	configLog := logging.Component("config")
 
 	// surface which config file the binary reads (absolute, so `go run`'s relative
 	// "config.json" — resolved against the CWD — is unambiguous).
@@ -71,9 +55,9 @@ func run() int {
 		cfgPath = abs
 	}
 	if _, e := os.Stat(cfgPath); e == nil {
-		log.Printf("[config] 配置文件: %s", cfgPath)
+		configLog.WithField("path", cfgPath).Info("读取配置文件")
 	} else {
-		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 SERIES_PG_DSN)", cfgPath)
+		configLog.WithField("path", cfgPath).Info("配置文件不存在，使用 SERIES_PG_DSN")
 	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -83,7 +67,8 @@ func run() int {
 
 	mgr, err := server.NewManager(*dataDir, *proxy)
 	if err != nil {
-		log.Fatalf("open stores: %v", err)
+		serverLog.WithError(err).Error("打开存储失败")
+		return 1
 	}
 	defer mgr.Close()
 
@@ -91,7 +76,7 @@ func run() int {
 	if abs, err := filepath.Abs(skillDir); err == nil {
 		skillDir = abs
 	}
-	log.Printf("[config] skill 目录: %s", skillDir)
+	configLog.WithField("path", skillDir).Info("加载 skill 目录")
 	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir())
 	httpSrv := &http.Server{
 		Addr:              *addr,
@@ -100,15 +85,15 @@ func run() int {
 	}
 
 	go func() {
-		log.Printf("SERIES %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
+		serverLog.WithFields(logging.Fields{"address": *addr, "data_dir": *dataDir, "workers": mgr.Workers()}).Info("后端开始监听")
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
+			serverLog.WithError(err).Fatal("HTTP 服务失败")
 		}
 	}()
 
 	<-ctx.Done()
 
-	log.Println("shutting down...")
+	serverLog.Info("正在关闭服务")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)

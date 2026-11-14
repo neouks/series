@@ -202,6 +202,8 @@ CGO_ENABLED=0 go build -tags embedui -o series ./cmd/series
 
 **并发**：每个任务的 work agent 数在「系统设置」里配置（默认 3）。
 
+后端使用 Logrus 输出结构化日志。终端默认每行一条 JSON，可设置 `SERIES_LOG_FORMAT=text` 改用文本。`SERIES_LOG_LEVEL` 支持 `debug`、`info`、`warn`、`error`，默认 `info`。系统日志页可按模块、级别及任务等字段检索实时和历史日志。
+
 **常用参数**：`./start.sh -addr :8787 -proxy :8788`（`-addr` 前端+API，`-proxy` 流量录制代理）。启动脚本会把参数原样透传给 `series`。
 
 ### 反向代理部署（HTTPS / 只开放 443）

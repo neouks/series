@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"log"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
+	"github.com/neouks/series/internal/logging"
 	"github.com/neouks/series/runtimebudget"
 )
 
@@ -141,12 +142,18 @@ func (p modelResourceProvider) acquire(ctx context.Context, queue time.Duration)
 		if cause, ok := context.Cause(waitCtx).(*runtimebudget.RequestTimeout); ok {
 			err = cause
 			ri := RunInfoFrom(ctx)
-			log.Printf("[model-policy-timeout] task=%d role=%s phase=%s limit_ms=%d elapsed_ms=%d", ri.TaskID, ri.AgentKey, cause.Phase, cause.Limit.Milliseconds(), time.Since(started).Milliseconds())
+			logging.Component("model-policy-timeout").WithFields(logging.Fields{
+				"task_id": strconv.FormatInt(ri.TaskID, 10), "role": ri.AgentKey, "phase": cause.Phase,
+				"limit_ms": cause.Limit.Milliseconds(), "elapsed_ms": time.Since(started).Milliseconds(),
+			}).Warn("模型请求超时")
 		}
 	}
 	if err != nil || time.Since(started) >= 100*time.Millisecond {
 		ri := RunInfoFrom(ctx)
-		log.Printf("[model-admission] task=%d role=%s wait_ms=%d rejected=%t", ri.TaskID, ri.AgentKey, time.Since(started).Milliseconds(), err != nil)
+		logging.Component("model-admission").WithFields(logging.Fields{
+			"task_id": strconv.FormatInt(ri.TaskID, 10), "role": ri.AgentKey,
+			"wait_ms": time.Since(started).Milliseconds(), "rejected": err != nil,
+		}).Info("模型请求准入")
 	}
 	return release, err
 }

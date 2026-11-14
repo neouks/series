@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +18,7 @@ import (
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noaadapter"
 	"github.com/neouks/series/db"
+	"github.com/neouks/series/internal/logging"
 	"github.com/neouks/series/llmrec"
 )
 
@@ -478,7 +478,13 @@ func projectRequestBudgetAndMetrics(ctx context.Context, req llm.CompletionReque
 		after = measureRequest(req)
 		readMetrics = contextReadMetrics(req)
 	}
-	log.Printf("[context-input] task=%d role=%s chars=%d bytes=%d system_bytes=%d tool_schema_bytes=%d history_bytes=%d before_chars=%d history_retrieval_calls=%d repeated_queries=%d history_tracking_limited=%t projection_ms=%d", ri.TaskID, ri.AgentKey, after.Characters, after.Bytes, after.SystemBytes, after.ToolsBytes, after.HistoryBytes, before.Characters, readMetrics.Calls, readMetrics.Repeated, readMetrics.Limited, time.Since(started).Milliseconds())
+	logging.Component("context-input").WithFields(logging.Fields{
+		"task_id": strconv.FormatInt(ri.TaskID, 10), "role": ri.AgentKey,
+		"chars": after.Characters, "bytes": after.Bytes, "before_chars": before.Characters,
+		"system_bytes": after.SystemBytes, "tool_schema_bytes": after.ToolsBytes, "history_bytes": after.HistoryBytes,
+		"history_retrieval_calls": readMetrics.Calls, "repeated_queries": readMetrics.Repeated,
+		"history_tracking_limited": readMetrics.Limited, "projection_ms": time.Since(started).Milliseconds(),
+	}).Info("模型请求上下文")
 	if after.Characters <= chars && after.Bytes <= bytes {
 		return req, readMetrics
 	}
@@ -506,7 +512,11 @@ func projectRequestBudgetAndMetrics(ctx context.Context, req llm.CompletionReque
 	budgetWarnings.Unlock()
 	if warn {
 		text := fmt.Sprintf("上下文软预算超出：%s 输入%d字符/%d字节，目标%d字符/%d字节。已精简可恢复历史；必要目标和限制保留，按配置继续请求。", ri.AgentKey, after.Characters, after.Bytes, chars, bytes)
-		log.Printf("[context-budget-warning] task=%d role=%s chars=%d bytes=%d", ri.TaskID, ri.AgentKey, after.Characters, after.Bytes)
+		logging.Component("context-budget-warning").WithFields(logging.Fields{
+			"task_id": strconv.FormatInt(ri.TaskID, 10), "role": ri.AgentKey,
+			"chars": after.Characters, "bytes": after.Bytes,
+			"budget_chars": chars, "budget_bytes": bytes,
+		}).Warn("超出上下文软预算")
 		if emit, ok := ctx.Value(contextObserverKey{}).(func(db.Activity)); ok && emit != nil {
 			event := db.Activity{Kind: "warning", Worker: ri.AgentKey, Summary: text, Detail: text}
 			if ri.IntentID > 0 {
@@ -523,7 +533,12 @@ func logContextUsage(ctx context.Context, usage llm.Usage, elapsed time.Duration
 	if ri.AgentKey != "planner" && ri.AgentKey != "worker" {
 		return
 	}
-	log.Printf("[context-usage] task=%d role=%s input_tokens=%d output_tokens=%d cache_read_tokens=%d cache_write_tokens=%d elapsed_ms=%d failed=%t", ri.TaskID, ri.AgentKey, usage.InputTokens, usage.OutputTokens, usage.CacheReadTokens, usage.CacheWriteTokens, elapsed.Milliseconds(), failed)
+	logging.Component("context-usage").WithFields(logging.Fields{
+		"task_id": strconv.FormatInt(ri.TaskID, 10), "role": ri.AgentKey,
+		"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens,
+		"cache_read_tokens": usage.CacheReadTokens, "cache_write_tokens": usage.CacheWriteTokens,
+		"elapsed_ms": elapsed.Milliseconds(), "failed": failed,
+	}).Info("模型请求用量")
 }
 
 var recordedReference = regexp.MustCompile(`(?:fact recorded:|finding recorded:|intent created:|goal added:|hint added:)\s*([0-9]+)`)

@@ -859,9 +859,10 @@ export interface LogLine {
   seq: number;
   db_id?: number; // server_logs.id; present for DB-persisted lines
   ts: string;
-  level: "info" | "warn" | "error";
+  level: "debug" | "info" | "warn" | "error";
   tag: string;
   text: string;
+  fields?: Record<string, unknown>;
 }
 
 export type SessionRole = "mainagent" | "planner" | "worker" | "system";

@@ -20,11 +20,13 @@ const MOCK_LOGS: LogLine[] = [
 ];
 
 const levelTone: Record<LogLine["level"], string> = {
+  debug: "text-muted-foreground",
   info: "text-foreground/80",
   warn: "text-amber-600 dark:text-amber-400",
   error: "text-red-600 dark:text-red-400",
 };
 const levelDot: Record<LogLine["level"], string> = {
+  debug: "bg-muted-foreground/40",
   info: "bg-muted-foreground/40",
   warn: "bg-amber-500",
   error: "bg-red-500",
@@ -122,7 +124,8 @@ export default function LogsPage() {
     return lines.filter(
       (l) =>
         (level === "all" || l.level === level) &&
-        (!needle || l.text.toLowerCase().includes(needle) || l.tag.toLowerCase().includes(needle)),
+        (!needle || l.text.toLowerCase().includes(needle) || l.tag.toLowerCase().includes(needle) ||
+          (l.fields && JSON.stringify(l.fields).toLowerCase().includes(needle))),
     );
   }, [lines, q, level]);
 
@@ -149,13 +152,13 @@ export default function LogsPage() {
       <div className="flex flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            placeholder="过滤(文本 / tag)…"
+            placeholder="过滤文本、模块或字段…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="h-8 max-w-xs"
           />
           <div className="flex gap-1">
-            {(["all", "info", "warn", "error"] as const).map((lv) => (
+            {(["all", "debug", "info", "warn", "error"] as const).map((lv) => (
               <Button
                 key={lv}
                 size="sm"
@@ -213,6 +216,9 @@ export default function LogsPage() {
                 l.tag && l.text.startsWith("[" + l.tag + "]")
                   ? l.text.slice(l.tag.length + 2).trimStart()
                   : l.text;
+              const fields = Object.entries(l.fields ?? {})
+                .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+                .join(" ");
               return (
                 <div key={l.seq} className="flex items-start gap-2 px-1 py-0.5 hover:bg-muted/40">
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", levelDot[l.level])} />
@@ -220,7 +226,10 @@ export default function LogsPage() {
                   {l.tag && (
                     <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-foreground/70">{l.tag}</span>
                   )}
-                  <span className={cn("min-w-0 whitespace-pre-wrap break-words", levelTone[l.level])}>{body}</span>
+                  <span className={cn("min-w-0 whitespace-pre-wrap break-words", levelTone[l.level])}>
+                    {body}
+                    {fields && <span className="ml-2 text-muted-foreground">{fields}</span>}
+                  </span>
                 </div>
               );
             })

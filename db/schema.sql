@@ -1492,6 +1492,7 @@ CREATE TABLE IF NOT EXISTS server_logs (
     tag        TEXT NOT NULL DEFAULT '',
     text       TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE server_logs ADD COLUMN IF NOT EXISTS fields JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_server_logs_id ON server_logs(id DESC);
 
 -- Independent /btw history and the latest provider-ready main checkpoint.
