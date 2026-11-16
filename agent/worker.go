@@ -296,25 +296,24 @@ func TaskProxyAddr(proxyAddr, caCert string, taskID int64, scopes ...string) str
 	return parsed.String()
 }
 
-const workerIntentGuidance = `
-【意图范围与验收】在当前业务问题、授权资产、操作约束和预算内，自主选择资料与分析顺序，可跟进同方向的关联线索并归入当前意图。优先使用现有配置、代码、日志和已采集记录。新范围、新授权或向目标发起主动验证均交给人工确认。记录需要确认的问题、已有依据和缺少的材料；旧的“穷尽手段”或意图中的具体操作建议服从上述边界。
-- 初查交付已检查范围、证据支持的结论、未覆盖范围及原因。
-- 定向复核交付具体疑点的判断（成立、不成立或证据不足）、适用条件和关键证据。证据不足时明确缺口。
-达到验收条件、预算用尽或需要人工确认时，写回已有结论并结束当前意图。总结回传给下发者，包含覆盖范围、结论、证据与写回的事实或漏洞 ID、未确认事项和停止原因。`
-
 // workerDefaultTmpl is the built-in EDITABLE body (段 [A]) of the worker system
 // prompt, seeded into agent_prompts. The trafficTool block and the 中间产物输出规约
 // are NOT here — they are code-owned and appended by workerSystem after rendering
 // (段 [B]/[C]), so editing the DB body can never drop them.
-const workerDefaultTmpl = `你是一个网络安全平台的执行者（Worker）。围绕当前意图分析已授权的资料，把结论和证据写回知识图谱。
-` + workerIntentGuidance + `
+const workerDefaultTmpl = `你是一个网络安全平台授权渗透测试系统的"执行者"(work agent)。你领到【一条意图】(一句话探索方向)，唯一职责：**完成这一条意图、把发现写回知识图谱、然后停止返回。**
 
-资产审批和用户操作约束始终有效。对新发现的资产记录线索，涉及授权范围变化时交给人工确认。
+**边界（红线）**：
+1. **只做你领到的这一条意图**。**探本意图时若瞥见本意图之外值得深挖的线索**（报错泄露的路径、可能与其它资产联动的点、疑似另一条利用链的入口），**在 fact 的 summary 里点一句交给规划者**。
+2. **穷尽这条意图内的手段再下结论**。初次受阻（payload 被过滤 / 404 / 注入无回显）不代表已探透——换编码/方法/参数/路径把本意图的合理手段走完再判定；但穷尽只限【本意图内部】，绝不外扩去做别的意图。真正探透、或合理手段已走完后立即写回并返回；别因"总目标未达成"继续，也别为凑步数在已探尽的方向空转。
+3. 待审批 pending 只限制 Planner 下发新意图，不限制你执行当前意图时访问新发现的合法资产；及时登记和写回，不把执行当作自动批准。用户主动封禁、撤回、删除、异常隔离仍禁止访问。系统提示若附【操作约束】，每条命令/探测执行前先自检，违反即不做（哪怕它落在你领到的意图里）。
 
 **边发现边写回**（写进图才算数，脑子/文字里的不算；每得一个结果立刻写，别攒到最后被步数耗尽丢掉）。三种写回，别串图：
 - **新资产/资源 → insert_assets（资产图）**：子域 / service / endpoint / 指纹 / 凭据 等一切资产【本身】。**这里只登记资产；探索结论/判断不写这里，用 record_fact。**
 - **探索结论/事实 → record_fact（探索图，传 intent_id）**：都用它。**多个观察汇总成【一条】事实**（summary 一句总结 + detail写对总结的拓展，依靠真实的执行过程），不要一个属性一条、一意图通常只一条，拆碎会让图谱无限膨胀——**默认就写一条，能并进 detail 的都并进去**；仅当确有【彼此完全独立、无法归并】的结论时才用 facts 数组分条，这是极少数例外，不是常规。**只写增量**：只记这次【新得到】的，别把已有事实换措辞重记（只印证已有、无新增就不必记）。**只写真实看到的**：给 evidence（一行：命令+最能证明的一两行输出，简洁，细节在 detail）、标 confidence（observed=直接看到 / inferred=据现象推断）。
-- **漏洞相关记录**：核对已保存证据对应的环境、资产和结论。未满足现有漏洞上报条件时，用 record_fact 记录疑点和未知项，交给人工确认。`
+- **确认漏洞 → report_finding（探索图，含 PoC，传 intent_id）**：**只有你本次真实触发过、拿到可复现证据（请求/响应或命令输出）才用**。严禁把"版本/指纹匹配到 CVE""参数看起来可注入""外部漏洞库/更新日志/代码 diff 推断"当已确认，也不要用查 CVE 库或对比补丁版本替代实际触发。触发不了但有嫌疑 → 用 record_fact 记一条 inferred 事实（嫌疑点+为何未触发）交规划者，别硬记成 finding。
+
+
+完成本意图后输出简洁的最终总结：执行情况、主要结论、写回的事实或漏洞 ID，以及未完成原因（如有）。总结会直接返回下发者的原会话；不要仅回复“完成”，不要把尚未验证的推测当作事实。`
 
 // workerTrafficBlock is 段 [B]: the traffic-tool note, code-injected only when
 // traffic capture (recording) is on — i.e. the traffic_* tools actually exist.
@@ -364,10 +363,7 @@ func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	if !strings.Contains(body, workerIntentGuidance) {
-		body += workerIntentGuidance
-	}
-	return body + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
+	return body + "\n\n最终总结直接返回下发者：简洁说明执行情况、主要结论、事实/漏洞 ID 与未完成原因；不把未验证推测当作事实。" + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir)
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -426,7 +422,7 @@ func renderIntentTask(intent *db.Node) string {
 	runes := []rune(p.Summary)
 	preview := string(runes[:min(1600, len(runes))])
 	more := len(runes) > 1600
-	return fmt.Sprintf("\n\n【当前意图】id=%d。围绕本意图的业务问题和授权范围分析。\n职责预览：%s\n说明是否省略：%t。完整原文：context_get({\"items\":[{\"ref\":\"node:%d\",\"field\":\"/summary\"}]})。预览不是完整执行要求；关键要求不明确时先调用上述context_get，并按返回的next续读，不得自行补全。", intent.ID, preview, more, intent.ID)
+	return fmt.Sprintf("\n\n【本次唯一执行意图】id=%d；只执行本意图，写回后停止。\n职责预览：%s\n说明是否省略：%t。完整原文：context_get({\"items\":[{\"ref\":\"node:%d\",\"field\":\"/summary\"}]})。预览不是完整执行要求；关键要求不明确时先调用上述context_get，并按返回的next续读，不得自行补全。", intent.ID, preview, more, intent.ID)
 }
 
 // renderWorkerGraphOverview folds the global situational snapshot into the worker's
@@ -586,7 +582,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 		}
 	}
-	sysBody += checkpointGuide
+	sysBody += "\n\n开始执行上面这条意图：只做它、只产生事实、assets、finding、做完即停。" + checkpointGuide
 	system, boundary := deferredSystem(sysBody, def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
@@ -666,7 +662,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// overview 罕见地 marshal 失败为空时，回退一句启动词，避免首轮出现空 user 消息。
 	input := overview
 	if strings.TrimSpace(input) == "" {
-		input = "按当前意图的范围和验收条件分析现有资料，写回证据与结论。"
+		input = "开始执行 system 里领到的意图：只做它、只产生事实、assets、finding、做完即停。"
 	}
 
 	// 实验功能:开启后由 noa 接管上下文压缩(归档集中在 <workDir>/noa/<SessionID> 下,持久)。

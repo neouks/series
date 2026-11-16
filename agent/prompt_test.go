@@ -38,32 +38,6 @@ func TestAllAgentPromptsRequireChinese(t *testing.T) {
 	}
 }
 
-func TestIntentGuidanceSurvivesCustomPrompts(t *testing.T) {
-	prior := PromptOverride
-	t.Cleanup(func() { PromptOverride = prior })
-	for _, custom := range []bool{false, true} {
-		PromptOverride = func(key string) (string, bool) { return "用户自定义：" + key, custom }
-		for _, tc := range []struct {
-			role, prompt, guidance string
-			want                   []string
-		}{
-			{"planner", plannerSystem("任务目标", "", ""), plannerIntentGuidance,
-				[]string{"初查按业务问题", "定向复核围绕已有证据", "未覆盖范围与原因", "成立、不成立或证据不足", "需要主动验证时，记录缺口并交给人工确认"}},
-			{"worker", workerSystem("", "", "", ""), workerIntentGuidance,
-				[]string{"自主选择资料与分析顺序", "跟进同方向的关联线索", "主动验证均交给人工确认", "初查交付", "定向复核交付", "未确认事项和停止原因"}},
-		} {
-			if strings.Count(tc.prompt, tc.guidance) != 1 || custom && !strings.HasPrefix(tc.prompt, "用户自定义："+tc.role) {
-				t.Fatalf("%s: custom=%t guidance missing or duplicated", tc.role, custom)
-			}
-			for _, want := range tc.want {
-				if !strings.Contains(tc.prompt, want) {
-					t.Errorf("%s: custom=%t missing %q", tc.role, custom, want)
-				}
-			}
-		}
-	}
-}
-
 func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	previous := PromptOverride
 	t.Cleanup(func() { PromptOverride = previous })

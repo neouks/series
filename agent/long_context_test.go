@@ -115,12 +115,9 @@ func TestPlannerWorkingStateReadRoleAndPagination(t *testing.T) {
 	if r, err := tool.Call(WithRunInfo(t.Context(), RunInfo{AgentKey: "planner", TaskID: task.ID, ExplorationID: s.ID()}), raw, nil); err != nil || r.IsError {
 		t.Fatal(r, err)
 	}
-	rawTodos, err := s.PlannerTodos(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var restored []actool.Todo
-	if err := json.Unmarshal(rawTodos, &restored); err != nil || !reflect.DeepEqual(restored, items) {
+	planner := NewPlanner(nil, "", "", nil, 0, 0)
+	restored, err := planner.restoreTodos(t.Context(), s)
+	if err != nil || !reflect.DeepEqual(restored.List(), items) {
 		t.Fatal("restore lost todos", err)
 	}
 	ref := fmt.Sprintf("planner_state:%d", task.ID)
