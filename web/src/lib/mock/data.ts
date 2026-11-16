@@ -1356,6 +1356,15 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
 
 export const intents: TaskNode[] = [
   {
+    id: "102",
+    type: "intent",
+    payload: P({ summary: "核对会话配置的现有记录" }),
+    priority: 5,
+    state: "human_confirmation",
+    origin: "planner",
+    ts: T("2026-07-26T10:10:00Z"),
+  },
+  {
     id: "101",
     type: "intent",
     payload: P({ summary: "接口权限核验（Worker 回传演示）" }),
@@ -1375,6 +1384,15 @@ export const frontier: TaskNode[] = explorationGraph.nodes.filter(
 // intent_id 的活动流。planner=worker "planner"、主 agent=worker "mainagent"。
 // 每个 worker 会话含完整工具执行链（tool_use → tool_result → …→ result）。
 export const activity: Activity[] = [
+  {
+    seq: 10201,
+    intent_id: "102",
+    worker: "work#1",
+    ts: T("2026-07-26T10:12:00Z"),
+    kind: "result",
+    summary: "待人工确认",
+    detail: "现有记录缺少账号停用时间。请补充相关审计记录，以便继续核对。",
+  },
   // planner —— 每轮完整决策链：读态势 → 拉 worker 产出对照 → 判目标 → add_intent 派方向
   // ── 第 0 轮 · 目标拆解与首批意图（2026-07-24 09:12）──
   { seq: 1000, worker: "planner", ts: T("2026-07-24T09:12:10Z"), kind: "round", summary: "第 0 轮 · 目标拆解" },

@@ -31,9 +31,6 @@ type Planner struct {
 	maxTurns          int                                    // max agent turns per run (0 = unlimited)
 	killWork          IntentStopper                          // stop a queued or running intent (nil = off)
 	steerWork         func(intentID int64, msg string) error // engine callback to steer a running work mid-run (nil = off)
-	proxyAddr         string                                 // recording proxy for WebFetch (empty = direct)
-	proxyCACert       string                                 // recording proxy's CA cert path (HTTPS verify)
-	webSearch         WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir           string                                 // shared work dir (surfaced in prompt as artifact-output target)
 	injectConstraints func(context.Context) (bool, error)    // request-scoped policy resolver; nil = enabled
 	nonStreamingFn    func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
@@ -92,13 +89,6 @@ func (p *Planner) compactionWindow() int {
 	}
 	return p.window
 }
-
-// SetProxy points the planner's WebFetch at the recording proxy plus the CA cert
-// it trusts to verify HTTPS through it (empty addr = direct).
-func (p *Planner) SetProxy(addr, caCert string) { p.proxyAddr, p.proxyCACert = addr, caCert }
-
-// SetWebSearch selects the web_search backend for the planner (off by default).
-func (p *Planner) SetWebSearch(o WebSearchOpts) { p.webSearch = o }
 
 // SetConstraintInject wires a resolver deciding whether this task's operation
 // constraints get injected into the planner system prompt. Read per request so the
@@ -164,12 +154,12 @@ const plannerIntentGuidance = `
 【意图粒度与验收】每条意图只回答一个可独立交付的问题，并写清授权范围、依据、必要限制、预算和验收条件。同一业务问题的多个入口和相关线索放在同一条，依赖其他方向产出、授权不同或交付不同结论时再拆分。具体分析顺序由 Worker 决定。
 - 初查按业务问题派方向级意图。验收交付已检查范围、已确认结论及证据引用、未覆盖范围与原因，以及待人工确认的问题。缺少证据时可正常交付。
 - 定向复核围绕已有证据中的一个具体疑点。写清环境、适用条件和待核对的线索。验收给出成立、不成立或证据不足，附关键证据和剩余缺口；给出不成立须有反证。
-以上分工适用于常规规划，优先于旧提示词中的逐项派单要求。Worker 在授权范围内分析现有资料。涉及超范围或需要主动验证时，记录缺口并交给人工确认。不要把这些操作拆成新的自动下发意图。`
+以上分工适用于常规规划和单轮收尾，优先于旧提示词中的逐项派单要求。Worker 在授权范围内分析现有资料。涉及超范围或需要主动验证时，记录缺口并交给人工确认。不要把这些操作拆成新的自动下发意图。`
 
 // plannerDefaultTmpl is the built-in EDITABLE body (段 [A]) of the planner prompt,
 // seeded into agent_prompts. Goal is a {{.Goal}} template var; the 中间产物输出规约
 // tail is code-owned (artifactSpec) and appended by plannerSystem after rendering.
-const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系统的"规划者"，被频繁唤醒（图一变就唤醒）。职责：读态势 → 判目标 → **只在确有未被覆盖的新方向时**补充探索意图。你是规划者、不是执行者：本轮所有产物只能是【生成/说清意图】或【判定目标】，绝不在 plan 里把活干了。
+const plannerDefaultTmpl = `你是任务的规划者。读取当前态势，依据证据判断目标，补充确有需要的探索意图，或记录待人工确认事项。
 
 任务目标：{{.Goal}}
 
@@ -191,7 +181,7 @@ const plannerDefaultTmpl = `你是一个网络安全平台授权渗透测试系�
 
 3. **确定范围**：基于任务目标、授权资产和已采集的资料描述问题。材料不足时明确缺口，需要向目标发起主动验证时交给人工确认。
 
-4. **决定是否派新方向**：已有 open/running 意图覆盖时让当前 Worker 继续。done 意图已有结论时复用证据，出现会改变结论的新资料或明确缺口时再派。exhausted/blocked 时按需用 context_get 的 output 视图核对实际进度，明确剩余问题后再续派。跨意图依赖用 TodoWrite 记录，只派前置条件已满足的方向。逐条操作细节留给当前 Worker 自行安排。
+4. **决定是否派新方向**：已有 open/running 意图覆盖时让当前 Worker 继续。对完成事件先按需读取 context_get 的 output 视图，再根据证据判断是否已覆盖。human_confirmation 表示等待用户补充，请读取该意图结果了解缺口，由用户在原 Worker 会话继续，不派发替代意图。exhausted/blocked 时核对实际进度后再决定是否续派。跨意图依赖用 TodoWrite 记录，只派前置条件已满足的方向。逐条操作细节留给当前 Worker 自行安排。
 
 5. **提交**：用【一次】add_intent 批量提交筛出的新方向（intents 数组，最多 4 个最高价值的，不要逐条多次调）：
    - **summary（每条必填）**：写明问题、授权范围、已知线索与限制、验收条件。单条写顶层 summary，批量写每个 intents 元素的 summary，收到参数错误时只修正失败项。
@@ -248,16 +238,13 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	if origin, _ := ts.OriginFactID(); origin > 0 {
 		tsx.SetOwnerNode(origin) // planner-side anchors default to the task root (origin fact)
 	}
-	// Resolve the run directory before tool assembly so Bash describes the same
-	// path mapping that the executor uses.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
-	// Planner 只保留开局极轻量探测需要的 Bash；文件编辑、目录遍历与 Sleep 都不属于
-	// 规划职责，避免它们的 schema 在每次 completion 中反复占用输入。
-	// 资产覆盖度关闭时移除 add_task_scope，保留普通资产检索。
-	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), newAdmittedBash())
+	base := tsx.DropCoverageTools(tsx.PlannerTools())
 	ctx = withContextObserver(ctx, emit)
 	ctx = context.WithValue(ctx, contextOutputDirectoryKey{}, cmdOutDir(taskDir))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "planner"})
+	handoff := &humanConfirmation{}
+	ctx = context.WithValue(ctx, humanConfirmationKey{}, handoff)
 	ctx = WithTaskToolSet(ctx, tsx)
 	ctx = withExecutionCheckpoint(ctx, tsx, "planner", 0)
 	ctx = withOperationConstraints(ctx, ts, p.wantConstraints)
@@ -271,6 +258,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	if err := requireRoleTools("planner", tools); err != nil {
 		return false, "", err
 	}
+	tools = append(tools, handoff.tool())
 	triggers, err = tsx.plannerChangeTriggers(ctx, triggers)
 	if err != nil {
 		return false, "", err
@@ -314,7 +302,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	}
 	// 本任务的工作目录 <workDir>/tasks/<taskID>，先建好。
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
-	sysBody := plannerSystem(goal, p.workDir, taskDir) + plannerRetrievalRule + checkpointGuide
+	sysBody := plannerSystem(goal, p.workDir, taskDir) + plannerRetrievalRule + checkpointGuide + humanConfirmationGuidance
 	sysBody += "\n仅未知候选按需批量调用 check_target_access；已知不可用项本轮跳过，继续已授权方向。"
 	sysBody += "\n资产审批管理不自动预载，需要管理详情时才按需分页调用 list_task_assets。管理可见不等于允许测试：只有 can_schedule=true 的当前已授权资产可下发；pending/blocked/revoked 仅供解释，不要每轮查询全部状态。"
 	// Enabled constraints are refreshed at the provider boundary, including
@@ -327,7 +315,6 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	if tc.DeadlineUnix > 0 {
 		settle = wrapupSettlementForTask("planner", nil, clamped)
 	}
-	runProxyAddr := TaskProxyAddr(p.proxyAddr, p.proxyCACert, taskID, guard.AssetSkipScope(ctx))
 	todoPreview, todoErr := p.plannerTodos(ctx, ts)
 	if todoErr != nil {
 		return false, "", fmt.Errorf("读取规划待办: %w", todoErr)
@@ -342,25 +329,11 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		UnlockSet:              def.Unlock,
 		PermissionMode:         permission.ModeBypass,
 		DisableBackgroundTasks: true,
-		EnableWebFetch:         true, // 走记录代理留痕；载入代理 CA 验证 MITM 重签的 HTTPS 证书
-		WebFetchProxy:          runProxyAddr,
-		WebFetchCACert:         p.proxyCACert,
-		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       p.webSearch.Enabled,
-		WebSearchBackend:      p.webSearch.Backend,
-		BraveSearchAPIKey:     p.webSearch.BraveKey,
-		TavilySearchAPIKey:    p.webSearch.TavilyKey,
-		WebSearchProxy:        p.webSearch.Proxy,
-		BashEnv:               proxyEnv(runProxyAddr, p.proxyCACert), // Bash 子命令默认走代理+信任 CA
-		WorkingDir:            taskDir,                               // 本任务工作目录 <workDir>/tasks/<taskID>
-		ToolOutputDir:         cmdOutDir(taskDir),
-		MaxTurns:              p.maxTurns, // 0 = unlimited (configurable in agent management)
-		MaxDuration:           maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余
-		Compaction:            compactionConfig(p.compactionWindow()),
-		DeepSeekSearchBaseURL: p.webSearch.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  p.webSearch.DeepSeekAPIKey,
-		DeepSeekSearchModel:   p.webSearch.DeepSeekModel,
+		WorkingDir:             taskDir, // 本任务工作目录 <workDir>/tasks/<taskID>
+		ToolOutputDir:          cmdOutDir(taskDir),
+		MaxTurns:               p.maxTurns, // 0 = unlimited (configurable in agent management)
+		MaxDuration:            maxDur,     // 0=不限;有 deadline 时=距 deadline 剩余
+		Compaction:             compactionConfig(p.compactionWindow()),
 		// 跨唤醒共享的规划待办：让串行链在多轮之间保留（session 是新的，store 不是）。
 		Todos: nil, // Host-owned persistent tool avoids SDK unbounded todo reminders.
 		// 命中【本轮】步数预算→ SDK 跑收尾:把本轮已想清楚的结论落地(该派的 add_intent、
@@ -400,7 +373,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 		func(r db.Activity) {
 			if emit != nil {
 				r.Worker = "planner" // planner activity has no intent_id (it generates them)
-				emit(r)
+				emit(handoff.annotateResult(r))
 			}
 		})
 	return tsx.GoalMet, tsx.Reason, err

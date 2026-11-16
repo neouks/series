@@ -76,12 +76,17 @@ func (s *ExplorationStore) ReopenBlockedIntentsByUser() (int64, error) {
 
 // ClaimPausedIntentByUser is an explicit execution selection, serialized with mode changes.
 func (s *ExplorationStore) ClaimPausedIntentByUser(id int64) (bool, error) {
+	return s.ClaimIntentForHumanMessage(id, "paused")
+}
+
+// ClaimIntentForHumanMessage only resumes the waiting state the user acted on.
+func (s *ExplorationStore) ClaimIntentForHumanMessage(id int64, expected string) (bool, error) {
 	res, err := s.queueExec(`UPDATE exploration_nodes SET state='running',completed_at=NULL,
  payload=payload || jsonb_build_object('dispatch_requested',true), content_version=content_version+1
- WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='paused'
+ WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state=$3 AND state IN ('paused','human_confirmation')
  AND payload->>'cancelled_by_user' IS DISTINCT FROM 'true'
  AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.exploration_id=exploration_nodes.exploration_id AND (t.deleted_at IS NOT NULL OR t.status IN ('done','failed','timeout')))
- AND NOT EXISTS (SELECT 1 FROM exploration_anchors a JOIN tasks t ON t.exploration_id=exploration_nodes.exploration_id WHERE a.node_id=exploration_nodes.id AND NOT `+intentAssetAllowedSQL("t.id", "a.asset_id", "exploration_nodes")+`)`, id, s.expID)
+ AND NOT EXISTS (SELECT 1 FROM exploration_anchors a JOIN tasks t ON t.exploration_id=exploration_nodes.exploration_id WHERE a.node_id=exploration_nodes.id AND NOT `+intentAssetAllowedSQL("t.id", "a.asset_id", "exploration_nodes")+`)`, id, s.expID, expected)
 	if err != nil {
 		return false, err
 	}

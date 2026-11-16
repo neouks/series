@@ -61,6 +61,8 @@ func (t *ToolSet) plannerChangeTriggers(ctx context.Context, triggers []TriggerE
 		kind := row.Kind
 		if kind == "intent" && slices.Contains([]string{"done", "blocked", "exhausted", "stopped"}, row.State) {
 			kind = "done"
+		} else if kind == "intent" && row.State == db.IntentHumanConfirmation {
+			kind = db.IntentHumanConfirmation
 		}
 		out = append(out, TriggerEvent{Kind: kind, NodeIDs: []int64{row.ID}})
 	}

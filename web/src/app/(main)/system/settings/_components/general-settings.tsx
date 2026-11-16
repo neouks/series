@@ -713,7 +713,7 @@ export default function SystemSettingsPage() {
               网络搜索
             </CardTitle>
             <CardDescription>
-              这是网络搜索的<b>总开关 + 来源配置</b>。开启后，才能在<b>每个 Agent 的配置</b>里单独选择是否启用
+              这是网络搜索的<b>总开关 + 来源配置</b>。开启后，可在<b>支持网络搜索的 Agent</b> 配置里单独启用
               <b>web_search</b>（仅返回标题/链接/摘要，不抓取正文；抓取由 WebFetch 负责）。网络搜索<b>不走</b>
               记录代理，独立于流量捕获。
               <br />
@@ -725,7 +725,7 @@ export default function SystemSettingsPage() {
           <CardContent className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-4">
               <Label htmlFor="web-search" className="text-sm font-normal text-muted-foreground">
-                {webSearch ? "总开关已开启 · 可在各 Agent 配置里单独启用" : "已关闭 · 各 Agent 无法启用网络搜索"}
+                {webSearch ? "总开关已开启 · 支持网络搜索的 Agent 可单独启用" : "已关闭 · 各 Agent 无法启用网络搜索"}
               </Label>
               <Switch
                 id="web-search"

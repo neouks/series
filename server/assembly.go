@@ -81,7 +81,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 		serverTools := map[string][]string{} // server name → its tool names
 		var allNames, globalNames []string
 		globalSet := map[string]bool{}
-		{
+		if !agent.RequiresManualVerification(agentKey) {
 			mcpIDs, _ := pg.AgentVisible(a.ID, "mcp")
 			want := idSet(mcpIDs)
 			all, _ := pg.ListMCP()
@@ -289,7 +289,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 				out = append(out, t)
 				continue
 			}
-			if !row.Enabled || !contains(row.Agents, agentKey) {
+			if !row.Enabled || !contains(row.Agents, agentKey) || (!row.System && agent.RequiresManualVerification(agentKey)) {
 				continue // disabled globally or not bound to this agent → drop
 			}
 			out = append(out, resolve(t, row))
@@ -345,7 +345,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 		// web_search), NOT by tools-table binding. When on, inject the 5 shell_* tools
 		// and COUPLE the Bash description addendum so it points at shell_open — and never
 		// dangles when off. See docs/交互式shell设计.md §14.2.
-		if runtime.GOOS != "windows" && !actool.InteractiveShellDisabled() {
+		if !agent.RequiresManualVerification(agentKey) && runtime.GOOS != "windows" && !actool.InteractiveShellDisabled() {
 			if a, err := pg.GetAgentByKey(agentKey); err == nil && a != nil && a.InteractiveShell {
 				out = append(out, agent.ShellSessionTools()...)
 				for i, t := range out {

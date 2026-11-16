@@ -258,7 +258,7 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 			if err != nil {
 				return out, err
 			}
-			if current != nil && (current.State == "paused" || current.State == "open" || (current.State == "stopped" && current.UserCancelled())) {
+			if current != nil && (current.State == "paused" || current.State == db.IntentHumanConfirmation || current.State == "open" || (current.State == "stopped" && current.UserCancelled())) {
 				continue
 			}
 			if current == nil || current.State != "running" {

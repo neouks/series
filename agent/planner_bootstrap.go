@@ -128,7 +128,7 @@ func (t *ToolSet) plannerBootstrap(ctx context.Context, triggers []TriggerEvent)
 	for i := len(triggers) - 1; i >= 0; i-- {
 		e := triggers[i]
 		kind := e.Kind
-		if !slices.Contains([]string{"done", "finding", "goal", "goal_edited", "goal_deleted", "hint", "cancelled", "finding_deleted"}, kind) {
+		if !slices.Contains([]string{"done", db.IntentHumanConfirmation, "finding", "goal", "goal_edited", "goal_deleted", "hint", "cancelled", "finding_deleted"}, kind) {
 			kind = "change"
 		}
 		count := max(1, e.Count)

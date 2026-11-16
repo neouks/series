@@ -97,6 +97,11 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 			return nil, DeferredInfo{}, cleanup, err
 		}
 	}
+	if RequiresManualVerification(RunInfoFrom(ctx).AgentKey) {
+		out = filterPassiveTools(out)
+		def.Deferred = filterPassiveNames(def.Deferred)
+		def.GlobalNames = filterPassiveNames(def.GlobalNames)
+	}
 	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
 	if agentKey == "planner" {
 		def.AssetGuidance = plannerAssetGuidance(out)
@@ -108,6 +113,26 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 		out[i] = guardPanic(tool)
 	}
 	return out, def, cleanup, nil
+}
+
+func filterPassiveTools(tools []actool.CoreTool) []actool.CoreTool {
+	out := make([]actool.CoreTool, 0, len(tools))
+	for _, t := range tools {
+		if passiveTaskTool(t.Name()) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func filterPassiveNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if passiveTaskTool(name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // guardPanic turns a panicking tool handler into an ordinary tool error. The

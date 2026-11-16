@@ -334,6 +334,7 @@ func (s *ExplorationStore) ContextOutput(ctx context.Context, id int64, offset, 
 	query := contextVisibility(roots, s.workerRead) + ` SELECT jsonb_strip_nulls(jsonb_build_object(
  'id',v.id,'node_id',v.id,'ref','node:'||v.id,'kind',v.kind,'state',v.state,'source_task_id',v.owner,'inherited',v.exploration_id<>$1,
  'has_output',a.id IS NOT NULL,'output_kind',a.kind,'is_final',COALESCE(a.kind='result' AND v.state IN ('done','blocked','exhausted','stopped'),false),
+ 'awaiting_human_confirmation',v.state='human_confirmation',
  'text',a.detail,'is_error',a.is_error,'activity_ref','activity:'||a.id,'total_chars',a.total_chars,
  'next_offset',CASE WHEN a.total_chars>$3+$4 THEN $3+$4 END))
  FROM visible v LEFT JOIN LATERAL (
@@ -461,7 +462,7 @@ func (s *ExplorationStore) ContextDigestMembers(ctx context.Context, id, before 
 func (s *ExplorationStore) ToolHotNodeIDs(ctx context.Context) (map[int64]bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	rows, e := s.db.QueryContext(ctx, `WITH RECURSIVE live AS (SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused')), hot(id) AS (
+	rows, e := s.db.QueryContext(ctx, `WITH RECURSIVE live AS (SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused','human_confirmation')), hot(id) AS (
  SELECT id FROM live UNION SELECT e.src_id FROM hot h JOIN exploration_edges e ON e.dst_id=h.id AND e.exploration_id=$1 AND e.rel<>'covers'
  ) SELECT id FROM hot UNION SELECT e.dst_id FROM live l JOIN exploration_edges e ON e.src_id=l.id AND e.exploration_id=$1 AND e.rel<>'covers'`, s.expID)
 	if e != nil {

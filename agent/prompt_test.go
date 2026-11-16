@@ -64,6 +64,23 @@ func TestIntentGuidanceSurvivesCustomPrompts(t *testing.T) {
 	}
 }
 
+func TestPlannerWrapupSharesIntentGuidance(t *testing.T) {
+	prior := WrapupOverride
+	t.Cleanup(func() { WrapupOverride = prior })
+	for _, override := range []string{"", "旧版收尾设置"} {
+		WrapupOverride = func(string) (string, bool) { return override, override != "" }
+		for _, prompt := range []string{
+			wrapupSettlement("planner", nil).Prompt,
+			wrapupSettlementForTask("planner", nil, true).Prompt,
+		} {
+			if !strings.Contains(prompt, plannerIntentGuidance) || !strings.Contains(prompt, humanConfirmationGuidance) ||
+				!strings.HasPrefix(prompt, override) || strings.Contains(prompt, "串行利用链") {
+				t.Fatalf("unexpected Planner wrapup: %s", prompt)
+			}
+		}
+	}
+}
+
 func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	previous := PromptOverride
 	t.Cleanup(func() { PromptOverride = previous })

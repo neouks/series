@@ -156,6 +156,72 @@ func TestOfficialSessionDeferredPolicyAndSource(t *testing.T) {
 	}
 }
 
+func TestHumanConfirmationBlocksDirectAndDeferredExecution(t *testing.T) {
+	for _, tc := range []struct {
+		role, tool string
+		deferred   bool
+		want       int
+	}{
+		{"worker", "unclassified_tool", false, 0},
+		{"worker", "unclassified_tool", true, 0},
+		{"planner", "unclassified_tool", true, 0},
+		{"worker", "context_search", true, 1},
+		{"mainagent", "unclassified_tool", false, 1},
+	} {
+		t.Run(fmt.Sprintf("%s/%s/deferred=%t", tc.role, tc.tool, tc.deferred), func(t *testing.T) {
+			calls := 0
+			tool := readTool(tc.tool, "test", obj(nil), func(context.Context, json.RawMessage) (actool.Result, error) {
+				calls++
+				return actool.Text("executed"), nil
+			})
+			probe := &sdkPolicyProbe{}
+			opts := agentcore.Options{Tools: []actool.CoreTool{tool}, PermissionMode: permission.ModeBypass,
+				Hooks: probe, DisableBackgroundTasks: true, NonStreaming: true}
+			name, input := tool.Name(), `{}`
+			if tc.deferred {
+				opts.DeferredTools = []string{name}
+				opts.UnlockSet = actool.NewUnlockSet(name)
+				name, input = actool.ExecuteExtraToolName, fmt.Sprintf(`{"tool_name":%q,"params":{}}`, name)
+			}
+			opts.Deps = sdkToolTurn(name, input)
+			handoff := &humanConfirmation{}
+			ctx := WithRunInfo(t.Context(), RunInfo{TaskID: 1, AgentKey: tc.role})
+			ctx = context.WithValue(ctx, humanConfirmationKey{}, handoff)
+			var result db.Activity
+			_, _, err := captureRun(ctx, opts, "existing materials", func(a db.Activity) {
+				if a.Kind == "tool_result" {
+					result = a
+				}
+			})
+			if err != nil || calls != tc.want || probe.pre != tc.want {
+				t.Fatalf("calls=%d guard=%d want=%d err=%v result=%+v", calls, probe.pre, tc.want, err, result)
+			}
+			if tc.want == 0 && (!result.IsError || handoff.pending() != manualVerificationNotice) {
+				t.Fatalf("missing structured handoff: %+v", result)
+			}
+		})
+	}
+}
+
+func TestHumanConfirmationKeepsExplicitReasonInResult(t *testing.T) {
+	handoff := &humanConfirmation{}
+	ctx := WithRunInfo(t.Context(), RunInfo{TaskID: 1, AgentKey: "worker"})
+	ctx = context.WithValue(ctx, humanConfirmationKey{}, handoff)
+	const reason = "缺少用户确认的记录"
+	tool := handoff.tool()
+	opts := agentcore.Options{Tools: []actool.CoreTool{tool}, DisableBackgroundTasks: true, NonStreaming: true,
+		Deps: sdkToolTurn(tool.Name(), `{"reason":"`+reason+`"}`)}
+	var result db.Activity
+	_, _, err := captureRun(ctx, opts, "existing materials", func(a db.Activity) {
+		if a.Kind == "result" {
+			result = handoff.annotateResult(a)
+		}
+	})
+	if err != nil || handoff.pending() != reason || result.Summary != "待人工确认" || !strings.Contains(result.Detail, reason) {
+		t.Fatalf("err=%v pending=%q result=%+v", err, handoff.pending(), result)
+	}
+}
+
 func TestDeferredAssetPolicyCannotBypassPlannerOrRewrites(t *testing.T) {
 	d := testDB(t)
 	defer d.Close()

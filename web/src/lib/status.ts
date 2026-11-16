@@ -35,6 +35,7 @@ const intent: Record<string, StatusMeta> = {
   open: { label: "待领", tone: "slate" },
   running: { label: "执行中", tone: "blue" },
   paused: { label: "已暂停", tone: "amber" },
+  human_confirmation: { label: "待人工确认", tone: "amber" },
   done: { label: "已完成", tone: "green" },
   // blocked = 模型/API/网络故障重试用尽，这条意图基本没真正探成（非目标拦截）。
   blocked: { label: "执行出错", tone: "red" },

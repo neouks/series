@@ -28,13 +28,8 @@ import (
 // leave the intent open for a later approval, rather than marking it blocked.
 var ErrWorkerAssetAuthorization = errors.New("worker asset authorization pending")
 
-// Worker is an LLM work agent (docs §4.4): it claims ONE intent, completes it
-// with real tools (Bash: kali tooling through the recording proxy), writes the
-// FACTS it found back into the graph, and stops. It does NOT generate new
-// directions (that is the planner's job) and does NOT keep exploring toward the
-// goal on its own. Multiple workers run concurrently as goroutines.
-// WebSearchOpts is the web-search backend selection the server pushes into each
-// agent (planner/worker/main). Enabled=false leaves the web_search tool off.
+// WebSearchOpts configures the search service for interactive agents.
+// Enabled=false leaves the web_search tool off.
 // Backend is "ddgs" (no key), "brave-free" (BraveKey required), "tavily"
 // (TavilyKey required), or "deepseek" (DeepSeek* required, filled from the
 // active LLM profile). It maps directly onto agentcore.Options.
@@ -59,6 +54,8 @@ type WebSearchOpts struct {
 	DeepSeekModel   string
 }
 
+// Worker analyzes existing materials for a single intent and writes back its
+// conclusions or the information needed from the user.
 type Worker struct {
 	findingRecorder  FindingRecorder
 	prov             llm.Provider
@@ -67,7 +64,6 @@ type Worker struct {
 	proxyAddr        string
 	proxyCACert      string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
 	trafficRecording bool              // traffic persistence toggle; policy proxy can remain on while false
-	webSearch        WebSearchOpts     // web_search tool backend selection (off by default)
 	mem              *memory.Store     // cross-engagement tradecraft memory (G4)
 	tx               *transcript.Store // raw LLM conversation persistence (nil = off)
 	window           int               // context window in tokens (for compaction)
@@ -223,18 +219,13 @@ func (w *Worker) compactionWindow() int {
 	return w.window
 }
 
-// SetProxy configures the recording proxy address that workers route target
-// traffic through, plus the CA cert path WebFetch trusts to verify HTTPS through
-// that MITM proxy. Empty addr disables the hint.
+// SetProxy supplies the template's historical proxy variable and recording hint.
 func (w *Worker) SetProxy(addr, caCert string) {
 	w.proxyAddr, w.proxyCACert = addr, caCert
 	w.trafficRecording = caCert != ""
 }
 
 func (w *Worker) SetTrafficRecording(enabled bool) { w.trafficRecording = enabled }
-
-// SetWebSearch selects the web_search backend for this worker (off by default).
-func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 
 // proxyEnv builds the Bash-subprocess env that routes child-command HTTP through
 // the egress proxy (the recording MITM when capture is on, or the global proxy
@@ -497,20 +488,15 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	tsx.SetOwnerNode(intent.ID)         // discoveries track execution provenance, not new planning anchors
 	tsx.SetEnrich(enr)                  // async DNS/HTTP auto-completion for assets this worker writes
 	tsx.SetNotifyFinding(notifyFinding) // report_finding 落库时当场唤醒 planner，带上「哪个意图+finding」
-	// Capture the run directory before tool assembly so Bash's model-facing
-	// prompt can use the shell-specific path (notably /mnt/c/... for WSL).
 	runDir := ensureRunDir(w.workDir, taskID, intent.ID)
-	// base = built-in worker tools ∪ host tools (traffic) ∪ default tools (incl. Bash);
-	// then augment with the agent's visible skills/MCP. During the SDK settlement
-	// phase, Bash is hidden and execution-gated via Settlement.DisabledTools.
 	tsx.workerExecution = true
 	base := append(tsx.WorkerTools(), w.extraTools...)
-	// Worker 需要本地读写与 Bash，但不会派后台任务；Sleep 只为后台任务轮询服务，
-	// 不把它的 schema 重复发送给每一次 completion。
-	base = append(base, workerLocalTools()...)
+	base = append(base, actool.NewRead(), actool.NewLS(), actool.NewGlob(), newAdmittedGrep())
 	ctx = withContextObserver(ctx, emit)
 	ctx = context.WithValue(ctx, contextOutputDirectoryKey{}, cmdOutDir(runDir))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID, AgentKey: "worker"})
+	handoff := &humanConfirmation{}
+	ctx = context.WithValue(ctx, humanConfirmationKey{}, handoff)
 	ctx = WithTaskToolSet(ctx, tsx)
 	ctx = withExecutionCheckpoint(ctx, tsx, "worker", intent.ID)
 	ctx = withOperationConstraints(ctx, ts, w.wantConstraints)
@@ -523,6 +509,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if err := requireRoleTools("worker", tools); err != nil {
 		return harness.ReasonAbortedTools, WriteCounts{}, err
 	}
+	tools = append(tools, handoff.tool())
 
 	// Keep a bounded mandate and identity in system. Long instructions remain
 	// available through typed node fields, never as repeated full payload JSON.
@@ -588,7 +575,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 		}
 	}
-	sysBody += checkpointGuide
+	sysBody += checkpointGuide + humanConfirmationGuidance
 	system, boundary := deferredSystem(sysBody, def)
 	// 任务级 deadline(经 ctx 注入)夹逼本 run 的墙钟预算 + 决定收尾词(见 taskclock.go)。
 	tc := taskClockFrom(ctx)
@@ -612,25 +599,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		UnlockSet:              def.Unlock,
 		PermissionMode:         permission.ModeBypass,
 		DisableBackgroundTasks: true,
-		// WebFetch 走记录代理，其 HTTP 与 curl 一样被留痕；载入代理 CA 让经 MITM
-		// 重签的 HTTPS 证书能【正常校验通过】（而非关掉校验）。proxy 空则直连。
-		EnableWebFetch: true,
-		WebFetchProxy:  runProxyAddr,
-		WebFetchCACert: w.proxyCACert,
-		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立的出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
-		EnableWebSearch:       w.webSearch.Enabled,
-		WebSearchBackend:      w.webSearch.Backend,
-		BraveSearchAPIKey:     w.webSearch.BraveKey,
-		TavilySearchAPIKey:    w.webSearch.TavilyKey,
-		DeepSeekSearchBaseURL: w.webSearch.DeepSeekBaseURL,
-		DeepSeekSearchAPIKey:  w.webSearch.DeepSeekAPIKey,
-		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
-		WebSearchProxy:        w.webSearch.Proxy,
-		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:    proxyEnv(runProxyAddr, w.proxyCACert),
-		WorkingDir: runDir,
-		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
+		WorkingDir:             runDir,
+		MaxTurns:               w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,
 		// 距 deadline 剩余),让本 run 在任务到点时自然进收尾(见 taskclock.go)。
 		MaxDuration: maxDur,
@@ -660,7 +630,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	emitWrap := func(r db.Activity) {
 		if emit != nil {
 			r.NodeID, r.Worker = &intentID, name
-			emit(r)
+			emit(handoff.annotateResult(r))
 		}
 	}
 	// 意图 / 启动指令 / 意图锚定资产已随 system prompt 下发（见上方 sysBody 组装）。
@@ -727,5 +697,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// still settles (no external hard-timeout backstop needed). ctx itself carries only
 	// pause / planner kill / shutdown, which the engine distinguishes and re-queues/stops.
 	_, reason, err := captureRunSession(ctx, s, input, emitWrap)
-	return reason, tsx.Writes(), err
+	writes := tsx.Writes()
+	writes.HumanConfirmation = handoff.pending() != ""
+	return reason, writes, err
 }

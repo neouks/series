@@ -102,7 +102,7 @@ func (s *ExplorationStore) PlannerBootstrap(ctx context.Context, kinds []string,
  ), chosen AS (
  SELECT * FROM (SELECT * FROM ranked UNION ALL SELECT * FROM idle WHERE NOT EXISTS(SELECT 1 FROM ranked)) c ORDER BY rank,id DESC LIMIT 9
  ), grouped AS (
- SELECT kind,CASE WHEN state IN ('open','running','paused','done','blocked','exhausted','stopped','met','active','confirmed','origin','abandoned','dismissed','consumed','superseded') THEN state ELSE 'other' END state,
+ SELECT kind,CASE WHEN state IN ('open','running','paused','human_confirmation','done','blocked','exhausted','stopped','met','active','confirmed','origin','abandoned','dismissed','consumed','superseded') THEN state ELSE 'other' END state,
  exploration_id<>$1 inherited,count(*) count FROM visible WHERE NOT $6::boolean GROUP BY 1,2,3
  ) SELECT jsonb_build_object('task_description',(SELECT left(COALESCE(description,''),240) FROM explorations WHERE id=$1),
  'description_omitted',(SELECT length(COALESCE(description,''))>240 FROM explorations WHERE id=$1),

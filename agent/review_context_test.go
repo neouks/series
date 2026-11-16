@@ -26,15 +26,15 @@ func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close() })
-	expID, err := d.CreateExploration("只操作隔离测试目录", "验证创建和清理")
+	task, err := d.CreateTask("只操作隔离测试目录", "验证创建和清理", nil, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := d.Exploration(expID)
-	taskID := fmt.Sprint(expID)
+	ts := d.Exploration(task.ExplorationID)
+	taskID := fmt.Sprint(task.ID)
 	t.Cleanup(func() {
 		_, _ = d.Exec(`DELETE FROM intercept_pending WHERE task_id=$1`, taskID)
-		_, _ = d.Exec(`DELETE FROM explorations WHERE id=$1`, expID)
+		_ = d.DeleteTask(task.ID)
 	})
 	ic := intercept.New(d)
 	priorTools, err := ic.GetEnabledTools()
@@ -43,7 +43,7 @@ func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 	}
 	priorConfig := ic.GetJudgeConfig()
 	t.Cleanup(func() { _ = ic.SetEnabledTools(priorTools); _ = ic.SetJudgeConfig(priorConfig) })
-	const probeName = "ContextEvidenceProbe"
+	const probeName = "record_fact"
 	if err := ic.SetEnabledTools([]string{probeName}); err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +83,17 @@ func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 			return tool.Text("Created a new fixture; no existing file overwritten."), err
 		},
 	})
+	// Substitute an offline write-back handler without opening any external tool.
+	priorResolve := ToolResolve
+	t.Cleanup(func() { ToolResolve = priorResolve })
+	ToolResolve = func(_ context.Context, _ string, tools []tool.CoreTool) ([]tool.CoreTool, error) {
+		for i, existing := range tools {
+			if existing.Name() == probeName {
+				tools[i] = probe
+			}
+		}
+		return tools, nil
+	}
 	workDir := t.TempDir()
 	ctx := intercept.WithTaskContext(t.Context(), taskID, "test-agent", nil)
 	ctx = intercept.WithReviewContext(ctx, "/parent", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: "PARENT_BACKGROUND_SENTINEL"})
@@ -92,9 +103,9 @@ func TestWorkerReviewContextAcrossToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	rawIntent, _ := json.Marshal(intentPayload)
-	worker := NewWorker(provider, "test-model", workDir, nil, 0, 3, probe)
-	_, _, err = worker.Execute(ctx, "test-agent", expID, nil, ts, &db.Node{ID: intentID, Payload: rawIntent}, guard.NewWithInterceptor(ic).Hooks(), nil, nil, nil)
-	runDir := ensureRunDir(workDir, expID, intentID)
+	worker := NewWorker(provider, "test-model", workDir, nil, 0, 3)
+	_, _, err = worker.Execute(ctx, "test-agent", task.ID, nil, ts, &db.Node{ID: intentID, Payload: rawIntent}, guard.NewWithInterceptor(ic).Hooks(), nil, nil, nil)
+	runDir := ensureRunDir(workDir, task.ID, intentID)
 	if err != nil {
 		t.Fatal(err)
 	}

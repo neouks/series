@@ -19,11 +19,11 @@ func (s *ExplorationStore) ToolUnfoldedPage(ctx context.Context, kind string, li
 	query := workerReadSQL(visibility, s.workerRead) + `, allowed_visible AS (
  SELECT v.* FROM visible v WHERE $6::bigint=0 AND ($9::bigint=0 OR NOT EXISTS(SELECT 1 FROM anchors a WHERE a.root=v.id AND NOT task_asset_effectively_approved($9,a.asset_id)))
  ), hot(id) AS (
- SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused')
+ SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused','human_confirmation')
  UNION SELECT e.src_id FROM hot h JOIN exploration_edges e ON e.exploration_id=$1 AND e.dst_id=h.id AND e.rel<>'covers'
  ), active_children AS (
  SELECT e.dst_id id FROM exploration_edges e JOIN exploration_nodes p ON p.id=e.src_id WHERE e.exploration_id=$1
- AND e.rel<>'covers' AND p.kind='intent' AND p.state IN ('open','running','paused')
+ AND e.rel<>'covers' AND p.kind='intent' AND p.state IN ('open','running','paused','human_confirmation')
  ), page AS (
  SELECT v.id FROM allowed_visible v WHERE v.kind=$2 AND NOT EXISTS(SELECT 1 FROM exploration_edges e JOIN allowed_visible d ON d.id=e.src_id AND d.kind='digest'
  WHERE e.exploration_id=$1 AND e.dst_id=v.id AND e.rel='covers' AND NOT EXISTS(SELECT 1 FROM hot h WHERE h.id=v.id)

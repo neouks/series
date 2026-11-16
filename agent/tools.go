@@ -198,9 +198,10 @@ type EnrichTrigger interface {
 // findings under "facts" (record_fact → Facts, insert_assets → Assets,
 // report_finding → Findings; each element of a batch counts once).
 type WriteCounts struct {
-	Facts    int
-	Assets   int
-	Findings int
+	Facts             int
+	Assets            int
+	Findings          int
+	HumanConfirmation bool
 }
 
 // Total is every node persisted this run, regardless of kind — the

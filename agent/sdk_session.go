@@ -147,6 +147,9 @@ func (t *processContextTool) AcceptsRawInput() bool {
 	return ok && raw.AcceptsRawInput()
 }
 func (t *processContextTool) Call(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+	if reason := checkHumanConfirmation(ctx, t.Name()); reason != "" {
+		return actool.Errorf(reason), nil
+	}
 	if isInteractiveTool(t.Name()) {
 		if err := ctx.Err(); err != nil {
 			return actool.Errorf("interactive shell execution canceled: " + err.Error()), nil
@@ -160,6 +163,9 @@ func (t *processContextTool) Call(ctx context.Context, input json.RawMessage, tc
 		}
 	}
 	check := processRecheck(func(checkCtx context.Context, name string, in []byte) string {
+		if reason := checkHumanConfirmation(checkCtx, name); reason != "" {
+			return reason
+		}
 		if policy, ok := t.hooks.inner.(interface {
 			RecheckToolInput(context.Context, string, []byte) string
 		}); ok {
@@ -349,6 +355,9 @@ func (h *dispatchHooks) PreToolUse(ctx context.Context, outer string, input []by
 	name, params, err := h.target(outer, input)
 	if err != nil {
 		return true, err.Error(), nil
+	}
+	if reason := checkHumanConfirmation(ctx, name); reason != "" {
+		return true, reason, nil
 	}
 	h.viewMu.RLock()
 	hidden := h.visible != nil && !h.visible[outer] && !h.deferred[outer]

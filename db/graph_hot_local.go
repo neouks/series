@@ -106,10 +106,10 @@ func maintainHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool, err
 		_, err = tx.ExecContext(ctx, `DELETE FROM graph_hot_reach WHERE exploration_id=$1 AND node_id=ANY($2::bigint[])`, exp, ids)
 	case 3:
 		_, err = tx.ExecContext(ctx, `WITH seeds AS MATERIALIZED(
- SELECT n.id,(n.kind='intent' AND n.state IN ('open','running','paused')) OR EXISTS(
+ SELECT n.id,(n.kind='intent' AND n.state IN ('open','running','paused','human_confirmation')) OR EXISTS(
  SELECT 1 FROM exploration_edges e JOIN graph_hot_reach h ON h.exploration_id=$1 AND h.node_id=e.dst_id AND h.wave=$3 AND h.expand
  WHERE e.exploration_id=$1 AND e.src_id=n.id AND e.rel<>'covers' AND NOT EXISTS(SELECT 1 FROM graph_hot_region r WHERE r.exploration_id=$1 AND r.node_id=e.dst_id)) expanding,
- EXISTS(SELECT 1 FROM exploration_edges e JOIN exploration_nodes p ON p.id=e.src_id AND p.exploration_id=$1 AND p.kind='intent' AND p.state IN ('open','running','paused') WHERE e.exploration_id=$1 AND e.dst_id=n.id AND e.rel<>'covers') child
+ EXISTS(SELECT 1 FROM exploration_edges e JOIN exploration_nodes p ON p.id=e.src_id AND p.exploration_id=$1 AND p.kind='intent' AND p.state IN ('open','running','paused','human_confirmation') WHERE e.exploration_id=$1 AND e.dst_id=n.id AND e.rel<>'covers') child
  FROM exploration_nodes n WHERE n.exploration_id=$1 AND n.id=ANY($2::bigint[]))
  INSERT INTO graph_hot_reach(exploration_id,node_id,wave,expand,expanded,children_done)
  SELECT $1,id,$3,expanding,NOT expanding,true FROM seeds WHERE expanding OR child`, exp, ids, wave)
