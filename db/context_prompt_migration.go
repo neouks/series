@@ -121,3 +121,13 @@ func (d *DB) MigrateConciseFindingReportPrompt(reporter string) error {
 		map[string]string{"reporter": reporter},
 		map[string][]string{"reporter": {"bc72d8c45517aedffc64730edc2b05af6a867bb6bfa8ca170a93cd68c53d06c6"}})
 }
+
+// MigrateIntentGuidancePrompts updates the previous exact Planner and Worker defaults.
+func (d *DB) MigrateIntentGuidancePrompts(planner, worker string) error {
+	return d.migratePromptContracts("intent_guidance_prompts_v1", "intent_guidance_prompt_report_v1",
+		map[string]string{"planner": planner, "worker": worker},
+		map[string][]string{
+			"planner": {"77d903a0c27a9935d73584a80c1d5fc9977af37dfa89030b983993be9b6b24d2"},
+			"worker":  {"9cfe2314eccfa52e3e1fb5fb10f952e7a06a17e6f7fad3506e5b070d5569330d"},
+		})
+}

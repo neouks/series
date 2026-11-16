@@ -76,8 +76,14 @@ func TestActiveBuiltinDocumentationHasNoRetiredToolNames(t *testing.T) {
 }
 
 func TestIntentBatchDocumentationUsesSingleItemContract(t *testing.T) {
-	tool := NewToolSet(nil, "").addIntent()
+	tool := ResolveBuiltinTool(NewToolSet(nil, "").addIntent(), "旧版派单说明", nil)
 	props := tool.InputSchema()["properties"].(map[string]any)
+	summary := props["summary"].(map[string]any)["description"].(string)
+	for _, want := range []string{"初查示例", "定向复核示例", "验收条件", "证据不足", "主动验证时交人工确认"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("summary description missing %q", want)
+		}
+	}
 	batch := props["intents"].(map[string]any)["items"].(map[string]any)
 	for _, key := range []string{"summary", "asset_ids", "parent_ids", "priority"} {
 		if !reflect.DeepEqual(props[key], batch["properties"].(map[string]any)[key]) {

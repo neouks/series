@@ -310,6 +310,9 @@ func migrateContextCatalog(pg *db.DB) error {
 	if err := pg.MigratePlannerDirectDispatchPrompt(defaults["planner"], agent.PreviousPlannerDirectDispatchPromptHashes); err != nil {
 		return err
 	}
+	if err := pg.MigrateIntentGuidancePrompts(defaults["planner"], defaults["worker"]); err != nil {
+		return err
+	}
 	if report, ok, err := pg.GetSetting("planner_direct_dispatch_prompt_report_v1"); err != nil {
 		return err
 	} else if ok && report != "{}" {

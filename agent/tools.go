@@ -1603,11 +1603,15 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 	return id, true, nil
 }
 
+const intentSummaryDescription = `每条必填。写明一个可独立交付的问题、授权范围、依据或限制及验收条件。
+初查示例：梳理测试环境用户中心的身份与会话配置，范围限已授权的配置与日志。交付已检查模块、核实结论及证据引用、未覆盖范围和原因。
+定向复核示例：复核测试环境中账号停用后旧会话仍被接受的已有观察。核对已有记录中的账号、时间与入口。交付成立、不成立或证据不足及相应证据和缺口，需要主动验证时交人工确认。`
+
 // Batch and single submissions expose the same fields. Keep required-field
 // and authorization errors in the per-item result rather than rejecting the batch.
 func intentInputSchema() map[string]any {
 	fields := map[string]any{
-		"summary":    map[string]any{"type": "string", "minLength": 1, "description": "每条必填，不能只含空白。一句话写明做什么及为什么。"},
+		"summary":    map[string]any{"type": "string", "minLength": 1, "description": intentSummaryDescription},
 		"asset_ids":  map[string]any{"type": "array", "description": "目标资产ID（复用当前授权上下文中的明确ID，未知时用asset_search查找），不能传探索节点ID；具体目标务必填写，纯全局侦察无具体资产时留空。"},
 		"parent_ids": map[string]any{"type": "array", "description": "上游fact/finding探索节点ID，不是独立finding_id；禁止意图/目标/提示节点。顶层新方向留空，系统挂到任务起点。"},
 		"priority":   intp("优先级建议1-10；省略或0按5处理"),
@@ -1634,7 +1638,7 @@ func intentInputSchema() map[string]any {
 func (t *ToolSet) addIntent() actool.CoreTool {
 	schema := intentInputSchema()
 	core := writeTool("add_intent", "登记探索方向并连入探索链路。"+intentInputContract+"\n"+
-		"主 Agent 成功下发后结束本轮，Worker 自动回传总结。Planner 信息足够时直接提交，信息不足时按需检索；跳过未审批候选。主 Agent 可明确下发待审批资产，封禁和撤回仍拒绝。未知候选先批量 check_target_access。批量 ids 与输入同序，失败项为 0 并列在 errors，活跃重复项见 duplicates。全部失败会明确报错；只修正失败项，参数未改变时不要重试。",
+		"主 Agent 成功下发后结束本轮，Worker 自动回传总结。Planner 信息足够时直接提交，无需先查询；信息不足时按需检索，跳过未审批候选。主 Agent 可明确下发待审批资产，封禁和撤回仍拒绝。未知候选先批量 check_target_access。批量 ids 与输入同序，失败项为 0 并列在 errors，活跃重复项见 duplicates。全部失败会明确报错；只修正失败项，参数未改变时不要重试。",
 		schema,
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			t := t
