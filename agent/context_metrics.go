@@ -1,13 +1,30 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
+	"strconv"
+	"time"
 
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/neouks/series/db"
+	"github.com/neouks/series/internal/logging"
 	"github.com/neouks/series/llmrec"
 )
+
+func logContextUsage(ctx context.Context, usage llm.Usage, elapsed time.Duration, failed bool) {
+	ri := RunInfoFrom(ctx)
+	if ri.AgentKey != "planner" && ri.AgentKey != "worker" {
+		return
+	}
+	logging.Component("context-usage").WithFields(logging.Fields{
+		"task_id": strconv.FormatInt(ri.TaskID, 10), "role": ri.AgentKey,
+		"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens,
+		"cache_read_tokens": usage.CacheReadTokens, "cache_write_tokens": usage.CacheWriteTokens,
+		"elapsed_ms": elapsed.Milliseconds(), "failed": failed,
+	}).Info("模型请求用量")
+}
 
 // Count only the final authorized/projected model view. Hashes and arguments
 // are transient; no query or evidence text is written to the usage ledger.

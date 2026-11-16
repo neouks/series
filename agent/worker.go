@@ -508,8 +508,6 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// Worker 需要本地读写与 Bash，但不会派后台任务；Sleep 只为后台任务轮询服务，
 	// 不把它的 schema 重复发送给每一次 completion。
 	base = append(base, workerLocalTools()...)
-	ctx = withContextObserver(ctx, emit)
-	ctx = context.WithValue(ctx, contextOutputDirectoryKey{}, cmdOutDir(runDir))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID, AgentKey: "worker"})
 	ctx = WithTaskToolSet(ctx, tsx)
 	ctx = withExecutionCheckpoint(ctx, tsx, "worker", intent.ID)

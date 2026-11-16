@@ -87,6 +87,6 @@ func (p assetContextProvider) filterWithMetrics(ctx context.Context, req llm.Com
 			b.Content[r.c].Text += r.suffix
 		}
 	}
-	out, metrics := projectRequestBudgetAndMetrics(ctx, out)
-	return out, metrics, nil
+	out = deduplicatePlainHistory(governRequestDocs(out))
+	return out, contextReadMetrics(out), nil
 }

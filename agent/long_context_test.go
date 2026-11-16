@@ -15,50 +15,31 @@ import (
 	"github.com/neouks/series/db"
 )
 
-func TestCompletedBatchProjectionPreservesProtocolAndAudit(t *testing.T) {
-	req := llm.CompletionRequest{System: []string{"goal and required constraints"}}
-	for i := 0; i < 20; i++ {
+func TestRequestFilteringKeepsCompleteWriteHistory(t *testing.T) {
+	req := llm.CompletionRequest{System: []string{"保留任务目标和约束"}, Messages: []llm.Message{llm.UserText("核对现有资料")}}
+	input, err := json.Marshal(map[string]string{"summary": strings.Repeat("观察记录", 5000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 4 {
 		id := fmt.Sprint(i)
-		input, _ := json.Marshal(map[string]any{"summary": strings.Repeat("证据", 6000)})
-		req.Messages = append(req.Messages, llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: id, Name: "record_fact", Input: input}}},
-			llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.ToolResultText(id, fmt.Sprintf(`{"node_id":%d}`, i+1), false)}})
+		req.Messages = append(req.Messages,
+			llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: id, Name: "record_fact", Input: input}}},
+			llm.Message{Role: llm.RoleUser, Content: []llm.ContentBlock{llm.ToolResultText(id, fmt.Sprintf(`{"node_id":%d}`, i+1), false)}},
+		)
 	}
-	before, _ := json.Marshal(req)
-	out := projectCompletedBatches(req)
-	after, _ := json.Marshal(req)
-	if string(before) != string(after) {
-		t.Fatal("audit changed")
-	}
-	if !reflect.DeepEqual(out.System, req.System) {
-		t.Fatal("constraints changed")
-	}
-	calls, results := 0, 0
-	for _, m := range out.Messages {
-		for _, b := range m.Content {
-			if b.Type == llm.BlockToolUse {
-				calls++
+	req.Messages = append(req.Messages, llm.UserText("根据以上记录给出结论"))
+	for _, role := range []string{"planner", "worker"} {
+		t.Run(role, func(t *testing.T) {
+			ctx := WithRunInfo(t.Context(), RunInfo{AgentKey: role, TaskID: 1})
+			got, err := (assetContextProvider{taskID: 1}).filter(ctx, req)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if b.Type == llm.BlockToolResult {
-				results++
+			if !reflect.DeepEqual(got.Messages, req.Messages) || len(got.System) == 0 || got.System[0] != req.System[0] {
+				t.Fatal("write history or required system text changed")
 			}
-		}
-	}
-	if calls != 2 || results != 2 {
-		t.Fatalf("pairing %d/%d", calls, results)
-	}
-	if out.Messages[len(out.Messages)-1].Content[0].ToolUseID != "19" {
-		t.Fatal("latest batch changed")
-	}
-	if measureRequest(out).Characters >= measureRequest(req).Characters/3 {
-		t.Fatal("long arguments retained")
-	}
-	t.Logf("20_write_batches before_chars=%d after_chars=%d", measureRequest(req).Characters, measureRequest(out).Characters)
-	// An ordinary user message breaks a batch; no cross-boundary pairing.
-	broken := llm.CompletionRequest{Messages: append([]llm.Message{}, req.Messages...)}
-	broken.Messages = append(broken.Messages[:1], append([]llm.Message{llm.UserText("new user boundary")}, broken.Messages[1:]...)...)
-	got := projectCompletedBatches(broken)
-	if got.Messages[0].Content[0].Type != llm.BlockToolUse {
-		t.Fatal("incomplete batch modified")
+		})
 	}
 }
 
@@ -94,21 +75,6 @@ func TestWorkerTodoProgressIsBoundedDurableAndScoped(t *testing.T) {
 	}
 	if mode, e := os.Stat(state.path); e != nil || mode.Mode().Perm() != 0600 {
 		t.Fatal("progress file permissions", e)
-	}
-}
-
-func TestContextSoftBudgetWarnsContinuesAndPreservesLatestFailure(t *testing.T) {
-	var events []db.Activity
-	ctx := withContextObserver(WithRunInfo(t.Context(), RunInfo{AgentKey: "worker", TaskID: 999901, IntentID: 7}), func(a db.Activity) { events = append(events, a) })
-	required := strings.Repeat("必要操作限制", 20000)
-	req := llm.CompletionRequest{System: []string{required}, Messages: []llm.Message{llm.UserText("latest user instruction")}}
-	out := projectRequestBudget(ctx, req)
-	projectRequestBudget(ctx, req)
-	if out.System[0] != required || len(events) != 1 {
-		t.Fatal("constraints lost or warning repeated", len(events))
-	}
-	if measureRequest(out).Characters <= 48000 {
-		t.Fatal("fixture did not exceed budget")
 	}
 }
 
@@ -205,27 +171,6 @@ func TestIncrementalSummaryRejectsInventedReferencesAndEvidenceUpgrade(t *testin
 	}
 	if _, err := validateGraphSummary(`{"items":[{"text":"uncertain outcome","refs":[1],"confidence":"inferred"}]}`, sources); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestRequestMeasurementAndLongRetrievalProjection(t *testing.T) {
-	for _, pages := range []int{2, 10, 100, 300} {
-		req := retrievalFixture(pages)
-		req.System = append(req.System, "必要约束 <>& 中文🙂")
-		raw, _ := json.Marshal(req)
-		got := measureRequest(req)
-		if got.Bytes != len(raw) || got.Characters != utf8.RuneCount(raw) {
-			t.Fatal("measurement mismatch", got, len(raw))
-		}
-		bounded := boundRetrievalHistory(req)
-		projected := projectRequestBudget(WithRunInfo(t.Context(), RunInfo{AgentKey: "worker", TaskID: 999902}), bounded)
-		if projected.System[0] != req.System[0] {
-			t.Fatal("system lost")
-		}
-		if pages >= 100 && measureRequest(projected).Characters > 48000 {
-			t.Fatalf("unbounded index after %d pages: %d", pages, measureRequest(projected).Characters)
-		}
-		t.Logf("pages=%d original_chars=%d read_window_chars=%d projected_chars=%d projected_bytes=%d", pages, got.Characters, measureRequest(bounded).Characters, measureRequest(projected).Characters, measureRequest(projected).Bytes)
 	}
 }
 

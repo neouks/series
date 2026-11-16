@@ -255,8 +255,6 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, g *
 	// 规划职责，避免它们的 schema 在每次 completion 中反复占用输入。
 	// 资产覆盖度关闭时移除 add_task_scope，保留普通资产检索。
 	base := append(tsx.DropCoverageTools(tsx.PlannerTools()), newAdmittedBash())
-	ctx = withContextObserver(ctx, emit)
-	ctx = context.WithValue(ctx, contextOutputDirectoryKey{}, cmdOutDir(taskDir))
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), AgentKey: "planner"})
 	ctx = WithTaskToolSet(ctx, tsx)
 	ctx = withExecutionCheckpoint(ctx, tsx, "planner", 0)
