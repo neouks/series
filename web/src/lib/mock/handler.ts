@@ -1373,8 +1373,8 @@ function sendMockWorkerMessage(
   }
   const intent = mockIntents.find((item) => item.id === id);
   if (!intent) return { ok: false, error: "意图不存在" };
-  if (intent.inherited || !["paused", "human_confirmation"].includes(intent.state)) {
-    return { ok: false, state: intent.state, error: "仅已暂停或待人工确认的 Worker 可以接收消息" };
+  if (intent.inherited || intent.state !== "paused") {
+    return { ok: false, state: intent.state, error: "仅已暂停的 Worker 可以发送消息，请先暂停" };
   }
   if (!normalizedMessage) return { ok: false, state: intent.state, error: "消息不能为空" };
   if (Array.from(normalizedMessage).length > 4000) {
@@ -2216,7 +2216,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       const payload = JSON.parse(intent.payload || "{}");
       if (
         !(intent.state === "stopped" && payload.cancelled_by_user) &&
-        !["open", "running", "paused", "human_confirmation"].includes(intent.state)
+        !["open", "running", "paused"].includes(intent.state)
       ) {
         throw new Error("Worker 状态已变化");
       }

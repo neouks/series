@@ -552,10 +552,10 @@ func (s *ExplorationStore) PublishGraphDigest(ctx context.Context, payload map[s
 	}
 	roots := `SELECT n.id,n.exploration_id,n.state,n.kind,n.created_at,c.owner FROM exploration_nodes n JOIN contexts c ON c.exp=n.exploration_id WHERE n.exploration_id=$1 AND n.id=ANY($2::bigint[])`
 	authQuery := contextVisibility(roots, false) + `, hot(id) AS (
- SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused','human_confirmation')
+ SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused')
  UNION SELECT e.src_id FROM hot h JOIN exploration_edges e ON e.exploration_id=$1 AND e.dst_id=h.id AND e.rel<>'covers'
  ), active_children AS (SELECT e.dst_id id FROM exploration_edges e JOIN exploration_nodes p ON p.id=e.src_id
- WHERE e.exploration_id=$1 AND e.rel<>'covers' AND p.kind='intent' AND p.state IN ('open','running','paused','human_confirmation'))
+ WHERE e.exploration_id=$1 AND e.rel<>'covers' AND p.kind='intent' AND p.state IN ('open','running','paused'))
  SELECT count(*) FROM visible WHERE $3::bigint=0 AND $4::bigint=0 AND NOT EXISTS(SELECT 1 FROM hot WHERE id=ANY($6::bigint[]))
  AND NOT EXISTS(SELECT 1 FROM active_children WHERE id=ANY($6::bigint[]))`
 	var readable int

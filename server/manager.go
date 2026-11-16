@@ -2017,11 +2017,6 @@ func (t *Task) NotifyDone(intentID int64) {
 	t.Notify()
 }
 
-func (t *Task) NotifyHumanConfirmation(intentID int64) {
-	t.enqueuePlannerTrigger(agent.TriggerEvent{Kind: pgdb.IntentHumanConfirmation, IntentID: intentID})
-	t.Notify()
-}
-
 // NotifyFinding records that a worker reported a finding on intentID (summary),
 // then wakes the planner — so the round spells out which intent found what.
 func (t *Task) NotifyFinding(intentID int64, summary string, nodeIDs ...int64) {

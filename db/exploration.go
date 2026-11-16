@@ -18,8 +18,6 @@ import (
 // it to distinguish an expected control race (HTTP 409) from a storage failure.
 var ErrIntentStateConflict = errors.New("intent state changed concurrently")
 
-const IntentHumanConfirmation = "human_confirmation"
-
 // utf8Clean makes a string safe for a PostgreSQL text column. It (1) replaces
 // invalid UTF-8 byte sequences with U+FFFD and (2) strips NUL (0x00) bytes.
 // Tool output (nmap/curl/… stdout) can carry raw/truncated bytes that PostgreSQL's
@@ -308,7 +306,7 @@ func (s *ExplorationStore) addIntentDeduplicated(ctx context.Context, payload ma
 SELECT n.id, n.payload,
        COALESCE((SELECT json_agg(a.asset_id ORDER BY a.asset_id) FROM exploration_anchors a WHERE a.node_id=n.id), '[]'::json)::text
 FROM exploration_nodes n
-WHERE n.exploration_id=$1 AND n.kind='intent' AND n.state IN ('open','running','paused','human_confirmation')
+WHERE n.exploration_id=$1 AND n.kind='intent' AND n.state IN ('open','running','paused')
 ORDER BY n.id`, s.expID)
 	if err != nil {
 		return 0, false, err
@@ -615,7 +613,7 @@ type IntentCleanup struct {
 	Activities int64 `json:"activities"`
 }
 
-// StopIntentWithReason marks a waiting or paused intent as 'stopped' without deleting
+// StopIntentWithReason marks an open/paused intent as 'stopped' WITHOUT deleting
 // it or any of its yielded facts/findings/activities, and records the user's reason
 // as a fact node hanging off that intent (intent --yields--> fact). Returns the new
 // fact node id. The caller must first stop a running worker to prevent late writes.
@@ -642,7 +640,7 @@ func (s *ExplorationStore) StopIntentWithReason(id int64, reason, origin string)
 	if state == "stopped" && existing["cancelled_by_user"] == true {
 		return 0, tx.Commit() // Already cancelled: no duplicate audit fact.
 	}
-	if state != "open" && state != "paused" && state != IntentHumanConfirmation {
+	if state != "open" && state != "paused" {
 		return 0, fmt.Errorf("%w: intent state %s cannot be cancelled", ErrIntentStateConflict, state)
 	}
 	// Merge the cancellation marker into the intent's own payload so it travels with the
@@ -1348,12 +1346,6 @@ func (s *ExplorationStore) HasActiveIntent() (bool, error) {
 	var exists bool
 	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running'))`, s.expID).Scan(&exists)
-	return exists, err
-}
-
-func (s *ExplorationStore) HasPendingHumanConfirmation() (bool, error) {
-	var exists bool
-	err := s.db.QueryRow("SELECT EXISTS(SELECT 1 FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state=$2)", s.expID, IntentHumanConfirmation).Scan(&exists)
 	return exists, err
 }
 

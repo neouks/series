@@ -5,18 +5,6 @@ import test from "node:test";
 
 type Queue = { items: TaskNode[]; version: number; manual: boolean };
 const base = "/tasks/t-acme-api";
-test("待人工确认不进入执行队列，补充资料后继续原 Worker 会话", async () => {
-  const queue = await mockHandle<Queue>("GET", `${base}/worker-queue`);
-  assert.ok(!queue.items.some((item) => item.id === "102"));
-  await assert.rejects(mockHandle("POST", `${base}/intents/102/control`, JSON.stringify({ action: "resume" })));
-  const result = await mockHandle<{ state: string }>(
-    "POST",
-    `${base}/intents/102/messages`,
-    JSON.stringify({ message: "补充已核对的记录", request_id: "handoff-fixture" }),
-  );
-  assert.equal(result.state, "running");
-});
-
 test("队列手动排序、版本冲突、取消后重开追加队尾和物理删除", async () => {
   const queue = () => mockHandle<Queue>("GET", `${base}/worker-queue`);
   const control = (id: string, action: string) =>

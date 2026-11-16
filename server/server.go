@@ -450,6 +450,7 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	wk.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
 	wk.SetTrafficRecording(s.m.TrafficEnabled())
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
+	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInjectContext(s.constraintInjectWorkerContext) // 操作约束注入 worker(可配置,默认开;每轮读)
 	wk.SetNonStreaming(nonStreamingResolver(wCfg))                 // 该 profile 选非流式时走 Provider.Complete
 	wk.SetMaxTokens(maxTokensResolver(wCfg))                       // 单次回复输出上限(0 = 不发)
@@ -457,8 +458,10 @@ func (s *Server) buildPlannerWorker(pinID *int64, gProv llm.Provider, gCfg agent
 	pProv, pCfg := s.providerForAgent("planner", pinID, gProv, gCfg)
 	pl := agent.NewPlanner(pProv, pCfg.Model, s.m.dir, tx, providerCompactionWindow(pProv, pCfg), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.findingRecorder())
-	pl.SetKillWork(s.engine.KillWork)                               // planner kill_work → stop queued/running intent
-	pl.SetSteerWork(s.engine.SteerWork)                             // planner steer_work → inject mid-run course-correction
+	pl.SetKillWork(s.engine.KillWork)                       // planner kill_work → stop queued/running intent
+	pl.SetSteerWork(s.engine.SteerWork)                     // planner steer_work → inject mid-run course-correction
+	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert()) // WebFetch through the task policy proxy
+	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInjectContext(s.constraintInjectPlannerContext) // 操作约束注入 planner(可配置,默认开;每轮读)
 	pl.SetNonStreaming(nonStreamingResolver(pCfg))                  // 该 profile 选非流式时走 Provider.Complete
 	pl.SetMaxTokens(maxTokensResolver(pCfg))                        // 单次回复输出上限(0 = 不发)

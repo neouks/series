@@ -44,53 +44,6 @@ func TestPlannerIntentRejectedAfterManualSwitch(t *testing.T) {
 	}
 }
 
-func TestWorkerHumanConfirmationPersistsWithoutAutomaticClaim(t *testing.T) {
-	d, s, taskID := executionFixture(t)
-	id := addQueueIntent(t, s, "open", 5)
-	if err := s.MainDispatchFeedback(t.Context(), id, 2, true); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := s.ClaimIntent(id, "worker"); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	if _, err := s.AppendActivity(Activity{NodeID: &id, Worker: "worker", Kind: "result", Summary: "待人工确认", Detail: "缺少用户提供的材料"}); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := s.CompareAndSetIntentState(id, "running", IntentHumanConfirmation); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	if ok, err := s.HasPendingHumanConfirmation(); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	if ok, err := s.ClaimIntent(id, "worker"); err != nil || ok {
-		t.Fatalf("automatic claim: %v %v", ok, err)
-	}
-	if ok, err := s.ClaimPausedIntentByUser(id); err != nil || ok {
-		t.Fatalf("stale pause claim: %v %v", ok, err)
-	}
-	if output, err := s.ContextOutput(t.Context(), id, 0, 200); err != nil ||
-		output["awaiting_human_confirmation"] != true || output["is_final"] != false {
-		t.Fatal(output, err)
-	}
-	var notified bool
-	if err := d.QueryRow(`SELECT EXISTS(SELECT 1 FROM activity WHERE exploration_id=$1 AND main_seg=2
-		AND metadata->'worker_feedback'->>'state'=$2 AND detail LIKE '%缺少用户提供的材料%')`, s.ID(), IntentHumanConfirmation).Scan(&notified); err != nil || !notified {
-		t.Fatal(notified, err)
-	}
-	if _, err := s.SetExecutionMode(ExecutionManual); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := s.ClaimIntentForHumanMessage(id, IntentHumanConfirmation); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	if ok, err := s.HasPendingHumanConfirmation(); err != nil || ok {
-		t.Fatal(ok, err)
-	}
-	if node, err := d.Exploration(s.ID()).GetNode(id); err != nil || node == nil || node.State != "running" || !node.DispatchRequested() {
-		t.Fatalf("task=%d node=%+v err=%v", taskID, node, err)
-	}
-}
-
 func TestPlannerIntentModeSwitchRace(t *testing.T) {
 	_, store, _ := executionFixture(t)
 	for i := range 20 {

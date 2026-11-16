@@ -36,7 +36,7 @@ func maintainFullHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool,
 		var last int64
 		var count int
 		err := tx.QueryRowContext(ctx, `WITH page AS MATERIALIZED (
-   SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused','human_confirmation') AND id>$2 ORDER BY id LIMIT 128
+   SELECT id FROM exploration_nodes WHERE exploration_id=$1 AND kind='intent' AND state IN ('open','running','paused') AND id>$2 ORDER BY id LIMIT 128
   ), written AS (
    INSERT INTO graph_hot_reach(exploration_id,node_id,wave) SELECT $1::bigint,id,$3::bigint FROM page
    ON CONFLICT(exploration_id,node_id) DO UPDATE SET wave=EXCLUDED.wave,expand=true,expanded=false,edge_cursor=0,child_cursor=0,children_done=false
@@ -64,7 +64,7 @@ func maintainFullHotReachPage(ctx context.Context, tx *sql.Tx, exp int64) (bool,
 	// with DISTINCT so multiple edge relations cannot drop a neighbor.
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `WITH page AS MATERIALIZED (
- SELECT h.*,n.kind='intent' AND n.state IN ('open','running','paused','human_confirmation') live FROM graph_hot_reach h
+ SELECT h.*,n.kind='intent' AND n.state IN ('open','running','paused') live FROM graph_hot_reach h
  LEFT JOIN exploration_nodes n ON n.id=h.node_id WHERE h.exploration_id=$1 AND h.wave=$2 AND NOT h.expanded ORDER BY h.node_id LIMIT 128
  ) SELECT COALESCE(jsonb_agg(jsonb_build_object('id',p.node_id,'edge',p.edge_cursor,'child',p.child_cursor,'children_done',p.children_done,
  'ancestors',(SELECT COALESCE(jsonb_agg(id ORDER BY id),'[]'::jsonb) FROM (SELECT DISTINCT e.src_id id FROM exploration_edges e WHERE p.expand AND e.exploration_id=$1 AND e.dst_id=p.node_id AND e.rel<>'covers' AND e.src_id>p.edge_cursor ORDER BY e.src_id LIMIT 129)a),

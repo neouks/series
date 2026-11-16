@@ -319,8 +319,6 @@ function intentStatus(state: string): SessionStatus {
       return "stopped";
     case "paused":
       return "paused";
-    case "human_confirmation":
-      return "human_confirmation";
     case "open": // 待领取，区别于执行中
       return "pending";
     default: // running
@@ -387,7 +385,7 @@ function SessionItem({
     s.role === "worker" &&
     !s.inherited &&
     !executionCancelled &&
-    ["pending", "running", "paused", "human_confirmation"].includes(s.status);
+    (s.status === "pending" || s.status === "running" || s.status === "paused");
   return (
     <div
       className={cn(
@@ -429,9 +427,6 @@ function SessionItem({
           <Badge variant="outline" className="shrink-0">
             已取消执行
           </Badge>
-        )}
-        {s.status === "human_confirmation" && (
-          <Badge variant="outline" className="shrink-0">待人工确认</Badge>
         )}
         {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-500" />}
         {!active && unread ? (
@@ -1390,11 +1385,11 @@ export function SessionsTab({
     (worker) =>
       !worker.inherited &&
       worker.intent_id &&
-      (["pending", "running", "paused", "human_confirmation"].includes(worker.status) || sessionMeta.get(worker.id)?.executionCancelled),
+      (["pending", "running", "paused"].includes(worker.status) || sessionMeta.get(worker.id)?.executionCancelled),
   );
   const selectedVisibleWorkers = selectableWorkers.filter((worker) => selectedWorkers.has(worker.intent_id!));
   const batchCancellable = selectedVisibleWorkers.filter((worker) =>
-    ["pending", "running", "paused", "human_confirmation"].includes(worker.status),
+    ["pending", "running", "paused"].includes(worker.status),
   );
   const batchResumable = selectedVisibleWorkers.filter(
     (worker) => worker.status === "paused" || sessionMeta.get(worker.id)?.executionCancelled,
@@ -1770,7 +1765,7 @@ export function SessionsTab({
     const intentId = active.intent_id;
     const message = workerMessage.trim();
     if (side.handleCommand(message, () => setWorkerMessage(""))) return;
-    if (!intentId || active.inherited || !["paused", "human_confirmation"].includes(active.status) || workerMessageSending || !message) return;
+    if (!intentId || active.inherited || active.status !== "paused" || workerMessageSending || !message) return;
     if (workerMessageCharCount(message) > MAX_WORKER_MESSAGE_CHARS) {
       toast.error(`消息不能超过 ${MAX_WORKER_MESSAGE_CHARS} 个字符`);
       return;
@@ -2048,7 +2043,7 @@ export function SessionsTab({
                             s.role === "worker" &&
                             !s.inherited &&
                             s.intent_id &&
-                            (["pending", "running", "paused", "human_confirmation"].includes(s.status) || meta?.executionCancelled)
+                            (["pending", "running", "paused"].includes(s.status) || meta?.executionCancelled)
                               ? (checked) => toggleWorkerSelection(s.intent_id!, checked)
                               : undefined
                           }
@@ -2423,16 +2418,14 @@ export function SessionsTab({
               </div>
             ) : active.role === "worker" &&
               !active.inherited &&
-              ["running", "paused", "human_confirmation"].includes(active.status) ? (
+              (active.status === "running" || active.status === "paused") ? (
               <div className="mx-auto w-full max-w-[960px] p-3 sm:px-5">
                 <InputGroup className="min-h-9 rounded-3xl bg-muted/30 p-2 has-disabled:opacity-100">
                   <MentionTextarea
                     inputGroup
                     rows={1}
                     aria-label={`给 Worker #${active.intent_id} 发消息`}
-                    placeholder={active.status === "human_confirmation"
-                      ? "补充确认结果或资料，继续分析…"
-                      : `给 Worker #${active.intent_id} 发消息，@ 引用记录，调整执行方向…`}
+                    placeholder={`给 Worker #${active.intent_id} 发消息，@ 引用记录，调整执行方向…`}
                     value={workerMessage}
                     onValueChange={(value) => {
                       setWorkerMessage(value);
@@ -2479,25 +2472,22 @@ export function SessionsTab({
                       </InputGroupButton>
                     ) : (
                       <>
-                        {active.status === "paused" && (
-                          <InputGroupButton
-                            className="ml-auto"
-                            size="xs"
-                            variant="ghost"
-                            onClick={() => void controlWorker(active, "resume")}
-                            disabled={controllingIntent !== null || workerMessageSending}
-                            title="不发消息，直接继续执行"
-                            aria-label="直接继续执行"
-                          >
-                            {controllingIntent === active.intent_id ? (
-                              <Loader2Icon className="animate-spin" />
-                            ) : (
-                              "直接继续"
-                            )}
-                          </InputGroupButton>
-                        )}
                         <InputGroupButton
-                          className={cn(active.status === "human_confirmation" && "ml-auto")}
+                          className="ml-auto"
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => void controlWorker(active, "resume")}
+                          disabled={controllingIntent !== null || workerMessageSending}
+                          title="不发消息，直接继续执行"
+                          aria-label="直接继续执行"
+                        >
+                          {controllingIntent === active.intent_id ? (
+                            <Loader2Icon className="animate-spin" />
+                          ) : (
+                            "直接继续"
+                          )}
+                        </InputGroupButton>
+                        <InputGroupButton
                           size="icon-xs"
                           variant="default"
                           onClick={sendWorkerChat}

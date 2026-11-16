@@ -41,9 +41,7 @@ var wrapupTurnDefaults = map[string]int{
 
 const genericWrapupTurns = 10
 
-const plannerWrapUpDefault = "本轮规划预算即将用尽。只提交前置资料已齐备、可独立交付的方向，零条也可正常结束。依据已有原始证据核对目标。用 TodoWrite 记录跨意图依赖，具体分析顺序交给 Worker。"
-
-const plannerWrapUpGuidance = plannerIntentGuidance + humanConfirmationGuidance + "\n简短说明本轮结论及剩余缺口。此处派单粒度与人工交接规则优先于旧收尾提示。"
+const plannerWrapUpDefault = "你本轮规划的步数即将用尽——注意只是【这一轮】结束,系统之后仍会随态势变化再次唤醒你继续规划,并非任务终止,你无需在此收束整个规划。请把本轮已经想清楚的结论落地、别让这一轮白跑,但也【不要为了收尾硬凑意图】(本轮 0 个意图仍是完全正常的结果)：(1) 若已判断出【当前就该派发】的探索方向,用一次 add_intent 批量提交(想好的别憋着不发);(2) 对已被某发现/事实证明达成的目标,调 prove_goal 标记 met(别漏判);(3) 若识别出需要分步的串行利用链,用 TodoWrite 记下,便于下次唤醒接着派。做完直接结束本轮,无需输出总结文本。"
 
 const mainAgentWrapUpDefault = "你的步数即将用尽,本次交互就要结束。不要再发起新的探索/操作。请**单独用一句话纯文本**向用户总结当前进展、关键结论,以及建议的下一步。"
 
@@ -70,16 +68,12 @@ func WrapupTurnsDefault(agentKey string) int {
 // resolveWrapup returns the effective wrap-up prompt: the DB override (if set and
 // non-empty) over the built-in default.
 func resolveWrapup(agentKey string) string {
-	prompt := WrapupDefault(agentKey)
 	if WrapupOverride != nil {
 		if t, ok := WrapupOverride(agentKey); ok && strings.TrimSpace(t) != "" {
-			prompt = t
+			return t
 		}
 	}
-	if agentKey == "planner" {
-		prompt += plannerWrapUpGuidance
-	}
-	return prompt
+	return WrapupDefault(agentKey)
 }
 
 // resolveWrapupTurns returns the effective wrap-up turn budget: a positive DB
@@ -125,7 +119,7 @@ var taskTimeoutWrapupDefaults = map[string]string{
 
 const workerTaskTimeoutDefault = "**整个任务已到达超时上限，即将结束**（不是你这次 run 的预算，是整场探索到点了）。这是最后机会：(1) 把你已识别但还没写回的内容【全部】落库——新资产 insert_assets、探索结论/事实 record_fact、确认漏洞 report_finding；(2) 不要再启动任何新命令/探测；(3) **最后单独用一句话纯文本**总结你在本意图上的关键结论。"
 
-const plannerTaskTimeoutDefault = "任务已达到超时上限。根据已有证据最后核对目标，只标记确有证据支持的达成项。简短说明剩余缺口和需要人工确认的问题。本轮不下发意图。"
+const plannerTaskTimeoutDefault = "**整个任务已到达超时上限，即将结束**（不是本轮，是整个任务终止）。请基于当前【全部】事实与发现，做最后一次目标判定：对已被证据证明达成的目标调 prove_goal 标记 met（别漏判）。**不要再生成任何新意图**（此时派意图也不会再被执行）。判定完即收束，无需输出总结文本。"
 
 // TaskTimeoutWrapupDefault 返回某 agent 的任务超时内置默认收尾词（供后台占位/恢复默认）。
 func TaskTimeoutWrapupDefault(agentKey string) string {
@@ -135,16 +129,12 @@ func TaskTimeoutWrapupDefault(agentKey string) string {
 // resolveTaskTimeoutWrapup：DB 覆盖(非空) > 内置默认。空串表示该 agent 无任务超时词
 // （非 worker/planner），此时调用方应回退 per-run 词。
 func resolveTaskTimeoutWrapup(agentKey string) string {
-	prompt := TaskTimeoutWrapupDefault(agentKey)
 	if WrapupTaskTimeoutOverride != nil {
 		if t, ok := WrapupTaskTimeoutOverride(agentKey); ok && strings.TrimSpace(t) != "" {
-			prompt = t
+			return t
 		}
 	}
-	if agentKey == "planner" {
-		prompt += humanConfirmationGuidance + "\n任务已到点，简述剩余缺口，停止下发意图。"
-	}
-	return prompt
+	return TaskTimeoutWrapupDefault(agentKey)
 }
 
 func resolveTaskTimeoutTurns(agentKey string) int {

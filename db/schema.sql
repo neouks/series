@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS exploration_nodes (
     CONSTRAINT ck_node_kind CHECK (kind IN ('begin','goal','intent','fact','finding','hint','digest')),
     CONSTRAINT ck_node_state CHECK (
         (kind='begin'   AND state IN ('open')) OR
-        (kind='intent'  AND state IN ('open','running','paused','human_confirmation','done','blocked','exhausted','stopped')) OR
+        (kind='intent'  AND state IN ('open','running','paused','done','blocked','exhausted','stopped')) OR
         (kind='goal'    AND state IN ('open','met','abandoned')) OR
         (kind='fact'    AND state IN ('confirmed','dismissed','origin')) OR
         (kind='finding' AND state IN ('confirmed','dismissed')) OR
@@ -220,19 +220,20 @@ BEGIN
             CHECK (kind IN ('begin','goal','intent','fact','finding','hint','digest'));
     END IF;
 END $$;
--- ck_node_state: upgrade existing installations to include human confirmation.
+-- ck_node_state: recreate when it lacks the 'paused' (older) or 'digest' (this rev) branches.
 DO $$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conrelid='exploration_nodes'::regclass
           AND conname='ck_node_state'
-          AND pg_get_constraintdef(oid) NOT LIKE '%human_confirmation%'
+          AND (pg_get_constraintdef(oid) NOT LIKE '%paused%'
+               OR pg_get_constraintdef(oid) NOT LIKE '%superseded%')
     ) THEN
         ALTER TABLE exploration_nodes DROP CONSTRAINT ck_node_state;
         ALTER TABLE exploration_nodes ADD CONSTRAINT ck_node_state CHECK (
             (kind='begin'   AND state IN ('open')) OR
-            (kind='intent'  AND state IN ('open','running','paused','human_confirmation','done','blocked','exhausted','stopped')) OR
+            (kind='intent'  AND state IN ('open','running','paused','done','blocked','exhausted','stopped')) OR
             (kind='goal'    AND state IN ('open','met','abandoned')) OR
             (kind='fact'    AND state IN ('confirmed','dismissed','origin')) OR
             (kind='finding' AND state IN ('confirmed','dismissed')) OR
@@ -1666,10 +1667,10 @@ BEGIN
         RETURN NULL;
     END IF;
     is_terminal := target_state IN ('done','blocked','exhausted','stopped','deleted');
-    IF NOT is_terminal AND target_state NOT IN ('paused','open','human_confirmation') THEN RETURN NULL; END IF;
+    IF NOT is_terminal AND target_state NOT IN ('paused','open') THEN RETURN NULL; END IF;
     FOR f IN SELECT * FROM worker_feedback WHERE exploration_id=OLD.exploration_id AND intent_id=OLD.id AND NOT terminal FOR UPDATE LOOP
         result_id := NULL; result_text := NULL;
-        IF is_terminal OR target_state = 'human_confirmation' THEN
+        IF is_terminal THEN
             SELECT id,COALESCE(NULLIF(detail,''),summary) INTO result_id,result_text FROM activity
             WHERE exploration_id=OLD.exploration_id AND node_id=OLD.id AND id>f.after_activity AND kind='result'
             ORDER BY id DESC LIMIT 1;
@@ -1677,9 +1678,8 @@ BEGIN
         body := format('### Worker %s · 意图 #%s', CASE WHEN is_terminal THEN '结果' ELSE '状态' END,OLD.id)
             || E'\n\n状态：' || CASE target_state WHEN 'done' THEN '已完成' WHEN 'blocked' THEN '执行失败'
             WHEN 'exhausted' THEN '预算或时间耗尽' WHEN 'stopped' THEN '已终止' WHEN 'deleted' THEN '已删除'
-            WHEN 'paused' THEN '已暂停，恢复后继续跟踪' WHEN 'human_confirmation' THEN '待人工确认'
-            ELSE '等待执行或审批，恢复后继续跟踪' END
-            || CASE WHEN is_terminal OR target_state = 'human_confirmation' THEN E'\n\n' || COALESCE(NULLIF(result_text,''),'本次未产生最终总结，请查看 Worker 会话中的已有记录。') ELSE '' END;
+            WHEN 'paused' THEN '已暂停，恢复后继续跟踪' ELSE '等待执行或审批，恢复后继续跟踪' END
+            || CASE WHEN is_terminal THEN E'\n\n' || COALESCE(NULLIF(result_text,''),'本次未产生最终总结，请查看 Worker 会话中的已有记录。') ELSE '' END;
         IF result_id IS NULL THEN
             SELECT id INTO result_id FROM activity WHERE exploration_id=OLD.exploration_id AND node_id=OLD.id ORDER BY id DESC LIMIT 1;
         END IF;

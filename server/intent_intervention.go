@@ -28,7 +28,7 @@ func validWorkerMessageRequestID(id string) bool {
 	return true
 }
 
-// sendWorkerMessage continues a paused or awaiting-confirmation Worker with human input.
+// sendWorkerMessage continues a paused Worker intent with a human-authored message.
 // The message is injected as the next turn's input through the same
 // resume-from-transcript path the worker uses on a normal resume (ExecuteWithMessage),
 // so this reuses the existing pause/resume machinery rather than a bespoke protocol.
@@ -77,7 +77,9 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject non-runnable tasks before trying to claim the waiting intent.
+	// Reject non-runnable task lifecycles up front so the caller gets a clear reason
+	// instead of a silent no-op. The intent itself must be paused: the UI flow is
+	// interrupt (pause) first, then send.
 	if s.engine.IsDeleting(t.ID) {
 		writeErr(w, http.StatusConflict, "任务正在删除，无法向 Worker 发送消息")
 		return
@@ -115,8 +117,8 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "node is not an intent")
 		return
 	}
-	if node.State != "paused" && node.State != db.IntentHumanConfirmation {
-		writeErr(w, http.StatusConflict, "仅已暂停或待人工确认的 Worker 可以接收消息")
+	if node.State != "paused" {
+		writeErr(w, http.StatusConflict, "仅已暂停的 Worker 可以发送消息，请先暂停")
 		return
 	}
 	agentMessage, ok := s.prepareChatMentionMessage(w, message)
@@ -124,10 +126,10 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// runDetachedIntent claims the intent, emits the user turn and starts a
+	// runDetachedIntent transitions paused->running, emits the user turn and starts a
 	// dedicated run. Root the run at s.ctx so a disconnected browser cannot strand it
 	// while task pause/delete/shutdown still stop it.
-	if err := s.engine.runDetachedIntent(s.ctx, r.Context(), t, iid, node.State, requestID, message, agentMessage); err != nil {
+	if err := s.engine.runDetachedIntent(s.ctx, r.Context(), t, iid, requestID, message, agentMessage); err != nil {
 		switch {
 		case runtimebudget.IsLocalError(err):
 			w.Header().Set("Retry-After", "1")

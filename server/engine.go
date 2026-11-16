@@ -1241,7 +1241,6 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// 再重试,避免退避挤占其他 worker 的优雅收尾窗口)。
 	maxRetries, retryBackoff := e.modelErrorRetryPolicy()
 	for attempt := 1; attempt <= maxRetries &&
-		!wrote.HumanConfirmation &&
 		retryableWorkerModelError(reason, err) &&
 		workCtx.Err() == nil && ectx.Err() == nil && !e.IsPaused(t.ID) && !e.isSettling(t.ID); attempt++ {
 		log.Printf("[worker %s] task %s 意图 #%d model_error 收场，%v 后重试 (%d/%d)",
@@ -1380,8 +1379,6 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	// 试过但没真正做完、需换角度，而非当成已覆盖永久跳过）；出错→blocked；正常→done。
 	state := "done"
 	switch {
-	case wrote.HumanConfirmation:
-		state = db.IntentHumanConfirmation
 	case err != nil:
 		state = "blocked"
 	case reason == harness.ReasonMaxTurns:
@@ -1396,30 +1393,28 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	} else {
 		if stateErr := transitionIntentState(t.Store, intent.ID, "running", state); stateErr != nil {
 			log.Printf("[worker %s] task %s 意图 #%d 终态 %s 落库失败: %v", name, t.ID, intent.ID, state, stateErr)
-			return true
 		}
 	}
 	logging.Component("worker").WithFields(logging.Fields{
 		"task_id": t.ID, "intent_id": intent.ID, "worker": name, "state": state, "result": wrote,
 	}).Info("意图执行结束")
 	e.touch(t.ID)
-	if state == db.IntentHumanConfirmation {
-		t.NotifyHumanConfirmation(intent.ID)
-	} else {
-		t.NotifyDone(intent.ID)
-	}
+	t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	return true
 }
 
-// runDetachedIntent resumes a waiting intent outside the worker pool in its own
-// goroutine. The claim checks the state the user saw and stays off the open queue.
+// runDetachedIntent runs one paused intent OUTSIDE the worker pool in its own
+// goroutine — the human-message path. It transitions the intent paused->running
+// itself (never through 'open'), so the pool, which only claims 'open', can never
+// race it; the "at most one run per intent" invariant still holds because winning
+// the CAS is the sole entry and work[intentID] was cleared when the pause settled.
 // It shares the pool's task/global execution budget. Waiting belongs to requestCtx,
 // is finite and cancellable, and changes no intent state. After grant, the spawned goroutine owns one
 // task-operation admission for the whole run and roots its context at ctx (pass the
 // server root, never the HTTP request, so a disconnect cannot strand the run while
 // task pause/delete/shutdown still stops it). Returns an error if the run could not
 // be started; the intent is left untouched in that case.
-func (e *Engine) runDetachedIntent(ctx, requestCtx context.Context, t *Task, intentID int64, expected, requestID, message, agentMessage string) error {
+func (e *Engine) runDetachedIntent(ctx, requestCtx context.Context, t *Task, intentID int64, requestID, message, agentMessage string) error {
 	waitCtx, cancel := e.workerWaitContext(ctx, t)
 	defer cancel()
 	waitCtx, stopWait := context.WithTimeout(waitCtx, workerAdmissionWait)
@@ -1490,12 +1485,12 @@ func (e *Engine) runDetachedIntent(ctx, requestCtx context.Context, t *Task, int
 	if err := requestCtx.Err(); err != nil {
 		return err
 	}
-	changed, err := t.Store.ClaimIntentForHumanMessage(intentID, expected)
+	changed, err := t.Store.ClaimPausedIntentByUser(intentID)
 	if err != nil {
 		return err
 	}
 	if !changed {
-		return fmt.Errorf("%w: 意图状态已变化或当前资产不可用", db.ErrIntentStateConflict)
+		return fmt.Errorf("%w: 意图不再是 paused 状态", db.ErrIntentStateConflict)
 	}
 	node.State, node.Owner = "running", "chat"
 	// Record the human turn as a visible activity BEFORE the run starts, so it is
@@ -1567,9 +1562,6 @@ func (e *Engine) completeAutomatically(t *Task) (bool, error) {
 	}
 	if mode == db.ExecutionManual {
 		return false, nil
-	}
-	if pending, err := t.Store.HasPendingHumanConfirmation(); err != nil || pending {
-		return false, err
 	}
 	return e.m.SetTaskStatusGuarded(t.ID, "done")
 }

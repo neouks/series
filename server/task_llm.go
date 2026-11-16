@@ -573,6 +573,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
 	wk.SetTrafficRecording(s.m.TrafficEnabled())
 	wk.SetMemory(memory.NewStore(filepath.Join(s.m.dir, "memory")))
+	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInjectContext(s.constraintInjectWorkerContext) // 操作约束注入 worker(可配置,默认开)
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.findingRecorder())
@@ -582,6 +583,8 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetNoaEnabled(s.m.NoaCompactionEnabled) // 实验功能:noa 上下文压缩(平台级开关,每 run 读)
 	pl.SetKillWork(s.engine.KillWork)
 	pl.SetSteerWork(s.engine.SteerWork)
+	pl.SetProxy(s.m.TaskProxyAddr(), s.m.TaskProxyCACert())
+	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInjectContext(s.constraintInjectPlannerContext) // 操作约束注入 planner(可配置,默认开)
 	// cold-digest §7: 冷节点后台压缩。引擎经权威解析器实际驱动的就是这套 per-task planner
 	// (agentsForTask),所以 Compactor 必须接在这里;buildPlannerWorker 那套全局 pair 被解析器

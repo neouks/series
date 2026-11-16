@@ -299,9 +299,6 @@ func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 		description = commandExecutionDescription(description)
 	}
 	run := func(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
-		if reason := agent.RequireManualVerification(ctx); reason != "" {
-			return actool.Errorf(reason), nil
-		}
 		var params map[string]any
 		if len(in) > 0 {
 			if err := json.Unmarshal(in, &params); err != nil {

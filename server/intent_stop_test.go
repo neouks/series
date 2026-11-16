@@ -15,48 +15,6 @@ import (
 	"github.com/neouks/series/db"
 )
 
-func TestWorkerHumanConfirmationDisplayedInsteadOfDone(t *testing.T) {
-	isolateStopTestAgentHooks(t)
-	s, task := modeServer(t)
-	id := stopTestIntent(t, task, "review saved evidence")
-	if ok, err := task.Store.ClaimIntent(id, "worker"); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	node, err := task.Store.GetNode(id)
-	if err != nil || node == nil {
-		t.Fatal(node, err)
-	}
-	step := 0
-	provider := retestProvider{complete: func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
-		step++
-		if step == 1 {
-			return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{
-				Type: llm.BlockToolUse, ID: "handoff", Name: "request_human_confirmation",
-				Input: json.RawMessage(`{"reason":"请补充用户确认的原始记录"}`),
-			}}}, "tool_use", llm.Usage{}, nil
-		}
-		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("现有资料不足")}}, "end_turn", llm.Usage{}, nil
-	}}
-	worker := agent.NewWorker(provider, "test", t.TempDir(), nil, 0, 8)
-	worker.SetNonStreaming(func() bool { return true })
-	if !s.engine.runIntent(t.Context(), task, "worker", worker, node, "", "") {
-		t.Fatal("worker failed to settle")
-	}
-	if updated, err := task.Store.GetNode(id); err != nil || updated == nil || updated.State != db.IntentHumanConfirmation {
-		t.Fatal(updated, err)
-	}
-	if result, err := task.Store.ContextOutput(t.Context(), id, 0, 200); err != nil ||
-		!strings.Contains(fmt.Sprint(result["text"]), "请补充用户确认的原始记录") || result["is_final"] != false {
-		t.Fatal(result, err)
-	}
-	if events := task.drainTriggers(); len(events) != 1 || events[0].Kind != db.IntentHumanConfirmation || events[0].IntentID != id {
-		t.Fatal(events)
-	}
-	if won, err := s.engine.completeAutomatically(task); err != nil || won {
-		t.Fatalf("task completed while awaiting user: %v %v", won, err)
-	}
-}
-
 func stopTestContext(t *testing.T, task *Task, role string) (context.Context, int64) {
 	t.Helper()
 	id, err := strconv.ParseInt(task.ID, 10, 64)
