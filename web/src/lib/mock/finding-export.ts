@@ -67,7 +67,7 @@ export function mockFindingExport(items: Finding[], format: string) {
     return f.vulnclass;
   };
   const markdown = (f: Finding) =>
-    `# ${title(f)}\n\n${f.summary}\n\n## 证据 / PoC\n\n${f.evidence}\n\n${f.report || reproductionMarkdown(f.reproduction)}\n`;
+    `# ${title(f)}\n\n${f.summary}\n\n${f.report || reproductionMarkdown(f.reproduction)}\n`;
   if (format === "md-zip")
     return {
       filename: "findings-demo.zip",

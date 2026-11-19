@@ -1,11 +1,31 @@
 package db
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"testing"
 )
 
 func TestReproductionPromptUpgradePreservesCustomAndHistory(t *testing.T) {
+	testReportPromptUpgrade(t, "reporter-before-reproduction.txt", "finding_reproduction_prompts_v1", "finding_reproduction_prompts_report_v1", (*DB).MigrateFindingReproductionPrompts)
+}
+
+func TestInlineHTTPPromptUpgradePreservesCustomAndHistory(t *testing.T) {
+	testReportPromptUpgrade(t, "reporter-before-inline-http.txt", "finding_report_inline_http_v1", "finding_report_inline_http_migration_v1", (*DB).MigrateInlineHTTPReportPrompt)
+}
+
+func TestInlineHTTPPromptPreviousDefaultHash(t *testing.T) {
+	previous, err := os.ReadFile("testdata/reporter-before-inline-http.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(previous)); got != "0f33f6646416207cfcaab1205702ee63e594f5b8b71ee8a3e0b4b163202b0a5a" {
+		t.Fatal(got)
+	}
+}
+
+func testReportPromptUpgrade(t *testing.T, fixture, flag, reportKey string, migrate func(*DB, string) error) {
 	d, err := Open(testDSN(t))
 	if err != nil {
 		t.Fatal(err)
@@ -30,7 +50,7 @@ func TestReproductionPromptUpgradePreservesCustomAndHistory(t *testing.T) {
 		d.Exec(`UPDATE agents SET current_prompt_id=$1 WHERE id=$2`, original, a.ID)
 		d.Exec(`DELETE FROM agent_prompts WHERE agent_id=$1 AND id>$2`, a.ID, maxID)
 	}()
-	for _, key := range []string{"finding_reproduction_prompts_v1", "finding_reproduction_prompts_report_v1"} {
+	for _, key := range []string{flag, reportKey} {
 		value, found, err := d.GetSetting(key)
 		if err != nil {
 			t.Fatal(err)
@@ -43,7 +63,7 @@ func TestReproductionPromptUpgradePreservesCustomAndHistory(t *testing.T) {
 			}
 		}()
 	}
-	old, err := os.ReadFile("testdata/reporter-before-reproduction.txt")
+	old, err := os.ReadFile("testdata/" + fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,9 +75,9 @@ func TestReproductionPromptUpgradePreservesCustomAndHistory(t *testing.T) {
 		if _, err = d.ResetPromptToDefault(a.ID, text); err != nil {
 			t.Fatal(err)
 		}
-		d.Exec(`DELETE FROM settings WHERE key='finding_reproduction_prompts_v1'`)
+		d.Exec(`DELETE FROM settings WHERE key=$1`, flag)
 		for range 2 {
-			if err = d.MigrateFindingReproductionPrompts("NEW REPRODUCTION DEFAULT"); err != nil {
+			if err = migrate(d, "NEW REPRODUCTION DEFAULT"); err != nil {
 				t.Fatal(err)
 			}
 		}

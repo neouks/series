@@ -1,4 +1,4 @@
-import { reproductionMarkdown } from "../finding-reproduction";
+import { reportPacketPreview, reproductionMarkdown } from "../finding-reproduction";
 import type { Finding, FindingsPage } from "../types";
 import { mockHandle } from "./handler";
 import assert from "node:assert/strict";
@@ -25,7 +25,7 @@ test("fallback markdown preserves real packets, step order and code delimiters",
     ],
   });
   assert.ok(md.includes(raw));
-  assert.ok(md.includes("````\n"));
+  assert.ok(md.includes("````http\n"));
   assert.ok(md.includes("## 复现记录"));
   assert.ok(md.includes("读取已有响应") && md.includes("修改订单编号"));
   assert.ok(md.indexOf("读取已有响应") < md.indexOf("修改订单编号"));
@@ -42,4 +42,24 @@ test("recorded packet previews are labeled without changing the original text", 
   });
   assert.ok(md.includes(raw));
   assert.ok(md.includes("响应报文为截断预览"));
+});
+
+test("packet previews retain headers, Unicode, and the original copy source", () => {
+  for (const newline of ["\n", "\r\n"]) {
+    const headers = `POST /api HTTP/1.1${newline}Host: example.test${newline}Cookie: ${"c".repeat(9000)}${newline}${newline}`;
+    const packet = headers + "中🙂".repeat(4500);
+    const preview = reportPacketPreview(packet);
+    assert.equal(reportPacketPreview(preview), preview);
+    assert.equal(reportPacketPreview(headers.trimEnd()), headers.trimEnd());
+    assert.ok(preview.startsWith(headers + "中🙂".repeat(3000)));
+    assert.ok(preview.endsWith("中🙂".repeat(1000)));
+    assert.ok(preview.includes("[正文已截断，省略 1000 字符]"));
+    const short = headers + "🙂".repeat(8000);
+    assert.equal(reportPacketPreview(short), short);
+    const step = { title: "请求", action: "发送请求", result: "完成", request: packet, binding_ids: ["42"] };
+    const md = reproductionMarkdown({ steps: [step] });
+    assert.ok(md.includes("需从已保存原文补齐后复现"));
+    assert.ok(!md.includes("关联流量证据编号"));
+    assert.equal(step.request, packet);
+  }
 });

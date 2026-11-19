@@ -33,7 +33,7 @@ func findingTitle(f *db.DBFinding) string {
 }
 
 // FindingsMarkdown 把一批 findings 整合成一份汇总报告(摘要 + 按严重等级分组,
-// 每条含类别/状态/所属任务/证据/详细报告)。
+// 每条含类别/状态/所属任务/详细报告)。
 func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 	items := append([]*db.DBFinding(nil), fs...)
 	sortFindingsForExport(items)
@@ -76,15 +76,12 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 		if s := strings.TrimSpace(f.Summary); s != "" {
 			fmt.Fprintf(&b, "%s\n\n", s)
 		}
-		if e := strings.TrimSpace(f.Evidence); e != "" {
-			fmt.Fprintf(&b, "**证据：**\n\n```\n%s\n```\n\n", e)
-		}
 		if rep := findingReportBody(f); rep != "" {
 			b.WriteString("**详细报告：**\n\n")
 			b.WriteString(rep)
 			b.WriteString("\n\n")
 		}
-		b.WriteString(findingTrafficMarkdown(f, false))
+		b.WriteString(findingReportNotice(f))
 		b.WriteString("---\n\n")
 	}
 	return b.String()
@@ -107,15 +104,12 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	if s := strings.TrimSpace(f.Summary); s != "" {
 		fmt.Fprintf(&b, "## 概述\n\n%s\n\n", s)
 	}
-	if e := strings.TrimSpace(f.Evidence); e != "" {
-		fmt.Fprintf(&b, "## 证据\n\n```\n%s\n```\n\n", e)
-	}
 	if rep := findingReportBody(f); rep != "" {
 		b.WriteString("## 详细报告\n\n")
 		b.WriteString(rep)
 		b.WriteString("\n")
 	}
-	b.WriteString(findingTrafficMarkdown(f, true))
+	b.WriteString(findingReportNotice(f))
 	return b.String()
 }
 
@@ -175,28 +169,11 @@ func findingTrafficIDs(f *db.DBFinding) string {
 	return strings.Join(ids, ",")
 }
 
-func findingTrafficMarkdown(f *db.DBFinding, attachments bool) string {
-	stale := f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion
-	if len(f.TrafficBindings) == 0 && !stale {
-		return ""
+func findingReportNotice(f *db.DBFinding) string {
+	if f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion {
+		return "\n流量证据已变更，报告待更新。\n\n"
 	}
-	var out strings.Builder
-	out.WriteString("\n## 关联流量证据\n\n")
-	fmt.Fprintf(&out, "证据版本：%d；绑定数量：%d。\n\n", f.EvidenceVersion, len(f.TrafficBindings))
-	if stale {
-		out.WriteString("证据已变更，详细报告待更新。\n\n")
-	}
-	for i, b := range f.TrafficBindings {
-		fmt.Fprintf(&out, "%d. **证据 #%d · %s** — `%s %s`，状态码 %d\n", i+1, b.ID, b.Role, b.Snapshot.Method, strings.ReplaceAll(b.Snapshot.URL, "`", "%60"), b.Snapshot.Status)
-		if b.Note != "" {
-			fmt.Fprintf(&out, "   %s\n", strings.ReplaceAll(b.Note, "\n", "\n   "))
-		}
-		if attachments {
-			fmt.Fprintf(&out, "   [请求报文](evidence/%d/%d/request.http) · [响应报文](evidence/%d/%d/response.http)\n", f.ID, b.ID, f.ID, b.ID)
-		}
-	}
-	out.WriteString("\n")
-	return out.String()
+	return ""
 }
 
 func findingReportBody(f *db.DBFinding) string {

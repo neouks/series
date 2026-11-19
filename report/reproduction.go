@@ -24,6 +24,30 @@ func packetNotice(label, packet string) string {
 	return ""
 }
 
+var packetHeaderSeparator = regexp.MustCompile(`\r?\n\r?\n`)
+var packetStartLine = regexp.MustCompile(`^(?:HTTP/\d|[A-Z]+ \S+ HTTP/\d)`)
+var packetTruncationMarker = regexp.MustCompile(`\n\[正文已截断，省略 \d+ 字符\]\n`)
+
+// reportPacketPreview only shortens bodies; headers and the saved packet stay intact.
+func reportPacketPreview(packet string) string {
+	bodyStart := 0
+	if separator := packetHeaderSeparator.FindStringIndex(packet); separator != nil {
+		bodyStart = separator[1]
+	} else if packetStartLine.MatchString(packet) {
+		return packet // No recorded body separator: keep all available headers.
+	}
+	rawBody := packet[bodyStart:]
+	withoutMarker := packetTruncationMarker.ReplaceAllString(rawBody, "")
+	if withoutMarker != rawBody && len([]rune(withoutMarker)) <= 8000 {
+		return packet
+	}
+	body := []rune(rawBody)
+	if len(body) <= 8000 {
+		return packet
+	}
+	return packet[:bodyStart] + string(body[:6000]) + fmt.Sprintf("\n[正文已截断，省略 %d 字符]\n", len(body)-8000) + string(body[len(body)-2000:])
+}
+
 // ReproductionMarkdown renders only saved evidence, never reconstructs it.
 func ReproductionMarkdown(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -60,21 +84,24 @@ func ReproductionMarkdown(raw json.RawMessage) string {
 			for strings.Contains(block.text, fence) {
 				fence += "`"
 			}
-			fmt.Fprintf(&b, "**%s**\n\n%s\n%s\n%s\n\n", block.label, fence, block.text, fence)
+			language := "text"
+			if block.label == "请求" || block.label == "响应" {
+				language = "http"
+			}
+			preview := reportPacketPreview(block.text)
+			fmt.Fprintf(&b, "**%s**\n\n%s%s\n%s\n%s\n\n", block.label, fence, language, preview, fence)
+			if block.label == "请求" && preview != block.text {
+				b.WriteString("请求正文已截断，需从已保存原文补齐后复现。\n\n")
+			}
 		}
-		if step.Request != "" || step.Response != "" {
-			for _, packet := range []struct{ label, text string }{{"请求", step.Request}, {"响应", step.Response}} {
-				if notice := packetNotice(packet.label, packet.text); notice != "" {
-					fmt.Fprintf(&b, "%s\n\n", notice)
-				}
+		for _, packet := range []struct{ label, text string }{{"请求", step.Request}, {"响应", step.Response}} {
+			if notice := packetNotice(packet.label, packet.text); notice != "" {
+				fmt.Fprintf(&b, "%s\n\n", notice)
 			}
 		}
 		fmt.Fprintf(&b, "%s\n\n", step.Result)
 		if step.Proves != "" {
 			fmt.Fprintf(&b, "%s\n\n", step.Proves)
-		}
-		if len(step.BindingIDs) > 0 {
-			fmt.Fprintf(&b, "**关联流量证据编号**：%s（以当前绑定清单为准）\n\n", strings.Join(step.BindingIDs, "、"))
 		}
 	}
 	return b.String()

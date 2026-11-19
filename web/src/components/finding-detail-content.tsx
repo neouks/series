@@ -7,8 +7,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
-import { FindingReproductionPanel } from "@/components/finding-reproduction-panel";
 import { FindingDeleteDialog } from "@/components/finding-delete-dialog";
+import { FindingReproductionPanel } from "@/components/finding-reproduction-panel";
 import { FindingRetestPanel } from "@/components/finding-retest-panel";
 import { FindingTrafficPanel } from "@/components/finding-traffic-panel";
 import { Markdown } from "@/components/markdown";
@@ -275,18 +275,6 @@ export function FindingDetailContent({
               )}
             </div>
           </div>
-          {finding.reproduction?.steps?.length ? (
-            <FindingReproductionPanel reproduction={finding.reproduction} findingId={id} contextTask={contextTask} />
-          ) : null}
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-medium">证据 / PoC</h3>
-              {finding.evidence && <CopyButton text={finding.evidence} />}
-            </div>
-            <pre className="max-h-[46vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
-              {finding.evidence || "暂无证据。"}
-            </pre>
-          </div>
           <div>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-medium">详细报告</h3>
@@ -297,10 +285,12 @@ export function FindingDetailContent({
                 <AlertDescription>流量证据已变更，详细报告待更新。</AlertDescription>
               </Alert>
             )}
-            <div className="max-h-[60vh] overflow-auto">
-              {finding.report ? (
-                <Markdown text={finding.report} />
-              ) : (
+            <div className="min-w-0">
+              {finding.report && <Markdown text={finding.report} report />}
+              {!finding.report && !!finding.reproduction?.steps?.length && (
+                <FindingReproductionPanel reproduction={finding.reproduction} />
+              )}
+              {!finding.report && !finding.reproduction?.steps?.length && (
                 <p className="text-muted-foreground">暂无详细报告。</p>
               )}
             </div>

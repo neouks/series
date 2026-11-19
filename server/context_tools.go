@@ -295,6 +295,9 @@ func migrateContextCatalog(pg *db.DB) error {
 	if err := pg.MigrateConciseFindingReportPrompt(agent.ReporterDefaultPrompt); err != nil {
 		return err
 	}
+	if err := pg.MigrateInlineHTTPReportPrompt(agent.ReporterDefaultPrompt); err != nil {
+		return err
+	}
 	if err := pg.MigrateContextPrompts(defaults, agent.PreviousContextPromptHashes); err != nil {
 		return err
 	}

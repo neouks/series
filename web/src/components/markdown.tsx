@@ -1,8 +1,12 @@
 "use client";
 
 import * as React from "react";
+
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import { CopyButton } from "@/components/copy-button";
+import { reportPacketPreview } from "@/lib/finding-reproduction";
 
 // Tailwind-styled element overrides (no typography plugin in this project, so we
 // style each element). `node` is stripped — it's not a valid DOM attribute.
@@ -42,16 +46,34 @@ const components: Components = {
       <table className="w-full border-collapse text-xs" {...p} />
     </div>
   ),
-  th: ({ node, ...p }) => (
-    <th className="border border-border bg-muted/60 px-2 py-1 text-left font-medium" {...p} />
-  ),
+  th: ({ node, ...p }) => <th className="border border-border bg-muted/60 px-2 py-1 text-left font-medium" {...p} />,
   td: ({ node, ...p }) => <td className="border border-border px-2 py-1 align-top" {...p} />,
 };
 
-export function Markdown({ text }: { text: string }) {
+const reportComponents: Components = {
+  ...components,
+  img: () => null,
+  pre: ({ children }) => {
+    const code = React.Children.toArray(children)[0];
+    const raw = React.isValidElement<{ children?: React.ReactNode }>(code) ? code.props.children : null;
+    if (typeof raw !== "string") return <pre>{children}</pre>;
+    return (
+      <div className="min-w-0">
+        <div className="flex justify-end">
+          <CopyButton text={raw} label="复制原文" />
+        </div>
+        <pre className="my-1.5 overflow-x-auto rounded-md bg-muted p-2.5 text-xs leading-relaxed">
+          <code className="font-mono">{reportPacketPreview(raw)}</code>
+        </pre>
+      </div>
+    );
+  },
+};
+
+export function Markdown({ text, report = false }: { text: string; report?: boolean }) {
   return (
     <div className="min-w-0 space-y-1.5 text-sm [&>*:first-child]:mt-0">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={report ? reportComponents : components}>
         {text}
       </ReactMarkdown>
     </div>
