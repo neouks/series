@@ -1,0 +1,145 @@
+{
+  "effort": "high",
+  "metrics": [
+    {
+      "elapsed_ms": 4815,
+      "input": 216191,
+      "invalid_calls": 0,
+      "output": 357,
+      "requests": 3,
+      "run": "large_result-0-before",
+      "success": true,
+      "summaries": 0,
+      "tool_calls": 2,
+      "uncached": 73599,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 6546,
+      "input": 58163,
+      "invalid_calls": 0,
+      "output": 747,
+      "requests": 4,
+      "run": "large_result-0-after",
+      "success": true,
+      "summaries": 0,
+      "tool_calls": 4,
+      "uncached": 15667,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 5314,
+      "input": 133526,
+      "invalid_calls": 0,
+      "output": 2871,
+      "requests": 4,
+      "run": "stage_resume-0-before",
+      "success": true,
+      "summaries": 1,
+      "tool_calls": 3,
+      "uncached": 54038,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 12671,
+      "input": 44869,
+      "invalid_calls": 0,
+      "output": 3653,
+      "requests": 4,
+      "run": "stage_resume-0-after",
+      "success": false,
+      "summaries": 1,
+      "tool_calls": 2,
+      "uncached": 11461,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 5336,
+      "input": 213946,
+      "invalid_calls": 0,
+      "output": 307,
+      "requests": 3,
+      "run": "large_result-1-before",
+      "success": true,
+      "summaries": 0,
+      "tool_calls": 2,
+      "uncached": 71610,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 6213,
+      "input": 42389,
+      "invalid_calls": 0,
+      "output": 472,
+      "requests": 3,
+      "run": "large_result-1-after",
+      "success": true,
+      "summaries": 0,
+      "tool_calls": 3,
+      "uncached": 15253,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 15706,
+      "input": 221763,
+      "invalid_calls": 0,
+      "output": 3330,
+      "requests": 6,
+      "run": "stage_resume-1-before",
+      "success": true,
+      "summaries": 1,
+      "tool_calls": 6,
+      "uncached": 59459,
+      "repeated_reads": 0
+    },
+    {
+      "elapsed_ms": 9204,
+      "input": 54469,
+      "invalid_calls": 0,
+      "output": 2542,
+      "requests": 5,
+      "run": "stage_resume-1-after",
+      "success": true,
+      "summaries": 1,
+      "tool_calls": 4,
+      "uncached": 11336,
+      "repeated_reads": 0
+    }
+  ],
+  "model": "deepseek-flash",
+  "scope": "seeded synthetic history continuation, pressure window 64000; summary usage included",
+  "thinking": "enabled",
+  "aggregate": {
+    "before": {
+      "runs": 4,
+      "success": 4,
+      "requests": 16,
+      "input": 785426,
+      "uncached": 258706,
+      "output": 6865,
+      "tool_calls": 13,
+      "invalid_calls": 0,
+      "summaries": 2,
+      "repeated_reads": 0
+    },
+    "after": {
+      "runs": 4,
+      "success": 3,
+      "requests": 16,
+      "input": 199890,
+      "uncached": 53717,
+      "output": 7414,
+      "tool_calls": 13,
+      "invalid_calls": 0,
+      "summaries": 2,
+      "repeated_reads": 0
+    }
+  },
+  "status": "rejected_and_rolled_back",
+  "limitations": [
+    "4 paired cases; seeded synthetic evidence, not a full replay of task 160",
+    "Same production model and high reasoning; isolated PostgreSQL; no production commands",
+    "Pressure fixture context window 64000; original compactor in both retained-candidate variants",
+    "Success means exact proof value plus committed receipt and review-only next step; test process PASS is not task success"
+  ]
+}
