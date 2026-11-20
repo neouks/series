@@ -12,20 +12,22 @@ import (
 // model surface; custom rows additionally carry an execution spec or shell-only
 // environment guidance. See schema.sql §H and agent/toolcatalog.go.
 type Tool struct {
-	Key         string          `json:"key"`
-	System      bool            `json:"system"`
-	Description string          `json:"description"`
-	Schema      json.RawMessage `json:"schema"`
-	Agents      []string        `json:"agents"`
-	Enabled     bool            `json:"enabled"`
-	Kind        string          `json:"kind"`     // builtin | shell | command | script | http
-	Exec        json.RawMessage `json:"exec"`     // 自定义工具执行规格；builtin/shell 为空
-	Deferred    bool            `json:"deferred"` // schema 延迟(走 SearchExtraTools/ExecuteExtraTool)
-	Executable  string          `json:"executable"`
-	Directory   string          `json:"directory"`
-	UsageHelp   string          `json:"usage_help"`
-	WhenToUse   string          `json:"when_to_use"`
-	Calls       int             `json:"calls"` // runtime ledger aggregate; not stored in tools
+	Loading     map[string]string `json:"loading,omitempty"` // configuration preview, not runtime activation
+	SchemaBytes int               `json:"schema_bytes"`
+	Key         string            `json:"key"`
+	System      bool              `json:"system"`
+	Description string            `json:"description"`
+	Schema      json.RawMessage   `json:"schema"`
+	Agents      []string          `json:"agents"`
+	Enabled     bool              `json:"enabled"`
+	Kind        string            `json:"kind"`     // builtin | shell | command | script | http
+	Exec        json.RawMessage   `json:"exec"`     // 自定义工具执行规格；builtin/shell 为空
+	Deferred    bool              `json:"deferred"` // schema 延迟(走 SearchExtraTools/ExecuteExtraTool)
+	Executable  string            `json:"executable"`
+	Directory   string            `json:"directory"`
+	UsageHelp   string            `json:"usage_help"`
+	WhenToUse   string            `json:"when_to_use"`
+	Calls       int               `json:"calls"` // runtime ledger aggregate; not stored in tools
 }
 
 const toolCols = `key, system, description, schema, agents, enabled, kind, exec, deferred, directory, usage_help, when_to_use, executable`

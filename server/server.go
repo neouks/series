@@ -3499,6 +3499,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"model_request_limits":     modelUsage.Limits,
 		"model_request_usage":      modelUsage,
 		"traffic_capture":          s.m.TrafficEnabled(),
+		"builtin_tool_loading":     builtinLoadingMode(s.m.pg),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"traffic_skip_static":      s.m.pg.GetBool(settingTrafficSkipStatic, true),
 		"traffic_skip_types":       strings.Join(s.m.TrafficSkipRules(), ","),
@@ -3547,6 +3548,7 @@ func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 // off, agents get no proxy config, no traffic tools, and no proxy prompt content.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		BuiltinToolLoading    *string                        `json:"builtin_tool_loading"`
 		ModelRequestLimits    *modelRequestLimits            `json:"model_request_limits"`
 		ModelRequestDeadlines *runtimebudget.ModelDeadlines  `json:"model_request_deadlines"`
 		ModelRequestBytes     *runtimebudget.ModelByteLimits `json:"model_request_bytes"`
@@ -3585,6 +3587,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.BuiltinToolLoading != nil && *req.BuiltinToolLoading != "on_demand" && *req.BuiltinToolLoading != "direct" {
+		writeErr(w, 400, "builtin_tool_loading 必须为 on_demand 或 direct")
 		return
 	}
 	if len(req.ShellMode) > 0 {
@@ -3667,6 +3673,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ConstraintsInjectWorker != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectWorker, *req.ConstraintsInjectWorker); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.BuiltinToolLoading != nil {
+		if err := s.m.pg.SetSetting(agent.BuiltinLoadingSetting, *req.BuiltinToolLoading); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}

@@ -3511,6 +3511,7 @@ export const tools: Tool[] = [
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 export const settings: Settings = {
+  builtin_tool_loading: "on_demand",
   traffic_capture: true,
   agent_traffic_binding: false,
   traffic_skip_static: true,

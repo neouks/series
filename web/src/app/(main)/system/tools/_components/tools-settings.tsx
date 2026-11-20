@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -293,6 +293,8 @@ function ToolEditor({
 }
 
 // ToolGridCard is one clickable tile in the catalog grid.
+const loadingLabels = { resident: "常驻", on_demand: "按需", disabled: "已停用", forbidden: "角色不允许" } as const;
+
 function ToolGridCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
   return (
     <button
@@ -330,11 +332,12 @@ function ToolGridCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
         </Badge>
       </div>
       <p className="text-muted-foreground line-clamp-1 h-4 text-xs">{tool.description || "（无描述）"}</p>
+      {tool.system && tool.schema_bytes != null && <p className="text-muted-foreground text-xs">参数 Schema：{tool.schema_bytes.toLocaleString()} 字节</p>}
       <div className="mt-auto flex flex-wrap gap-1 pt-1">
         {tool.agents.length === 0 && <span className="text-muted-foreground text-[10px]">（未绑定 Agent）</span>}
         {tool.agents.map((a) => (
           <Badge key={a} variant="outline" className="px-1.5 py-0 text-[10px]">
-            {a}
+            {a}{tool.loading?.[a] ? ` · ${loadingLabels[tool.loading[a]]}` : ""}
           </Badge>
         ))}
       </div>
@@ -346,6 +349,9 @@ export default function ToolsPage() {
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [captureOn, setCaptureOn] = React.useState(false);
+  const [loadingMode, setLoadingMode] = React.useState<"on_demand" | "direct">("on_demand");
+  const [loadingReady, setLoadingReady] = React.useState(false);
+  const [savingLoading, setSavingLoading] = React.useState(false);
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [customEdit, setCustomEdit] = React.useState<Tool | "new" | null>(null);
 
@@ -365,11 +371,23 @@ export default function ToolsPage() {
       });
     api
       .settings()
-      .then((s) => setCaptureOn(!!s.traffic_capture))
+      .then((s) => { setCaptureOn(!!s.traffic_capture); setLoadingMode(s.builtin_tool_loading ?? "on_demand"); setLoadingReady(true); })
       .catch(() => {
         /* optional page data */
       });
   }, [reload]);
+
+  const saveLoading = async (onDemand: boolean) => {
+    const next = onDemand ? "on_demand" : "direct";
+    setSavingLoading(true);
+    try {
+      await api.setSettings({ builtin_tool_loading: next });
+      setLoadingMode(next);
+      reload();
+      toast.success("加载模式已保存，将在新建运行器时生效");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "保存失败"); }
+    finally { setSavingLoading(false); }
+  };
 
   const [query, setQuery] = React.useState("");
 
@@ -412,6 +430,24 @@ export default function ToolsPage() {
           />
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>内置工具加载</CardTitle>
+          <CardDescription>这里展示配置预览；开启模型录制后，每次请求实际声明的工具可在请求诊断的 active_tools 中查看。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup>
+            <Field orientation="horizontal" data-disabled={!loadingReady || savingLoading}>
+              <FieldContent>
+                <FieldLabel htmlFor="builtin-on-demand">按需加载内置工具</FieldLabel>
+                <FieldDescription>开启后常驻角色高频工具，其余通过 tool_search 加载；加载后稳定保留；仅当按需定义自身超过预算时淘汰较久未使用的工具，正文增长由上下文管理处理。关闭则直接声明已授权工具；角色无法使用 tool_search 时也自动直接声明。模式在新建运行器时读取，自定义工具与 MCP 仍沿用各自的发现机制。</FieldDescription>
+              </FieldContent>
+              <Switch id="builtin-on-demand" checked={loadingMode === "on_demand"} disabled={!loadingReady || savingLoading} onCheckedChange={saveLoading} />
+            </Field>
+          </FieldGroup>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="system">
         <TabsList>

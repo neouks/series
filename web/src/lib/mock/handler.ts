@@ -3305,6 +3305,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   }
   if (path === "/settings" && m === "GET") return D.settings;
   if (path === "/settings" && m === "PUT") {
+    if (Object.hasOwn(b, "builtin_tool_loading") && b.builtin_tool_loading !== "on_demand" && b.builtin_tool_loading !== "direct") throw new Error("builtin_tool_loading 必须为 on_demand 或 direct");
     if (Object.hasOwn(b, "shell_mode")) throw new Error("shell_mode 已移除；命令执行使用官方 norma 的平台默认解释器");
     Object.assign(D.settings, b);
     return D.settings;
@@ -3479,7 +3480,19 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   }
 
   // ── tools ──
-  if (path === "/tools" && m === "GET") return { tools: mockTools };
+  if (path === "/tools" && m === "GET") return { tools: mockTools.map(tool => ({
+    ...tool,
+    schema_bytes: new TextEncoder().encode(JSON.stringify(tool.schema ?? {})).length,
+    ...(tool.system ? { loading: Object.fromEntries(tool.agents.map(role => [role,
+      !tool.enabled ? "disabled" : D.settings.builtin_tool_loading === "direct" || ["context_search", "context_get", "asset_search", "asset_get", "graph_overview", "check_target_access", "ask_user", "tool_search", "Read", "Bash", "Write", "Edit", "MultiEdit", "read", "bash", "write", "edit"].includes(tool.key)
+        || (role === "planner" && ["add_intent", "prove_goal", "list_task_assets"].includes(tool.key))
+        || (["worker", "pentest", "auto"].includes(role) && ["insert_assets", "record_fact", "report_finding", "traffic_search", "traffic_get"].includes(tool.key))
+        || (role === "mainagent" && ["dispatch_intents", "add_intent", "add_hint", "set_goals", "set_constraints", "list_task_assets"].includes(tool.key))
+        || (role === "reporter" && ["get_finding_traffic", "update_finding_report"].includes(tool.key))
+        || (role === "goals" && ["set_goals", "set_constraints", "register_user_target"].includes(tool.key))
+        || (role !== "planner" && role !== "goals" && tool.key === "record_fact") ? "resident" : "on_demand"
+    ])) } : {}),
+  })) };
   if (path === "/tools/custom" && m === "POST") {
     const key = String(b.key ?? "custom_tool");
     const requestedKind = String(b.kind ?? "shell");

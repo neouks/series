@@ -1034,6 +1034,7 @@ export interface ModelRequestBytes {
 }
 
 export interface Settings {
+  builtin_tool_loading?: "on_demand" | "direct";
 	 external_process_limits?: ModelRequestLimits;
 	 external_process_usage?: ModelRequestLimits & { active: number; queued: number };
   model_request_bytes?: ModelRequestBytes;
@@ -1340,6 +1341,8 @@ export interface MissingSkill {
 // the key and the parameter *structure* (name/type/required) — the per-param
 // description/default and the agent binding are what move.
 export interface Tool {
+  loading?: Record<string, "resident" | "on_demand" | "disabled" | "forbidden">;
+  schema_bytes?: number;
   key: string;
   system: boolean;
   description: string;

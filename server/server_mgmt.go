@@ -761,8 +761,36 @@ func (s *Server) pgListTools(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "读取工具调用统计失败")
 		return
 	}
+	loading := builtinLoadingMode(pg)
+	var search *db.Tool
+	for _, tool := range ts {
+		if tool.Key == agent.BuiltinSearchName {
+			search = tool
+		}
+	}
 	for _, tool := range ts {
 		tool.Calls = counts[tool.Key]
+		var schema any
+		if json.Unmarshal(tool.Schema, &schema) == nil {
+			raw, _ := json.Marshal(schema)
+			tool.SchemaBytes = len(raw)
+		}
+		if tool.System {
+			tool.Loading = map[string]string{}
+			for _, role := range tool.Agents {
+				state := "on_demand"
+				if loading == "direct" || search == nil || !search.Enabled || !contains(search.Agents, role) || agent.BuiltinResident(role, tool.Key) {
+					state = "resident"
+				}
+				if !tool.Enabled {
+					state = "disabled"
+				}
+				if !agent.BuiltinRoleAllows(role, tool.Key) {
+					state = "forbidden"
+				}
+				tool.Loading[role] = state
+			}
+		}
 	}
 	writeJSON(w, 200, map[string]any{"tools": ts})
 }
