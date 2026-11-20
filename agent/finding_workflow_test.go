@@ -45,6 +45,9 @@ func TestFindingWorkflowSharedAssemblyAndSwitch(t *testing.T) {
 				t.Fatal("missing optional/handoff contract")
 			}
 			for _, tool := range out {
+				if tool.Name() == toolHelpName || tool.Name() == BuiltinSearchName {
+					continue
+				} // Runtime documentation helper is not a finding tool.
 				if !strings.HasPrefix(tool.Description(), "CUSTOM DESCRIPTION") {
 					t.Fatal("custom description replaced")
 				}

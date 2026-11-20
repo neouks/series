@@ -76,7 +76,8 @@ func BuiltinToolSeeds() []ToolSeed {
 		}
 	}
 
-	out := make([]ToolSeed, 0, len(keys))
+	search := newBuiltinSearch(nil)
+	out := []ToolSeed{{Key: BuiltinSearchName, Desc: search.Description(), Schema: search.InputSchema(), Agents: order}}
 	for _, k := range keys {
 		a := m[k]
 		agents := a.agents

@@ -70,5 +70,6 @@ func enableNoa(opts *agentcore.Options, enabled func() bool, archiveRoot, sessio
 		return
 	}
 	// Compactor 覆盖 Compaction,但两者并存时 agentcore 每次会告警;明确清掉。
+	opts.Compactor = &contextWindowCompactor{Compactor: opts.Compactor, window: window}
 	opts.Compaction = nil
 }

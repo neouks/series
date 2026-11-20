@@ -19,9 +19,9 @@ type DeferredInfo struct {
 	ContextReads    bool              // final role surface has unified context readers
 	FindingGuidance string            // derived from the final permitted tools, including DB overrides
 	AssetGuidance   string            // Planner guidance follows the final bound asset readers
-	Deferred        []string          // all MCP tool names (schema withheld)
-	GlobalNames     []string          // MCP names to list in the system-prompt block
-	Unlock          *actool.UnlockSet // shared call-gate; nil when no MCP tools
+	Deferred        []string          // all deferred tool names (schema withheld)
+	GlobalNames     []string          // tool names to list in the system-prompt block
+	Unlock          *actool.UnlockSet // shared deferred call-gate
 	UnlockSkill     func(skillName string)
 }
 
@@ -97,6 +97,13 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 			return nil, DeferredInfo{}, cleanup, err
 		}
 	}
+	allowed := make([]actool.CoreTool, 0, len(out))
+	for _, tool := range out {
+		if BuiltinRoleAllows(agentKey, tool.Name()) {
+			allowed = append(allowed, tool)
+		}
+	}
+	out = allowed
 	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
 	if agentKey == "planner" {
 		def.AssetGuidance = plannerAssetGuidance(out)
@@ -107,6 +114,8 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 		}
 		out[i] = guardPanic(tool)
 	}
+	out = ConfigureBuiltinTools(out, BuiltinLoadingOptions{Role: agentKey, SearchAllowed: true})
+	out, def = OnDemandTools(out, def, agentKey)
 	return out, def, cleanup, nil
 }
 

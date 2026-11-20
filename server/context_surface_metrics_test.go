@@ -10,8 +10,8 @@ import (
 )
 
 // Fixed fresh-install catalog (no custom/MCP/skills, capture enabled); include
-// evidence/reporter bindings, orchestration, platform and SDK tools. Deferred tools contribute only their name to
-// the advertised catalogue, not their full JSON schema on each request.
+// evidence/reporter bindings, orchestration, platform and SDK tools. Measures the
+// assembled catalog only; optional runtime web/memory/process controls are extra.
 func TestDefaultContextSurfaceMetrics(t *testing.T) {
 	s := &Server{}
 	type def struct {
@@ -74,22 +74,24 @@ func TestDefaultContextSurfaceMetrics(t *testing.T) {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		total, initial, nDeferred := 0, 0, 0
-		deferredNames := []string{}
+		total, initial := 0, 0
+		var catalog []actool.CoreTool
 		for _, key := range keys {
 			d := defs[key]
 			d.schema = applyContextPolicy(actool.Build(actool.Spec{Name: d.name, Schema: d.schema}), defaultContextAccess(role)).InputSchema()
 			b, _ := json.Marshal(map[string]any{"name": d.name, "description": d.desc, "parameters": d.schema})
 			total += len(b)
-			// This is the code-default policy introduced by this change. The baseline
-			// copy of this test counts platform schemas directly instead.
-			if contains(platformToolKeys, key) {
-				deferredNames = append(deferredNames, key)
-				nDeferred++
-			} else {
+			catalog = append(catalog, actool.Build(actool.Spec{Name: d.name, Description: d.desc, Schema: d.schema}))
+		}
+		resident, deferred := agent.OnDemandTools(catalog, agent.DeferredInfo{}, role)
+		for _, schema := range actool.NewRegistry(resident...).Schemas() {
+			if !contains(deferred.Deferred, schema.Name) {
+				b, _ := json.Marshal(map[string]any{"name": schema.Name, "description": schema.Description, "parameters": schema.InputSchema})
 				initial += len(b)
 			}
 		}
+		deferredNames := deferred.GlobalNames
+		nDeferred := len(deferred.Deferred)
 		if nDeferred > 0 {
 			initial += len(actool.RenderDeferredToolsBlock(deferredNames))
 			reg := actool.NewRegistry()
@@ -99,6 +101,6 @@ func TestDefaultContextSurfaceMetrics(t *testing.T) {
 			}
 		}
 
-		t.Logf("role=%s catalog=%d all_schema_bytes=%d initial_schema_and_deferred_names_bytes=%d deferred=%d", role, len(keys), total, initial, nDeferred)
+		t.Logf("role=%s catalog=%d all_schema_bytes=%d tiered_schema_and_deferred_names_bytes=%d deferred=%d", role, len(keys), total, initial, nDeferred)
 	}
 }

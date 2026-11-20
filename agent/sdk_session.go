@@ -25,6 +25,7 @@ func newSession(opts agentcore.Options) (conversationSession, func(), error) {
 	if opts.Tools == nil {
 		opts.Tools = []actool.CoreTool{}
 	}
+	configureDeferredSettlement(&opts)
 	cleanup := func() {}
 	var ptys *ptyOwner
 	if hasOwnedPTYTools(opts.Tools) {
@@ -147,6 +148,9 @@ func (t *processContextTool) AcceptsRawInput() bool {
 	return ok && raw.AcceptsRawInput()
 }
 func (t *processContextTool) Call(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+	if t.hooks != nil && t.hooks.builtins != nil {
+		ctx = context.WithValue(ctx, builtinSessionKey{}, t.hooks.builtins)
+	}
 	if isInteractiveTool(t.Name()) {
 		if err := ctx.Err(); err != nil {
 			return actool.Errorf("interactive shell execution canceled: " + err.Error()), nil
@@ -160,6 +164,11 @@ func (t *processContextTool) Call(ctx context.Context, input json.RawMessage, tc
 		}
 	}
 	check := processRecheck(func(checkCtx context.Context, name string, in []byte) string {
+		if t.hooks.builtins != nil {
+			if status, err := t.hooks.builtins.check(checkCtx, name); err != nil || status != "" {
+				return "工具授权已变化，禁止执行: " + status
+			}
+		}
 		if policy, ok := t.hooks.inner.(interface {
 			RecheckToolInput(context.Context, string, []byte) string
 		}); ok {
@@ -243,15 +252,20 @@ func (t *interactiveTool) Call(ctx context.Context, input json.RawMessage, tc *a
 }
 
 type dispatchHooks struct {
-	ptys        *ptyOwner
-	inner       harness.HookRunner
-	tools       map[string]actool.CoreTool
-	deferred    map[string]bool
-	unlock      *actool.UnlockSet
-	permissions permission.Context
-	ask         permission.CanUseTool
-	viewMu      sync.RWMutex
-	visible     map[string]bool
+	ptys           *ptyOwner
+	inner          harness.HookRunner
+	tools          map[string]actool.CoreTool
+	deferred       map[string]bool
+	unlock         *actool.UnlockSet
+	permissions    permission.Context
+	ask            permission.CanUseTool
+	viewMu         sync.RWMutex
+	visible        map[string]bool
+	phaseTargets   map[string]bool
+	schemaRequired map[string]bool
+	schemaVisible  map[string]bool
+	schemaPressure toolSchemaPressure
+	builtins       *builtinCatalog
 }
 
 // The official SDK hides Settlement.DisabledTools from request schemas but
@@ -259,6 +273,13 @@ type dispatchHooks struct {
 // surface in the hook as well. Observe only the loop's model calls (not the
 // compactor's summarizer); use trusted schemas, never model/user message text.
 func (h *dispatchHooks) observeModelCalls(opts *agentcore.Options) {
+	if h.builtins != nil && h.builtins.options.Mode != "direct" {
+		cached := opts.DynamicBoundary == len(opts.SystemPrompt)
+		opts.SystemPrompt = append(append([]string(nil), opts.SystemPrompt...), builtinLoadingRule)
+		if cached {
+			opts.DynamicBoundary = len(opts.SystemPrompt)
+		}
+	}
 	stream, complete := opts.Deps.CallModel, opts.Deps.CallModelSync
 	if opts.Provider != nil {
 		if stream == nil {
@@ -273,7 +294,26 @@ func (h *dispatchHooks) observeModelCalls(opts *agentcore.Options) {
 			if err := intentInputRetryError(ctx); err != nil {
 				return func(yield func(llm.StreamEvent, error) bool) { yield(llm.StreamEvent{}, err) }
 			}
+			if h.builtins != nil {
+				settling := h.phaseTargets != nil
+				for _, schema := range req.Tools {
+					if schema.Name == settlementMarkerName {
+						settling = false
+					}
+				}
+				var err error
+				req, err = h.builtins.project(ctx, req, settling)
+				if err != nil {
+					return func(yield func(llm.StreamEvent, error) bool) { yield(llm.StreamEvent{}, err) }
+				}
+			}
+			req = h.projectToolDocumentation(req)
+			if h.builtins != nil {
+				req = h.builtins.applyPressure(req)
+			}
 			h.observeTools(req.Tools)
+			req = withoutSettlementMarker(req)
+			h.observeDiscoveredSchemas(req)
 			return committedModelStream(ctx, req, stream)
 		}
 	}
@@ -282,7 +322,26 @@ func (h *dispatchHooks) observeModelCalls(opts *agentcore.Options) {
 			if err := intentInputRetryError(ctx); err != nil {
 				return llm.Message{}, "", llm.Usage{}, err
 			}
+			if h.builtins != nil {
+				settling := h.phaseTargets != nil
+				for _, schema := range req.Tools {
+					if schema.Name == settlementMarkerName {
+						settling = false
+					}
+				}
+				var err error
+				req, err = h.builtins.project(ctx, req, settling)
+				if err != nil {
+					return llm.Message{}, "", llm.Usage{}, err
+				}
+			}
+			req = h.projectToolDocumentation(req)
+			if h.builtins != nil {
+				req = h.builtins.applyPressure(req)
+			}
 			h.observeTools(req.Tools)
+			req = withoutSettlementMarker(req)
+			h.observeDiscoveredSchemas(req)
 			callCtx, release, err := acquireModelRequest(ctx, runtimebudget.ModelGate(), false)
 			if err != nil {
 				return llm.Message{}, "", llm.Usage{}, err
@@ -307,11 +366,38 @@ func (h *dispatchHooks) observeTools(schemas []llm.ToolSchema) {
 func newDispatchHooks(opts agentcore.Options) *dispatchHooks {
 	h := &dispatchHooks{inner: opts.Hooks, tools: map[string]actool.CoreTool{}, deferred: map[string]bool{}, unlock: opts.UnlockSet,
 		permissions: permission.Context{Mode: opts.PermissionMode, WorkingDir: opts.WorkingDir, Allowed: opts.AllowedTools, Disallowed: opts.DisallowedTools}, ask: opts.CanUseTool}
+	h.schemaPressure.window = defaultWindowK * 1000
+	if opts.Compaction != nil && opts.Compaction.ContextWindow > 0 {
+		h.schemaPressure.window = opts.Compaction.ContextWindow
+	}
+	if c, ok := opts.Compactor.(*contextWindowCompactor); ok && c.window > 0 {
+		h.schemaPressure.window = c.window
+	}
 	for _, t := range opts.Tools {
 		h.tools[t.Name()] = t
+		if h.builtins == nil {
+			if p := builtinPolicy(t); p != nil {
+				h.builtins = p.fresh()
+				h.builtins.window = h.schemaPressure.window
+			}
+		}
 	}
 	for _, name := range opts.DeferredTools {
 		h.deferred[name] = true
+	}
+	// Only the application's OnDemandTools catalog opts into schema eviction.
+	// Explicit SDK-only tools keep their existing programmatic call contract.
+	h.schemaRequired = map[string]bool{}
+	for _, t := range opts.Tools {
+		if requiresDiscoveredSchema(t) && h.deferred[t.Name()] {
+			h.schemaRequired[t.Name()] = true
+		}
+	}
+	if h.tools[settlementMarkerName] != nil && opts.Settlement != nil {
+		h.phaseTargets = map[string]bool{}
+		for _, name := range opts.Settlement.DisabledTools {
+			h.phaseTargets[name] = true
+		}
 	}
 	return h
 }
@@ -351,10 +437,27 @@ func (h *dispatchHooks) PreToolUse(ctx context.Context, outer string, input []by
 		return true, err.Error(), nil
 	}
 	h.viewMu.RLock()
-	hidden := h.visible != nil && !h.visible[outer] && !h.deferred[outer]
+	hidden := outer == settlementMarkerName || (h.visible != nil && !h.visible[outer] && !h.deferred[outer])
+	phaseBlocked := h.visible != nil && h.phaseTargets[name] && !h.visible[settlementMarkerName]
+	if phaseBlocked {
+		hidden = true
+	}
+	missingSchema := h.schemaRequired[name] && !h.schemaVisible[name]
 	h.viewMu.RUnlock()
+	if h.builtins != nil {
+		if status, err := h.builtins.check(ctx, name); err != nil || status != "" {
+			return true, "内置工具权限或服务状态已变化，未执行: " + status, nil
+		}
+		if hidden && h.builtins.options.Known[name] && !phaseBlocked {
+			return true, "内置工具尚未加载或因上下文压力退出声明；先用 tool_search({\"mode\":\"exact\",\"query\":\"" + name + "\"})，下一轮读取完整参数后调用。", nil
+		}
+	}
 	if hidden {
 		return true, "tool is not available in the current execution phase", nil
+	}
+	if missingSchema {
+		query, _ := json.Marshal(map[string]string{"query": "select:" + name})
+		return true, "tool schema is absent or outdated in this model request; call SearchExtraTools(" + string(query) + "), read its complete schema, then invoke in the next model response. Do not guess parameters.", nil
 	}
 	tool := h.tools[name]
 	validate := func(in json.RawMessage) (json.RawMessage, error) {
@@ -412,6 +515,11 @@ func (h *dispatchHooks) PreToolUse(ctx context.Context, outer string, input []by
 			}
 		}
 	}
+	if h.builtins != nil {
+		if status, err := h.builtins.check(ctx, name); err != nil || status != "" {
+			return true, "工具授权已变化，未执行: " + status, nil
+		}
+	}
 	if outer == actool.ExecuteExtraToolName {
 		envelope, _ := json.Marshal(deferredInvocation{Name: name, Params: params})
 		return false, "", envelope
@@ -420,6 +528,11 @@ func (h *dispatchHooks) PreToolUse(ctx context.Context, outer string, input []by
 }
 
 func (h *dispatchHooks) PostToolUse(ctx context.Context, name string, input, result []byte, isErr bool) {
+	if h.builtins != nil && !isErr {
+		if target, _, err := h.target(name, input); err == nil {
+			h.builtins.used(target)
+		}
+	}
 	if h.inner == nil {
 		return
 	}

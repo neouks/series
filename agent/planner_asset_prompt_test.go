@@ -17,7 +17,7 @@ func TestPlannerAssetPromptUsesActualBindings(t *testing.T) {
 		if !strings.HasPrefix(text, "saved custom prompt") || !strings.HasSuffix(text, guidance) {
 			t.Fatal("lost custom prompt or fixed guidance")
 		}
-		if (len(tools) > 0) != strings.Contains(text, "本轮已提供 asset_search") || (len(tools) < 2) != strings.Contains(text, "本轮未提供 asset_get") {
+		if (len(tools) > 0) != strings.Contains(text, "已授权 asset_search") || (len(tools) < 2) != strings.Contains(text, "本轮未提供 asset_get") {
 			t.Fatal(text)
 		}
 		if !strings.Contains(text, "未审批、封禁、撤回或越界") {

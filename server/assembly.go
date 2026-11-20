@@ -147,7 +147,7 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 			// so the run's task/session ids ride in on the ctx (agent.RunInfo). Read it
 			// once here — this closure is rebuilt per run, so the captured value always
 			// belongs to this run.
-			extra = append(extra, meterSkillTool(reg.Tool(), pg, reg, a.Key, runInfo))
+			extra = append(extra, meterSkillTool(agent.NewVisibleSkillTool(reg), pg, reg, a.Key, runInfo))
 		}
 
 		// host tools (traffic / orchestration / custom) — added to every agent's base;
@@ -356,7 +356,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 				}
 			}
 		}
-		return out, nil
+		return configureBuiltinLoading(ctx, pg, agentKey, out, rows)
 	}
 }
 

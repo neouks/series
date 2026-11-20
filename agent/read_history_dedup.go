@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"reflect"
 
 	"github.com/Autumn-27/norma/llm"
@@ -43,6 +44,10 @@ func (d *readHistoryDirectory) put(key [32]byte, value readHistoryResult) {
 }
 
 func deduplicateReadHistory(req llm.CompletionRequest, maxQueries, maxPending int) llm.CompletionRequest {
+	return deduplicateReadHistoryBy(req, maxQueries, maxPending, normalizedReadQuery)
+}
+
+func deduplicateReadHistoryBy(req llm.CompletionRequest, maxQueries, maxPending int, queryKey func(string, json.RawMessage) string) llm.CompletionRequest {
 	if maxQueries <= 0 || maxPending <= 0 {
 		return req
 	}
@@ -76,7 +81,7 @@ func deduplicateReadHistory(req llm.CompletionRequest, maxQueries, maxPending in
 					continue
 				}
 				call := assetContextCall(block)
-				key := normalizedReadQuery(call.Name, call.Input)
+				key := queryKey(call.Name, call.Input)
 				if key != "" {
 					pending[block.ID] = pendingRead{sha256.Sum256([]byte(key)), call.Name}
 				}

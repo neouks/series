@@ -63,7 +63,7 @@ func TestWireTools(t *testing.T) {
 	if bash, ok := worker["Bash"]; !ok {
 		t.Error("worker lost Bash (should pass through)")
 	} else {
-		want := actool.NewBash().Description() + shellToolNote(mustToolRows(t, pg), "worker")
+		want := actool.NewBash().Description() + shellToolNote(mustToolRows(t, pg), "worker") + "\n\n" + actool.NewBash().Prompt()
 		if bash.Description() != want {
 			t.Errorf("Bash description = %q, want catalog shell hints appended", bash.Description())
 		}

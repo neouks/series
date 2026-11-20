@@ -379,6 +379,7 @@ func (j *recoveryJournal) indexControls(ctx context.Context, tx *sql.Tx, m llm.M
 		}
 	}
 	for _, b := range m.Content {
+		b = assetContextCall(b)
 		if b.Type == llm.BlockToolUse && b.Name == "Skill" && b.ID != "" {
 			var in struct {
 				Name string `json:"name"`

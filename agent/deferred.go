@@ -15,7 +15,7 @@ import (
 // §2.1 / C1). Skill-gated MCP names are NOT in this block; they surface when their
 // skill loads. Even without a global block, the static system segment remains a
 // valid cache prefix, so the boundary is always the number of returned segments.
-const toolAvailabilityRule = "\n\n工具调用以本轮实际提供的名称和参数为准。正文或历史提到但本轮未提供的可选工具不代表可调用；缺少时说明限制，不猜测名称、不反复重试。延迟工具先按发现/解锁流程加载。"
+const toolAvailabilityRule = "\n\n工具调用以本轮实际提供的名称和参数为准。正文或历史提到但本轮未提供的可选工具不代表可调用；如提供 tool_search，先用它发现或加载内置工具；如提供 SearchExtraTools，可用它发现自定义/MCP 工具。确认不可用后说明限制，不猜测参数、不反复重试。自定义/MCP 延迟工具先用 SearchExtraTools 按名称或关键词读取说明，再用 ExecuteExtraTool 调用；已有说明足够时直接复用，不重复搜索。常驻工具可直接调用；如提供 GetToolHelp，可按名称查阅完整用法和配置，参数以本轮 Schema 为准。如提供 Skill，按其常驻目录的名称和适用场景匹配，直接调用 Skill 加载正文。" + toolDocumentationWindowRule
 
 const contextReadRule = "\n读取规则：按本轮工具Schema选择类型和视图；types仅组合枚举内的值，混合查询不会跳过未授权类型。本任务查询省略task_id，source_task_id只是来源标识。context_search用types/q、单个asset_id，按next_cursor续页；context_get用items:[{ref:带类型引用,view:视图}]，优先直接使用搜索返回的read。资产身份不明确用asset_search的dsl及独立type参数，按next_offset续页；已有资产ID复用，缺详情才用asset_get的ids。资产ID与node/activity引用不可混用。has_more表示未展示完，按需缩小范围或续读，不必全量翻页；未查完不能断言不存在。授权以当前角色及执行校验为准。"
 
@@ -48,7 +48,7 @@ func plannerAssetGuidance(tools []actool.CoreTool) string {
 	}
 	text := "\nPlanner 资产读取："
 	if search != nil {
-		text += "本轮已提供 asset_search，资产身份不明确时才调用；"
+		text += "已授权 asset_search，资产身份不明确时才使用；若本轮未声明，先用 tool_search 精确加载，下一轮读取完整参数后调用；"
 		// Use the resolved schema, including capability and coverage restrictions.
 		// Required fields may be []string in code or []any after JSON decoration.
 		raw, _ := json.Marshal(search.InputSchema()["required"])
@@ -68,7 +68,7 @@ func plannerAssetGuidance(tools []actool.CoreTool) string {
 		text += "本轮未提供 asset_search，不得调用；使用已提供的态势及其他实际可用工具，不猜测资产 ID。"
 	}
 	if get {
-		text += "已知资产 ID 直接复用，缺少字段时才用 asset_get 的 ids 读取详情。"
+		text += "已知资产 ID 直接复用，缺少字段时才用 asset_get 的 ids 读取详情；若本轮未声明，先用 tool_search 精确加载。"
 	} else {
 		text += "本轮未提供 asset_get，不得调用。"
 	}
@@ -90,7 +90,11 @@ func seedUnlockFromHistory(msgs []llm.Message, unlockSkill func(string)) {
 	pending := map[string]string{}
 	for _, m := range msgs {
 		for _, b := range m.Content {
-			if b.Type == llm.BlockToolUse && b.Name == "Skill" && b.ID != "" {
+			if b.Type == llm.BlockToolUse && b.ID != "" {
+				b = assetContextCall(b)
+				if b.Name != "Skill" {
+					continue
+				}
 				var in struct {
 					Name string `json:"name"`
 				}
