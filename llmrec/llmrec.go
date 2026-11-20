@@ -590,6 +590,7 @@ func (r *Recorder) serializeRequest(req llm.CompletionRequest) string {
 	if effType != "" || r.reasoningEffort != "" {
 		m["thinking"] = map[string]string{"type": effType, "effort": r.reasoningEffort}
 	}
+	m["active_tools"] = []string{}
 	if len(req.Tools) > 0 {
 		// Store tool names only (full schemas are huge).
 		names := make([]string, len(req.Tools))
@@ -597,6 +598,7 @@ func (r *Recorder) serializeRequest(req llm.CompletionRequest) string {
 			names[i] = t.Name
 		}
 		m["tools"] = names
+		m["active_tools"] = names
 		m["tools_count"] = len(req.Tools)
 	}
 	if req.Temperature != nil {
