@@ -20,6 +20,9 @@ import (
 // their identity before applying business policy. No SDK source is replaced.
 func newSession(opts agentcore.Options) (conversationSession, func(), error) {
 	configureWorkerMemory(&opts)
+	if opts.ToolOutputDir != "" && opts.MaxToolOutputChars <= 0 {
+		opts.MaxToolOutputChars = 12 << 10
+	}
 	// An empty catalog is authoritative. The SDK interprets nil as a request
 	// for its default filesystem/Bash tools, which would bypass role bindings.
 	if opts.Tools == nil {
