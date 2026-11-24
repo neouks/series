@@ -1,6 +1,7 @@
 ---
 name: api-recon
 description: 收集网站API接口时调用该skill。
+mcps: web_search, playwright, chrome-devtools
 ---
 
 # API Recon（前端接口侦察）
