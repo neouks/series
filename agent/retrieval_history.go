@@ -15,7 +15,8 @@ const retrievalDirectoryRunes = 4000
 const retrievalDirectoryPrefix = "检索历史目录（仅索引，非完整证据）："
 const legacyRetrievalContextRule = "检索结果和态势是有界窗口，未展示不代表不存在。优先按资产、意图和字段缩小范围；搜索结果的 read 可直接传给 context_get，从命中附近读取。history_omitted 仅表示历史正文被精简，可按原调用重读；不要把它当作空结果或否定结论。"
 const previousRetrievalContextRule = legacyRetrievalContextRule + "较早结果是当时快照；不同结果需结合来源和原始证据核对，不把旧快照当作当前状态。"
-const retrievalContextRule = previousRetrievalContextRule + "历史旧工具名仅用于审计；重读使用reread指定的当前工具，旧ID游标不能当作当前搜索cursor。"
+const priorRetrievalContextRule = previousRetrievalContextRule + "历史旧工具名仅用于审计；重读使用reread指定的当前工具，旧ID游标不能当作当前搜索cursor。"
+const retrievalContextRule = priorRetrievalContextRule + "graph_overview字段的snapshot_reuse指向后续调用中完全相同的字段，仅表示该字段值可复用。"
 
 func retrievalTool(name string) bool {
 	switch name {
@@ -27,7 +28,7 @@ func retrievalTool(name string) bool {
 
 func clearRetrievalDirectory(req llm.CompletionRequest) llm.CompletionRequest {
 	return withoutSystemSegments(req, func(s string) bool {
-		return strings.HasPrefix(s, retrievalDirectoryPrefix) || s == retrievalContextRule || s == previousRetrievalContextRule || s == legacyRetrievalContextRule
+		return strings.HasPrefix(s, retrievalDirectoryPrefix) || s == retrievalContextRule || s == priorRetrievalContextRule || s == previousRetrievalContextRule || s == legacyRetrievalContextRule
 	})
 }
 
@@ -76,6 +77,12 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 			for ci, c := range b.Content {
 				if c.Type != llm.BlockText {
 					continue
+				}
+				if call.Name == "graph_overview" {
+					var overview map[string]any
+					if decodeStructuredJSON([]byte(c.Text), &overview) == nil && overviewHasFailure(overview) {
+						continue
+					}
 				}
 				// Store positions only. Decode one result at a time below rather
 				// than retaining all historical evidence trees simultaneously.
@@ -179,7 +186,7 @@ func boundRetrievalHistory(req llm.CompletionRequest) llm.CompletionRequest {
 		req.System = append(req.System, retrievalDirectoryPrefix+string(b))
 	}
 	req.System = append(req.System, retrievalContextRule)
-	return req
+	return reuseOverviewFields(req)
 }
 
 func retrievalValue(text, name string) map[string]any {

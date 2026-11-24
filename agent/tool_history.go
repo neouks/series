@@ -205,7 +205,7 @@ func overviewHasFailure(value any) bool {
 	switch x := value.(type) {
 	case map[string]any:
 		for key, v := range x {
-			if (key == "partial" || key == "unavailable") && v == true {
+			if (key == "partial" || key == "unavailable" || key == "context_unavailable") && v == true {
 				return true
 			}
 			if key == "unavailable" {
