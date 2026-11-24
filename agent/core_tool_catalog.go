@@ -21,7 +21,7 @@ const ShellToolHelpName = "GetShellToolHelp"
 func coreTool(name, role string) bool {
 	switch name {
 	case ShellToolHelpName, "Skill", "Bash", "Read", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep", "TodoWrite",
-		"context_search", "context_get", "asset_search", "asset_get", "graph_overview", "check_target_access":
+		"context_search", "context_get", "asset_search", "graph_overview":
 		return true
 	}
 	var names []string
