@@ -88,5 +88,6 @@ func (p assetContextProvider) filterWithMetrics(ctx context.Context, req llm.Com
 		}
 	}
 	out = deduplicatePlainHistory(governRequestDocs(out))
+	out = compactExecutionLogHistory(out)
 	return out, contextReadMetrics(out), nil
 }
