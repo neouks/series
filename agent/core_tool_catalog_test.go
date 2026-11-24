@@ -20,9 +20,9 @@ import (
 func TestTieredToolsKeepRoleCapabilitiesAndNativeSchemas(t *testing.T) {
 	sets := builtinToolsByAgent()
 	for role, want := range map[string][]string{
-		"worker":    {"report_finding", "record_fact", "insert_assets", "context_get", "context_search"},
-		"planner":   {"add_intent", "prove_goal", "asset_search"},
-		"mainagent": {"dispatch_intents", "set_goals", "set_constraints"},
+		"worker":    {"report_finding", "record_fact", "insert_assets", "context_get", "context_search", "asset_get"},
+		"planner":   {"add_intent", "prove_goal", "asset_search", "asset_get"},
+		"mainagent": {"dispatch_intents", "set_goals", "set_constraints", "asset_get"},
 		"goals":     {"set_goals", "set_constraints"},
 	} {
 		tools, def := OnDemandTools(sets[role], DeferredInfo{}, role)
