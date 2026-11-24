@@ -13,11 +13,14 @@ import (
 
 const toolHelpName = "GetToolHelp"
 
+// ShellToolHelpName exposes authorized CLI documentation without executing it.
+const ShellToolHelpName = "GetShellToolHelp"
+
 // Frequency is a conservative role default, not a grant. Only tools that have
 // already passed role/configuration filtering can become resident.
 func coreTool(name, role string) bool {
 	switch name {
-	case "Skill", "Bash", "Read", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep", "TodoWrite",
+	case ShellToolHelpName, "Skill", "Bash", "Read", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep", "TodoWrite",
 		"context_search", "context_get", "asset_search", "asset_get", "graph_overview", "check_target_access":
 		return true
 	}

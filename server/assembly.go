@@ -330,17 +330,7 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, configRoot ...st
 				out[i] = &shellMeteredTool{CoreTool: tool, recorder: pg, declarations: rows, agentKey: agentKey, ri: runInfo, configRoot: root}
 			}
 		}
-		// shell hints: user-defined kind="shell" tools are not callable — they are
-		// environment declarations that tell the model which command-line tools are
-		// installed. Collect the ones bound to this agent and append to Bash's description.
-		if note := shellToolNote(rows, agentKey); note != "" {
-			for i, t := range out {
-				if t.Name() == "Bash" {
-					out[i] = agent.DecorateTool(t, t.Description()+note, t.InputSchema())
-					break
-				}
-			}
-		}
+		out = configureShellToolHelp(out, rows, agentKey, pg.ListTools)
 		// interactive shell: gated purely by the agent's interactive_shell flag (like
 		// web_search), NOT by tools-table binding. When on, inject the 5 shell_* tools
 		// and COUPLE the Bash description addendum so it points at shell_open — and never

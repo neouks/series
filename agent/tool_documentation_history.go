@@ -16,6 +16,7 @@ func projectToolDocumentation(req llm.CompletionRequest) llm.CompletionRequest {
 }
 
 func (p *toolSchemaPressure) projectDocumentation(req llm.CompletionRequest) llm.CompletionRequest {
+	req = deduplicateShellHelpHistory(req)
 	req = governRequestDocs(deduplicateReadHistoryBy(req, 1024, 1024, func(name string, raw json.RawMessage) string {
 		if name != "SearchExtraTools" && name != toolHelpName {
 			return ""

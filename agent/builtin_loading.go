@@ -65,7 +65,7 @@ func BuiltinToolNames() map[string]bool {
 	for _, seed := range BuiltinToolSeeds() {
 		names[seed.Key] = true
 	}
-	for _, name := range []string{BuiltinSearchName, "Read", "Bash", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep", "TodoWrite", "AskUserQuestion", "ask_user", "web_search", "web_fetch", "WebFetch", "web_read", "http_request", "traffic_search", "traffic_get", "shell_open", "shell_send", "shell_read", "shell_close", "shell_list"} {
+	for _, name := range []string{BuiltinSearchName, ShellToolHelpName, "Read", "Bash", "Write", "Edit", "MultiEdit", "LS", "Glob", "Grep", "TodoWrite", "AskUserQuestion", "ask_user", "web_search", "web_fetch", "WebFetch", "web_read", "http_request", "traffic_search", "traffic_get", "shell_open", "shell_send", "shell_read", "shell_close", "shell_list"} {
 		names[name] = true
 	}
 	return names
