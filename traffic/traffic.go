@@ -577,6 +577,25 @@ func (t *Traffic) authorizeTaskRequest(_ http.ResponseWriter, req *http.Request)
 	if host == "" {
 		host = hostOnly(req.Host)
 	}
+	port := 0
+	if req.URL != nil && req.URL.Port() != "" {
+		port, err = strconv.Atoi(req.URL.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return false, fmt.Errorf("无效目标端口")
+		}
+	} else if _, rawPort, splitErr := net.SplitHostPort(req.Host); splitErr == nil {
+		port, err = strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return false, fmt.Errorf("无效目标端口")
+		}
+	}
+	if port == 0 {
+		if req.Method == http.MethodConnect || (req.URL != nil && (req.URL.Scheme == "https" || req.URL.Scheme == "wss")) {
+			port = 443
+		} else {
+			port = 80
+		}
+	}
 	validate := t.assets.ValidateTaskHostsApproved
 	if scope == "mainagent" {
 		validate = t.assets.ValidateWorkerHosts
@@ -587,7 +606,11 @@ func (t *Traffic) authorizeTaskRequest(_ http.ResponseWriter, req *http.Request)
 		}
 		validate = t.assets.ValidateWorkerHosts
 	}
-	if err := validate(taskID, []string{host}); err != nil {
+	accessErr := validate(taskID, []string{host})
+	if accessErr == nil {
+		accessErr = t.assets.ValidateExplicitTarget(taskID, host, port)
+	}
+	if err := accessErr; err != nil {
 		rows, saveErr := t.assets.RememberTaskAssetDenials(taskID, []string{host}, nil, scope)
 		if saveErr != nil {
 			log.Printf("[traffic] task %d 跳过记录失败: %v", taskID, saveErr)

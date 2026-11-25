@@ -134,8 +134,8 @@ RETURNS BOOLEAN LANGUAGE SQL STABLE AS $$
  SELECT task_host_template_allows(tid,task_asset_host(target))
 $$;
 
--- Network targets have no port/path policy. Reuse the effective host records
--- and template grants; callers can evaluate a whole batch in one round trip.
+-- Host approval remains the shared projection; explicit_targets additionally
+-- checks the operator's exact host:port at intent and execution boundaries.
 -- Per-host authorization: tombstones and linked assets count only on the exact
 -- queried host; a parent domain's decision never reaches a subdomain host.
 CREATE OR REPLACE FUNCTION task_host_approval_state(tid BIGINT, host TEXT)

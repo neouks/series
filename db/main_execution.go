@@ -19,12 +19,18 @@ func (n *Node) AllowsPendingAssets() bool {
 	return json.Unmarshal(n.Payload, &p) == nil && p.Permission.Issuer == "mainagent"
 }
 func (s *AssetStore) ValidateIntentAssets(taskID int64, n *Node, ids []int64) error {
+	if err := s.ValidateExplicitAssets(taskID, ids); err != nil {
+		return err
+	}
 	if n.AllowsPendingAssets() {
 		return s.ValidateWorkerAssets(taskID, ids)
 	}
 	return s.ValidateTaskAssetsApproved(taskID, ids)
 }
 func (s *AssetStore) ValidateIntentHosts(taskID int64, n *Node, hosts []string) error {
+	if err := s.ValidateExplicitIntentPayload(taskID, n.Payload); err != nil {
+		return err
+	}
 	if n.AllowsPendingAssets() {
 		return s.ValidateWorkerHosts(taskID, hosts)
 	}

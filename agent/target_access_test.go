@@ -37,7 +37,7 @@ func TestTargetAccessInputAndHistory(t *testing.T) {
 func TestTargetAccessApprovalLifecycle(t *testing.T) {
 	d := testDB(t)
 	defer d.Close()
-	task, err := d.CreateTaskWithOptions("target access", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	task, err := d.CreateTaskWithOptions("target access", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 	if err != nil {
 		t.Fatal(err)
 	}

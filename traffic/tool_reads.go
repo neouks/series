@@ -17,12 +17,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
+	"github.com/neouks/series/db"
 	"github.com/neouks/series/llmrec"
 )
 
@@ -67,7 +69,7 @@ func decodeTrafficInput(raw json.RawMessage, out any) error {
 	return nil
 }
 
-func (t *Traffic) allowToolHost(ctx context.Context, host string) error {
+func (t *Traffic) allowToolHost(ctx context.Context, host string, port int) error {
 	ri := llmrec.RunInfoFrom(ctx)
 	if ri.TaskID <= 0 {
 		if ri.AgentKey == "worker" || ri.AgentKey == "planner" || ri.AgentKey == "mainagent" {
@@ -79,6 +81,9 @@ func (t *Traffic) allowToolHost(ctx context.Context, host string) error {
 		return fmt.Errorf("任务资产校验不可用")
 	}
 	store := t.assets.WithReadContext(ctx)
+	if err := store.ValidateExplicitTarget(ri.TaskID, host, port); err != nil {
+		return err
+	}
 	if (ri.AgentKey == "mainagent" && ri.IntentID == 0) || (ri.AgentKey == "worker" && ri.IntentID > 0) {
 		return store.ValidateWorkerHosts(ri.TaskID, []string{host})
 	}
@@ -118,8 +123,27 @@ func (t *Traffic) searchTool() actool.CoreTool {
 		if e != nil {
 			return actool.Errorf(e.Error()), nil
 		}
-		if e = t.allowToolHost(ctx, host); e != nil {
+		requestedPort := 443
+		if net.ParseIP(host) != nil || strings.HasPrefix(strings.ToLower(a.Host), "http://") {
+			requestedPort = 80
+		}
+		if port != "" {
+			requestedPort, _ = strconv.Atoi(port)
+		}
+		if e = t.allowToolHost(ctx, host, requestedPort); e != nil {
 			return actool.Errorf(e.Error()), nil
+		}
+		if port == "" {
+			ri := llmrec.RunInfoFrom(ctx)
+			if ri.TaskID > 0 && t.assets != nil {
+				template, templateErr := t.assets.WithReadContext(ctx).TaskApprovalTemplate(ri.TaskID)
+				if templateErr != nil {
+					return actool.Errorf(templateErr.Error()), nil
+				}
+				if template == "explicit_targets" {
+					port = strconv.Itoa(requestedPort)
+				}
+			}
 		}
 		if a.Limit == 0 {
 			a.Limit = 3
@@ -256,14 +280,18 @@ func (t *Traffic) getTool() actool.CoreTool {
 		if a.ID == "" || a.Offset < 0 || a.Max < 4 || a.Max > 8192 || (a.Part != "" && !slices.Contains(trafficParts, a.Part)) || (a.Part == "" && a.Offset != 0) {
 			return actool.Errorf("无效流量ID、部分或续读范围"), nil
 		}
-		var host string
-		if e := t.db.QueryRowContext(ctx, `SELECT host FROM exchanges WHERE id=?`, a.ID).Scan(&host); e != nil {
+		var host, rawURL string
+		if e := t.db.QueryRowContext(ctx, `SELECT host,url FROM exchanges WHERE id=?`, a.ID).Scan(&host, &rawURL); e != nil {
 			if errors.Is(e, sql.ErrNoRows) {
 				return actool.Errorf("流量不可用"), nil
 			}
 			return actool.Errorf("流量查询失败: " + e.Error()), nil
 		}
-		if e := t.allowToolHost(ctx, host); e != nil {
+		endpoint, ok := db.ParseTargetEndpoint(rawURL)
+		if !ok {
+			return actool.Errorf("流量目标无效"), nil
+		}
+		if e := t.allowToolHost(ctx, host, endpoint.Port); e != nil {
 			return actool.Errorf(e.Error()), nil
 		}
 		parts := trafficParts

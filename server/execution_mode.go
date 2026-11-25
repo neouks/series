@@ -165,6 +165,12 @@ func (s *Server) dispatchTaskIntentsLocked(ctx context.Context, t *Task, ids []i
 			if accessErr == nil && s.m.assets != nil {
 				accessErr = s.m.assets.ValidateTaskHostsApproved(taskID, guard.CollectTargetHosts(n.Payload))
 			}
+			if accessErr == nil && s.m.assets != nil {
+				accessErr = s.m.assets.ValidateIntentAssets(taskID, n, assetIDs)
+			}
+			if accessErr == nil && s.m.assets != nil {
+				accessErr = s.m.assets.ValidateIntentHosts(taskID, n, guard.CollectTargetHosts(n.Payload))
+			}
 			if accessErr != nil {
 				result.Error = accessErr.Error()
 				break
@@ -312,6 +318,12 @@ func (s *Server) dispatchMainIntentsLocked(ctx context.Context, t *Task, ids []i
 			}
 			if e == nil && s.m.assets != nil {
 				e = s.m.assets.ValidateWorkerHosts(taskID, guard.CollectTargetHosts(n.Payload))
+			}
+			if e == nil && s.m.assets != nil {
+				e = s.m.assets.ValidateIntentAssets(taskID, n, assets)
+			}
+			if e == nil && s.m.assets != nil {
+				e = s.m.assets.ValidateIntentHosts(taskID, n, guard.CollectTargetHosts(n.Payload))
 			}
 			if e == nil && s.m.assets != nil {
 				access, queryErr := s.m.assets.WithExecutionRead().TaskNodeAccess(taskID, []int64{id})

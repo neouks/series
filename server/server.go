@@ -1880,6 +1880,13 @@ func (s *Server) seed(t *Task, text string) {
 // a failure just falls back to the normal planner-driven flow.
 func (s *Server) seedFirstIntent(t *Task) {
 	summary := fmt.Sprintf("完成任务目标：%s（任务：%s）", t.Goal, t.Description)
+	if s.m.assets != nil {
+		taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+		if err := s.m.assets.ValidateExplicitIntent(taskID, summary); err != nil {
+			log.Printf("[seed] task %s: 种子意图超出目标范围: %v", t.ID, err)
+			return
+		}
+	}
 	id, err := t.Store.AddIntent(map[string]any{"summary": summary}, 8, nil, "seed")
 	if err != nil {
 		log.Printf("[seed] task %s: 下发种子意图失败: %v", t.ID, err)

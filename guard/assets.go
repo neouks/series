@@ -213,6 +213,9 @@ func (p TaskAssetPolicy) check(tool string, input []byte) (string, bool) {
 			if err := validate(p.TaskID, ids); err != nil {
 				return p.denial(err, nil, ids)
 			}
+			if err := p.Store.ValidateExplicitAssets(p.TaskID, ids); err != nil {
+				return p.denial(err, nil, ids)
+			}
 		}
 	}
 	// Evidence and summaries may mention unrelated hosts without targeting them.
@@ -234,7 +237,78 @@ func (p TaskAssetPolicy) check(tool string, input []byte) (string, bool) {
 	if err := validate(p.TaskID, hosts); err != nil {
 		return p.denial(err, hosts, nil)
 	}
+	for _, endpoint := range CollectTargetEndpoints(input) {
+		if err := p.Store.ValidateExplicitTarget(p.TaskID, endpoint.Host, endpoint.Port); err != nil {
+			return p.denial(err, []string{endpoint.Host}, nil)
+		}
+	}
 	return "", false
+}
+
+// CollectTargetEndpoints checks literal URLs and structured target fields.
+// Opaque shell commands are still enforced only when they use the tagged proxy.
+func CollectTargetEndpoints(input []byte) []db.TargetEndpoint {
+	seen := map[db.TargetEndpoint]bool{}
+	var out []db.TargetEndpoint
+	add := func(raw string, port int) {
+		endpoint, ok := db.ParseTargetEndpoint(raw)
+		if !ok {
+			return
+		}
+		if port > 0 {
+			endpoint.Port = port
+		}
+		if !seen[endpoint] {
+			seen[endpoint] = true
+			out = append(out, endpoint)
+		}
+	}
+	addURLs := func(text string) {
+		for _, raw := range urlPattern.FindAllString(text, -1) {
+			add(strings.TrimRight(raw, `.,;!?)]}`), 0)
+		}
+	}
+	var value any
+	if json.Unmarshal(input, &value) == nil {
+		var walk func(any)
+		walk = func(current any) {
+			switch x := current.(type) {
+			case map[string]any:
+				port := 0
+				switch v := x["port"].(type) {
+				case float64:
+					if v >= 1 && v <= 65535 && v == float64(int(v)) {
+						port = int(v)
+					}
+				case string:
+					if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 65535 {
+						port = n
+					}
+				}
+				for key, child := range x {
+					normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
+					switch normalized {
+					case "url", "uri", "host", "hostname", "domain", "ip", "ipv4", "ipv6", "address", "target", "endpoint":
+						if raw, ok := child.(string); ok {
+							add(raw, port)
+						}
+					default:
+						walk(child)
+					}
+				}
+			case []any:
+				for _, child := range x {
+					walk(child)
+				}
+			case string:
+				addURLs(x)
+			}
+		}
+		walk(value)
+	} else {
+		addURLs(string(input))
+	}
+	return out
 }
 
 func collectHosts(text string) []string {

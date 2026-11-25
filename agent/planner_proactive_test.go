@@ -172,7 +172,7 @@ func TestGraphOverviewDocumentationIsOnDemand(t *testing.T) {
 func TestPlannerWithoutSearchDirectDeferredKeepsPermissions(t *testing.T) {
 	d := testDB(t)
 	defer d.Close()
-	task, err := d.CreateTaskWithOptions("Planner permission review", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	task, err := d.CreateTaskWithOptions("Planner permission review", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -159,7 +159,7 @@ func TestOfficialSessionDeferredPolicyAndSource(t *testing.T) {
 func TestDeferredAssetPolicyCannotBypassPlannerOrRewrites(t *testing.T) {
 	d := testDB(t)
 	defer d.Close()
-	task, err := d.CreateTaskWithOptions("sdk-policy", "test", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	task, err := d.CreateTaskWithOptions("sdk-policy", "test", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 	if err != nil {
 		t.Fatal(err)
 	}

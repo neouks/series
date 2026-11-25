@@ -481,6 +481,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 			}
 			return harness.ReasonAbortedTools, WriteCounts{}, fmt.Errorf("%w: %v", ErrWorkerAssetAuthorization, wrapped)
 		}
+		if err := as.ValidateIntentHosts(taskID, intent, guard.CollectTargetHosts(intent.Payload)); err != nil {
+			return harness.ReasonAbortedTools, WriteCounts{}, fmt.Errorf("%w: Worker 启动前目标范围校验失败：%v", ErrWorkerAssetAuthorization, err)
+		}
 	}
 	tsx := NewToolSet(ts, name)
 	tsx.SetFindingRecorder(w.findingRecorder)

@@ -1193,6 +1193,13 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 			e.touch(t.ID)
 			return true
 		}
+		if e.m.assets.ValidateIntentHosts(taskID, intent, guard.CollectTargetHosts(intent.Payload)) != nil {
+			if err := transitionIntentState(t.Store, intent.ID, "running", "open"); err != nil {
+				log.Printf("[worker %s] task %s 意图 #%d 范围校验回退失败: %v", name, t.ID, intent.ID, err)
+			}
+			e.touch(t.ID)
+			return true
+		}
 	}
 	hasChatMessage := message != ""
 	e.stampFirstRun(t) // 首次真正执行 → 盖 first_run_at + 算 deadline(仅带 timeout 的任务)

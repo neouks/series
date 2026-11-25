@@ -107,7 +107,7 @@ func TestSDKReviewRechecksAssetsAfterUnchangedApproval(t *testing.T) {
 	defer d.Close()
 	for _, deferred := range []bool{false, true} {
 		t.Run(fmt.Sprint(deferred), func(t *testing.T) {
-			task, err := d.CreateTaskWithOptions("sdk stale approval", "fixture", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+			task, err := d.CreateTaskWithOptions("sdk stale approval", "fixture", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 			if err != nil {
 				t.Fatal(err)
 			}

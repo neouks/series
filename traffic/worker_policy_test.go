@@ -22,7 +22,7 @@ func TestWorkerProxyPendingAndManualLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	task, err := d.CreateTaskWithOptions("worker proxy", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	task, err := d.CreateTaskWithOptions("worker proxy", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +89,58 @@ func TestWorkerProxyPendingAndManualLimits(t *testing.T) {
 	}
 }
 
+func TestExplicitTargetProxyPorts(t *testing.T) {
+	dsn, _, err := db.DSN()
+	if err != nil {
+		t.Skipf("database unavailable: %v", err)
+	}
+	d, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	description := "测试 proxy-port.test:8080、192.0.2.55 和 192.0.2.56:9090"
+	task, err := d.CreateTaskWithOptions(description, "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	for _, target := range []struct{ host, evidence string }{
+		{"proxy-port.test", "proxy-port.test:8080"},
+		{"192.0.2.55", "192.0.2.55"},
+		{"192.0.2.56", "192.0.2.56:9090"},
+	} {
+		if _, err := d.Assets().RegisterDescriptionAsset(task.ID, "host", target.host, target.evidence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	user, pass, ok := guard.TaskProxyCredentials(task.ID, "mainagent")
+	if !ok {
+		t.Fatal("proxy signing unavailable")
+	}
+	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+	tr := &Traffic{assets: d.Assets()}
+	for _, tc := range []struct {
+		url  string
+		want bool
+	}{
+		{"http://proxy-port.test:8080/", true},
+		{"http://proxy-port.test/", false},
+		{"http://sub.proxy-port.test:8080/", false},
+		{"http://192.0.2.55/", true},
+		{"https://192.0.2.55/", false},
+		{"http://192.0.2.56:9090/", true},
+		{"http://192.0.2.56/", false},
+	} {
+		req := httptest.NewRequest("GET", tc.url, nil)
+		req.Header.Set("Proxy-Authorization", auth)
+		allowed, err := tr.authorizeTaskRequest(httptest.NewRecorder(), req)
+		if allowed != tc.want || (allowed && err != nil) {
+			t.Errorf("%s allowed=%v want=%v err=%v", tc.url, allowed, tc.want, err)
+		}
+	}
+}
+
 func TestTrafficReadRolesRetainApprovalPolicy(t *testing.T) {
 	dsn := os.Getenv("SERIES_PG_DSN")
 	if dsn == "" {
@@ -99,7 +151,7 @@ func TestTrafficReadRolesRetainApprovalPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	task, err := d.CreateTaskWithOptions("traffic read roles", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	task, err := d.CreateTaskWithOptions("traffic read roles", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,19 +170,19 @@ func TestTrafficReadRolesRetainApprovalPolicy(t *testing.T) {
 			}
 			ctx := llmrec.WithRunInfo(t.Context(), ri)
 			allowedPending := role == "mainagent" || role == "worker"
-			if allowed := tr.allowToolHost(ctx, host) == nil; allowed != allowedPending {
+			if allowed := tr.allowToolHost(ctx, host, 80) == nil; allowed != allowedPending {
 				t.Fatalf("pending allowed=%v want=%v", allowed, allowedPending)
 			}
 			if err := d.Assets().ApproveTaskAssets(task.ID, []int64{id}, "test", ""); err != nil {
 				t.Fatal(err)
 			}
-			if err := tr.allowToolHost(ctx, host); err != nil {
+			if err := tr.allowToolHost(ctx, host, 80); err != nil {
 				t.Fatalf("bound role cannot read approved host: %v", err)
 			}
 			if err := d.Assets().RevokeTaskAssets(task.ID, []int64{id}, "test", ""); err != nil {
 				t.Fatal(err)
 			}
-			if tr.allowToolHost(ctx, host) == nil {
+			if tr.allowToolHost(ctx, host, 80) == nil {
 				t.Fatal("revoked host readable")
 			}
 		})

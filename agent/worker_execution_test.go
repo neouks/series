@@ -26,7 +26,7 @@ func (workerIndependentRestriction) Stop(context.Context, []llm.Message) (bool, 
 func TestWorkerPendingExecutionKeepsPlannerBoundary(t *testing.T) {
 	d := testDB(t)
 	defer d.Close()
-	task, err := d.CreateTaskWithOptions("worker execution", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "explicit_targets"})
+	task, err := d.CreateTaskWithOptions("worker execution", "goal", db.TaskCreateOptions{AssetApprovalTemplate: "related_assets"})
 	if err != nil {
 		t.Fatal(err)
 	}

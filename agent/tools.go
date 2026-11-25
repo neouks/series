@@ -1486,6 +1486,12 @@ func (t *ToolSet) addOneIntentResultWithMode(ctx context.Context, it intentItem,
 		return 0, false, errIntentSummaryRequired
 	}
 	if t.as != nil && t.taskID > 0 {
+		if err := t.as.ValidateExplicitIntent(t.taskID, it.Summary); err != nil {
+			return 0, false, err
+		}
+		if err := t.as.ValidateExplicitAssets(t.taskID, pidList(it.AssetIDs)); err != nil {
+			return 0, false, err
+		}
 		access, err := queryTargetAccess(t.as, t.taskID, targetAccessQuery{AssetIDs: pidList(it.AssetIDs), NodeIDs: pidList(it.ParentIDs)})
 		if err != nil {
 			return 0, false, fmt.Errorf("审批查询失败: %w", err)
