@@ -6,7 +6,7 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 )
 
-const mainAssetExecutionRule = "主 Agent 可读取、操作未审批 pending 资产，也可明确下发关联意图；这不改变资产审批状态。封禁、撤回、删除、任务隔离和独立动作审批仍生效。历史 pending 拒绝不是当前限制。实际下发以 dispatch 结果为准。"
+const mainAssetExecutionRule = "主 Agent 可读取、操作未审批 pending 资产，也可明确下发关联意图；这不改变资产审批状态。仅用户提供资产自动批准模板下，执行和下发仍严格限于用户明确给定的主机与端口，禁止端口扫描和子域名探测。封禁、撤回、删除、任务隔离和独立动作审批仍生效。实际下发以 dispatch 结果为准。"
 
 func (t *ToolSet) enableMainExecution(ctx context.Context) {
 	ri := RunInfoFrom(ctx)

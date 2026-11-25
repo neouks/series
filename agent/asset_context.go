@@ -308,7 +308,12 @@ func (p assetContextProvider) filterPlain(ctx context.Context, req llm.Completio
 		}
 		skips = filtered
 	}
-	req.System = append(append([]string(nil), req.System...), "资产模板："+policy+"审批仅作用于域名/IP，获准主机的所有端口、服务和接口无需单独审批。用户封禁、撤回及删除限制优先。"+db.TaskAssetSkipRule)
+	portRule := "审批仅作用于域名/IP，获准主机的所有端口、服务和接口无需单独审批。"
+	if template == "explicit_targets" {
+		policy = "只允许测试任务描述或用户手动添加的精确主机与端口。裸 IP 默认仅 80 端口，裸域名默认仅 443 端口。不得创建或执行端口扫描、子域名探测意图；pending 资产不能扩大此范围。"
+		portRule = "意图摘要和工具请求必须明确使用获准的目标端口，不得访问其他端口或子域名。"
+	}
+	req.System = append(append([]string(nil), req.System...), "资产模板："+policy+portRule+"用户封禁、撤回及删除限制优先。"+db.TaskAssetSkipRule)
 	if list := db.TaskAssetSkipList(skips); list != "" {
 		req.System = append(req.System, list)
 	}

@@ -14,7 +14,7 @@ const descriptions: Record<AssetApprovalTemplate, string> = {
   related_assets:
     "用户目标所属根域下的子域名及有解析依据的 IP 自动批准，其他发现等待人工审批。获准主机的所有端口、服务和接口均可测试。",
   explicit_targets:
-    "仅任务描述明确提供、创建时关联及任务内手动添加的域名/IP自动批准，其他发现等待人工审批。审批不限制端口、服务或接口。",
+    "仅允许测试任务描述明确提供或任务内手动添加的主机与端口；裸 IP 默认 80，裸域名默认 443。禁止端口扫描和子域名探测意图。",
 };
 export function AssetApprovalTemplateField({
   value,
